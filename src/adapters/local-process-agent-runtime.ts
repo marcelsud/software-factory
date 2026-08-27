@@ -58,6 +58,7 @@ interface ProcessCapture {
   readonly stderr: Buffer;
   readonly stderrTruncated: boolean;
   readonly maxRssBytes: number;
+  readonly workspaceLimitExceeded: boolean;
   readonly stdout: Buffer;
   readonly stdoutOverflow: boolean;
   readonly timedOut: boolean;
@@ -71,6 +72,7 @@ interface CommandResult {
 
 export class LocalProcessAgentRuntime implements AgentRuntime {
   readonly #attemptControllers = new Map<string, AbortController>();
+  lastLaunchEnvironment: NodeJS.ProcessEnv = {};
   lastLaunchCommand: string[] = [];
   readonly #active = new Map<string, ActiveProcess>();
   readonly #bwrapPath: string;
@@ -140,28 +142,13 @@ export class LocalProcessAgentRuntime implements AgentRuntime {
       if (signal.aborted) controller.abort("cancel");
       await this.#manager.ensureRecovered();
       throwIfAborted(controller.signal);
+      workspace = { path: this.#manager.pathForAttempt(request.attemptId), request };
       workspace = await this.#manager.create(request);
       throwIfAborted(controller.signal);
       await this.#manager.materialize(workspace);
       throwIfAborted(controller.signal);
       const capture = await this.#invoke(workspace, controller.signal);
       result = await this.#interpret(workspace, capture, started);
-      if (
-        this.#debugRetention === "never" ||
-        (this.#debugRetention === "on-failure" && result.status === "succeeded")
-      ) {
-        try {
-          await this.#manager.cleanup(workspace.path);
-        } catch (error) {
-          if (result.outcome !== undefined)
-            result = failureResult(
-              request,
-              "adapter",
-              `workspace cleanup failed: ${message(error)}`,
-              started,
-            );
-        }
-      }
     } catch (error) {
       const category =
         controller.signal.reason === "timeout"
@@ -172,11 +159,30 @@ export class LocalProcessAgentRuntime implements AgentRuntime {
               ? error.category
               : "adapter";
       result = failureResult(request, category, message(error), started, this.#now());
-    } finally {
-      clearTimeout(attemptTimer);
-      signal.removeEventListener("abort", forwardAbort);
-      this.#attemptControllers.delete(request.attemptId);
     }
+    if (
+      workspace !== undefined &&
+      (this.#debugRetention === "never" ||
+        (this.#debugRetention === "on-failure" && result.status === "succeeded"))
+    ) {
+      try {
+        const cleanupSignal = new AbortController().signal;
+        await ATTEMPT_SIGNAL.run(
+          cleanupSignal,
+          async () => await this.#manager.cleanup(workspace.path),
+        );
+      } catch (error) {
+        result = failureResult(
+          request,
+          "adapter",
+          `workspace cleanup failed: ${message(error)}`,
+          started,
+        );
+      }
+    }
+    clearTimeout(attemptTimer);
+    signal.removeEventListener("abort", forwardAbort);
+    this.#attemptControllers.delete(request.attemptId);
     return result;
   }
 
@@ -216,6 +222,8 @@ export class LocalProcessAgentRuntime implements AgentRuntime {
       "/proc",
       "--dev",
       "/dev",
+      "--size",
+      String(request.agentProfile.limits.maxWorkspaceBytes),
       "--tmpfs",
       "/tmp",
       "--dir",
@@ -264,12 +272,42 @@ export class LocalProcessAgentRuntime implements AgentRuntime {
     );
     const usagePath = `${workspace.path}.usage`;
 
-    const launchArgs = ["-f", "cpu=%U,%S rss=%M", "-o", usagePath, this.#bwrapPath, ...args];
+    const durationLimit = Math.min(
+      request.agentProfile.limits.timeoutMs,
+      request.budget.maxDurationMs,
+    );
+    const cpuQuota = Math.max(
+      1,
+      Math.ceil((request.agentProfile.limits.cpuSeconds * 100_000) / durationLimit),
+    );
+    const launchArgs = [
+      "-f",
+      "cpu=%U,%S rss=%M",
+      "-o",
+      usagePath,
+      "/usr/bin/systemd-run",
+      "--user",
+      "--scope",
+      "--quiet",
+      "--collect",
+      "-p",
+      `MemoryMax=${request.agentProfile.limits.memoryBytes}`,
+      "-p",
+      `TasksMax=${request.agentProfile.limits.maxPids}`,
+      "-p",
+      "CPUAccounting=yes",
+      "-p",
+      `CPUQuota=${cpuQuota}%`,
+      this.#bwrapPath,
+      ...args,
+    ];
+    const launchEnvironment = await trustedSystemdEnvironment();
+    this.lastLaunchEnvironment = { ...launchEnvironment };
     this.lastLaunchCommand = ["/usr/bin/time", ...launchArgs];
     const child = spawn("/usr/bin/time", launchArgs, {
       cwd: workspace.path,
       detached: true,
-      env: {},
+      env: launchEnvironment,
       signal,
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -279,6 +317,31 @@ export class LocalProcessAgentRuntime implements AgentRuntime {
       terminating ??= terminateProcessGroup(child, this.#killGraceMs);
       await terminating;
     };
+    let workspaceLimitExceeded = false;
+    let monitoring = false;
+    const monitor = setInterval(() => {
+      if (monitoring || workspaceLimitExceeded) return;
+      monitoring = true;
+      void workspaceWithinLimits(
+        workspace.path,
+        request.agentProfile.limits.maxWorkspaceBytes,
+        request.agentProfile.limits.maxWorkspaceFiles,
+      )
+        .then((withinLimits) => {
+          if (!withinLimits) {
+            workspaceLimitExceeded = true;
+            void terminate();
+          }
+        })
+        .catch(() => {
+          workspaceLimitExceeded = true;
+          void terminate();
+        })
+        .finally(() => {
+          monitoring = false;
+        });
+    }, 25);
+    monitor.unref();
     const active: ActiveProcess = { cancelled: false, child, terminate };
     this.#active.set(request.attemptId, active);
     const onAbort = () => {
@@ -287,10 +350,6 @@ export class LocalProcessAgentRuntime implements AgentRuntime {
       void terminate();
     };
     signal.addEventListener("abort", onAbort, { once: true });
-    const durationLimit = Math.min(
-      request.agentProfile.limits.timeoutMs,
-      request.budget.maxDurationMs,
-    );
     const timer = setTimeout(() => {
       timedOut = true;
       void terminate();
@@ -344,7 +403,7 @@ export class LocalProcessAgentRuntime implements AgentRuntime {
       try {
         usage = await measuredUsage(usagePath);
       } catch (error) {
-        if (!stdoutOverflow) throw error;
+        if (!stdoutOverflow && !workspaceLimitExceeded) throw error;
         usage = { cpuMs: 0, maxRssBytes: 0 };
       }
       return {
@@ -357,6 +416,7 @@ export class LocalProcessAgentRuntime implements AgentRuntime {
         stdout: Buffer.concat(stdoutChunks),
         stdoutOverflow,
         timedOut,
+        workspaceLimitExceeded,
       };
     } catch (error) {
       throw new SandboxError(
@@ -365,6 +425,7 @@ export class LocalProcessAgentRuntime implements AgentRuntime {
       );
     } finally {
       clearTimeout(timer);
+      clearInterval(monitor);
       signal.removeEventListener("abort", onAbort);
       this.#active.delete(request.attemptId);
     }
@@ -384,6 +445,15 @@ export class LocalProcessAgentRuntime implements AgentRuntime {
       stdoutBytes: capture.stdout.length,
       stdoutDigest: sha256(capture.stdout),
     };
+    if (capture.workspaceLimitExceeded)
+      return failureResult(
+        request,
+        "workspace-limit",
+        "workspace exceeded pinned byte or file limit",
+        started,
+        finished,
+        logs,
+      );
     if (
       SECRET_MARKER.test(capture.stdout.toString("utf8")) ||
       SECRET_MARKER.test(capture.stderr.toString("utf8"))
@@ -430,7 +500,6 @@ export class LocalProcessAgentRuntime implements AgentRuntime {
     } catch (error) {
       return failureResult(request, "result-invalid", message(error), started, finished, logs);
     }
-
     let exported: { changedFiles: AgentResult["changedFiles"]; patch?: AgentResult["patch"] };
     try {
       exported = await this.#manager.exportChanges(workspace);
@@ -488,12 +557,15 @@ class WorkspaceManager {
     }
     this.#recovered = true;
   }
+  pathForAttempt(attemptId: string): string {
+    return this.#contained(`attempt-${sha256(Buffer.from(attemptId)).slice(0, 32)}`);
+  }
+
   async create(request: AgentRequest): Promise<Workspace> {
     await this.ensureRecovered();
+    await this.#validateLocalGitState();
     await this.#validateTree(request.repository.sha, request.agentProfile.limits);
-    const workspacePath = this.#contained(
-      `attempt-${sha256(Buffer.from(request.attemptId)).slice(0, 32)}`,
-    );
+    const workspacePath = this.pathForAttempt(request.attemptId);
     await this.cleanup(workspacePath);
     await git(this.#repositoryRoot, [
       "worktree",
@@ -697,6 +769,36 @@ class WorkspaceManager {
     await rm(contained, { force: true, recursive: true });
   }
 
+  async #validateLocalGitState(): Promise<void> {
+    const gitDirValue = (await git(this.#repositoryRoot, ["rev-parse", "--git-dir"])).stdout
+      .toString("utf8")
+      .trim();
+    if (gitDirValue === "") throw new Error("repository git directory is missing");
+    const gitDir = await realpath(
+      isAbsolute(gitDirValue) ? gitDirValue : resolve(this.#repositoryRoot, gitDirValue),
+    );
+    try {
+      const attributes = await stat(join(gitDir, "info", "attributes"));
+      if (attributes.size > 0) throw new Error("repository local info attributes are not allowed");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    const localExecutableConfig = await command(
+      "git",
+      [
+        "-C",
+        this.#repositoryRoot,
+        "config",
+        "--local",
+        "--get-regexp",
+        "^(filter\\\\.|core\\\\.fsmonitor$)",
+      ],
+      { acceptedCodes: [0, 1], env: safeGitEnvironment(), maxStdoutBytes: 64 * 1024 },
+    );
+    if (localExecutableConfig.stdout.length > 0)
+      throw new Error("repository local filters or fsmonitor config are not allowed");
+  }
+
   async #validateTree(sha: string, limits: AgentRequest["agentProfile"]["limits"]): Promise<void> {
     const listing = (
       await git(this.#repositoryRoot, ["ls-tree", "-r", "-l", "-z", "--full-tree", sha])
@@ -738,7 +840,7 @@ class WorkspaceManager {
           await git(this.#repositoryRoot, ["show", `${sha}:${path}`])
         ).stdout.toString("utf8");
         if (
-          /(?:^|\s)(?:filter|diff|merge|working-tree-encoding)=|(?:^|\s)export-ignore(?:\s|$)/mu.test(
+          /(?:^|\s)(?:filter|diff|merge|working-tree-encoding)=|(?:^|\s)export-(?:ignore|subst)(?:\s|$)/mu.test(
             attributes,
           )
         )
@@ -877,6 +979,32 @@ class WorkspaceManager {
   }
 }
 
+async function workspaceWithinLimits(
+  root: string,
+  maxBytes: number,
+  maxFiles: number,
+): Promise<boolean> {
+  let bytes = 0;
+  let files = 0;
+  const pending = [root];
+  while (pending.length > 0) {
+    const directory = pending.pop();
+    if (directory === undefined) break;
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      if (entry.name === ".git") continue;
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) pending.push(path);
+      else {
+        const metadata = await lstat(path);
+        files += 1;
+        bytes += metadata.size;
+        if (files > maxFiles || bytes > maxBytes) return false;
+      }
+    }
+  }
+  return true;
+}
+
 class SandboxError extends Error {
   constructor(
     readonly category: FailureCategory,
@@ -943,6 +1071,37 @@ function declaredOutput(path: string, declarations: readonly string[]): boolean 
   );
 }
 
+async function trustedSystemdEnvironment(): Promise<NodeJS.ProcessEnv> {
+  const uid = process.getuid?.();
+  if (uid === undefined) throw new Error("cannot determine uid for user cgroup");
+  const expectedRuntimeDirectory = `/run/user/${uid}`;
+  const configuredRuntimeDirectory = process.env.XDG_RUNTIME_DIR;
+  if (configuredRuntimeDirectory === undefined || !isAbsolute(configuredRuntimeDirectory))
+    throw new Error("trusted XDG_RUNTIME_DIR is unavailable");
+  const runtimeDirectory = resolve(configuredRuntimeDirectory);
+  const realRuntimeDirectory = await realpath(configuredRuntimeDirectory);
+  if (
+    runtimeDirectory !== expectedRuntimeDirectory ||
+    realRuntimeDirectory !== expectedRuntimeDirectory
+  )
+    throw new Error("trusted XDG_RUNTIME_DIR is unavailable");
+  const metadata = await stat(realRuntimeDirectory);
+  if (!metadata.isDirectory() || metadata.uid !== uid)
+    throw new Error("trusted XDG_RUNTIME_DIR ownership is invalid");
+  const environment: NodeJS.ProcessEnv = { XDG_RUNTIME_DIR: realRuntimeDirectory };
+  const busAddress = process.env.DBUS_SESSION_BUS_ADDRESS;
+  if (busAddress !== undefined) {
+    const prefix = `unix:path=${runtimeDirectory}/bus`;
+    if (
+      !busAddress.startsWith(prefix) ||
+      !/^(?:,guid=[0-9a-f]+)?$/u.test(busAddress.slice(prefix.length))
+    )
+      throw new Error("trusted DBUS_SESSION_BUS_ADDRESS is invalid");
+    environment.DBUS_SESSION_BUS_ADDRESS = busAddress;
+  }
+  return environment;
+}
+
 async function measuredUsage(path: string): Promise<{ cpuMs: number; maxRssBytes: number }> {
   try {
     const value = await readFile(path, "utf8");
@@ -986,6 +1145,7 @@ function safeGitEnvironment(): NodeJS.ProcessEnv {
     GIT_CONFIG_VALUE_0: "/dev/null",
     GIT_CONFIG_VALUE_1: "false",
     GIT_CONFIG_VALUE_2: "/dev/null",
+    GIT_ATTR_NOSYSTEM: "1",
     HOME: "/nonexistent",
     PATH: process.env.PATH ?? "/usr/bin:/bin",
   };
@@ -1099,7 +1259,7 @@ function failureResult(
     failure: {
       category,
       message: failureMessage.slice(0, 8_192),
-      retriable: category !== "result-invalid",
+      retriable: category !== "result-invalid" && category !== "workspace-limit",
     },
     logs,
     resources: { cpuMs: 0, maxRssBytes: 0 },

@@ -2828,7 +2828,8 @@
                               "result-invalid",
                               "process",
                               "sandbox",
-                              "adapter"
+                              "adapter",
+                              "workspace-limit"
                             ]
                           },
                           "message": {
@@ -3573,7 +3574,8 @@
                           "result-invalid",
                           "process",
                           "sandbox",
-                          "adapter"
+                          "adapter",
+                          "workspace-limit"
                         ]
                       },
                       "message": {
@@ -3914,7 +3916,8 @@
                           "result-invalid",
                           "process",
                           "sandbox",
-                          "adapter"
+                          "adapter",
+                          "workspace-limit"
                         ]
                       },
                       "message": {
@@ -10310,7 +10313,8 @@
                           "result-invalid",
                           "process",
                           "sandbox",
-                          "adapter"
+                          "adapter",
+                          "workspace-limit"
                         ]
                       },
                       "message": {
@@ -11039,7 +11043,8 @@
                       "result-invalid",
                       "process",
                       "sandbox",
-                      "adapter"
+                      "adapter",
+                      "workspace-limit"
                     ]
                   },
                   "message": {
@@ -11376,7 +11381,8 @@
                       "result-invalid",
                       "process",
                       "sandbox",
-                      "adapter"
+                      "adapter",
+                      "workspace-limit"
                     ]
                   },
                   "message": {

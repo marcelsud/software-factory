@@ -302,7 +302,15 @@ export const agentRequest = v.object({
 });
 
 export const agentFailure = v.object({
-  category: v.enum(["timeout", "cancel", "result-invalid", "process", "sandbox", "adapter"]),
+  category: v.enum([
+    "timeout",
+    "cancel",
+    "result-invalid",
+    "process",
+    "sandbox",
+    "adapter",
+    "workspace-limit",
+  ]),
   message: v.string(),
   retriable: v.boolean(),
 });

@@ -444,7 +444,7 @@ describe("foundation", () => {
     const profile = plan.agentProfiles["triage-agent"];
     expect(profile).toMatchObject({
       capabilities: ["repository.read"],
-      command: ["/home/marcelsud/.bun/bin/bun", "/workspace/src/adapters/json-stdio-agent.mjs"],
+      command: ["/__factory_agent_bin__", "/workspace/src/adapters/json-stdio-agent.mjs"],
       model: "trusted-composition-default",
     });
     if (profile === undefined) return;
@@ -792,7 +792,7 @@ describe("foundation", () => {
     expect(agentResult.outcome?.outcome).toBe("completed");
     expect(agent.requests[0]?.agentProfile).toMatchObject({
       capabilities: ["repository.read"],
-      command: ["/home/marcelsud/.bun/bin/bun", "/workspace/src/adapters/json-stdio-agent.mjs"],
+      command: ["/__factory_agent_bin__", "/workspace/src/adapters/json-stdio-agent.mjs"],
       model: "trusted-composition-default",
     });
 

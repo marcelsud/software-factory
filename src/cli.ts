@@ -95,9 +95,7 @@ const defaultDependencies: Required<CliDependencies> = {
         ? await import("chimpbase/runtime/bun")
         : await import("chimpbase/runtime/node");
     const manifest = await readFile(new URL("../module-contracts/manifest.json", import.meta.url));
-    const agentExecutable = await realpath(
-      process.env.FACTORY_AGENT_BIN ?? "/home/marcelsud/.bun/bin/bun",
-    );
+    const agentExecutable = await realpath(process.env.FACTORY_AGENT_BIN ?? process.execPath);
     const workspaceRoot = resolve(process.env.FACTORY_WORKSPACE_ROOT ?? ".factory/workspaces");
     const runtimes = new Map<string, LocalProcessAgentRuntime>();
     const repositoryPins: Record<string, string> = {};
@@ -431,10 +429,8 @@ async function activateCheckedDefinition(
   dependencies: CliDependencies,
 ): Promise<void> {
   let source = await dependencies.readText(config);
-  const agentExecutable = await realpath(
-    process.env.FACTORY_AGENT_BIN ?? "/home/marcelsud/.bun/bin/bun",
-  );
-  source = source.replaceAll("/home/marcelsud/.bun/bin/bun", agentExecutable);
+  const agentExecutable = await realpath(process.env.FACTORY_AGENT_BIN ?? process.execPath);
+  source = source.replaceAll("/__factory_agent_bin__", agentExecutable);
   const definition = compileFactoryDefinition(source, { sourceName: config }).definition;
   for (const skill of definition.skills) {
     const instructions = await dependencies.readText(resolve(dirname(config), skill.path));

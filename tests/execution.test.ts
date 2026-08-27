@@ -59,6 +59,12 @@ process.stdin.on("end", async () => {
     fs.writeFileSync("descendant.pid", String(child.pid));
     return void setInterval(() => {}, 1000);
   }
+  if (task.mode === "flood") {
+    fs.mkdirSync("flood", { recursive: true });
+    let index = 0;
+    setInterval(() => fs.writeFileSync("flood/" + index++, "0123456789"), 1);
+    return;
+  }
   if (task.mode === "write") fs.writeFileSync(task.path, task.content);
   if (task.mode === "observe") fs.writeFileSync(task.path, "private:" + request.attemptId);
   let network = "blocked";
@@ -428,6 +434,21 @@ describe("leaf-05 execution", () => {
     expect(timedRuntime.lastLaunchCommand).toContain(
       `--nproc=${timed.agentProfile.limits.maxPids}`,
     );
+    expect(timedRuntime.lastLaunchCommand).toContain("/usr/bin/systemd-run");
+    expect(timedRuntime.lastLaunchCommand).toContain(
+      `MemoryMax=${timed.agentProfile.limits.memoryBytes}`,
+    );
+    expect(timedRuntime.lastLaunchCommand).toContain(
+      `TasksMax=${timed.agentProfile.limits.maxPids}`,
+    );
+    expect(timedRuntime.lastLaunchEnvironment.XDG_RUNTIME_DIR).toBe(
+      process.env.XDG_RUNTIME_DIR?.replace(/\/+$/u, ""),
+    );
+    expect(Object.keys(timedRuntime.lastLaunchEnvironment).sort()).toEqual(
+      process.env.DBUS_SESSION_BUS_ADDRESS === undefined
+        ? ["XDG_RUNTIME_DIR"]
+        : ["DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR"],
+    );
     expect(timedResult.failure?.category).toBe("timeout");
     expect(timedResult.outcome).toBeUndefined();
 
@@ -500,9 +521,24 @@ describe("leaf-05 execution", () => {
         repository: { id: "fixture", sha: giantSha },
       },
     );
+    const floodProfile = profile(undefined, "patch");
+    floodProfile.limits.maxWorkspaceFiles = 10;
+    const flood = request(
+      traversalFixture,
+      "g10-flood",
+      { mode: "flood" },
+      {
+        agentProfile: floodProfile,
+        declaredOutputPaths: ["flood/"],
+      },
+    );
+    expect(
+      (await runtime(traversalFixture).run(flood, new AbortController().signal)).failure,
+    ).toMatchObject({ category: "workspace-limit", retriable: false });
     expect(
       (await runtime(giantFixture).run(giant, new AbortController().signal)).failure?.category,
     ).toBe("adapter");
+    expect(await readdir(giantFixture.workspaces)).toEqual([]);
     const mismatch = request(
       traversalFixture,
       "g10-mismatch",
@@ -598,6 +634,7 @@ describe("leaf-05 execution", () => {
     const hook = join(filterFixture.repository, ".git", "hooks", "post-checkout");
     await writeFile(hook, `#!/bin/sh\ntouch ${marker}\n`);
     await chmod(hook, 0o755);
+    await git(filterFixture.repository, "config", "filter.evil.clean", "/bin/false");
     await writeFile(join(filterFixture.repository, ".gitattributes"), "*.txt filter=evil\n");
     await git(filterFixture.repository, "add", ".gitattributes");
     await git(filterFixture.repository, "commit", "--quiet", "-m", "filter");
@@ -616,6 +653,46 @@ describe("leaf-05 execution", () => {
       ).failure?.category,
     ).toBe("adapter");
     await expect(lstat(marker)).rejects.toThrow();
+
+    const attributesFixture = await repositoryFixture();
+    await mkdir(join(attributesFixture.repository, "nested"));
+    await writeFile(
+      join(attributesFixture.repository, "nested", ".gitattributes"),
+      "*.txt export-subst\n",
+    );
+    await git(attributesFixture.repository, "add", "nested/.gitattributes");
+    await git(attributesFixture.repository, "commit", "--quiet", "-m", "nested attributes");
+    const attributesSha = await git(attributesFixture.repository, "rev-parse", "HEAD");
+    expect(
+      (
+        await runtime(attributesFixture).run(
+          request(
+            attributesFixture,
+            "g10-attributes",
+            {},
+            {
+              repository: { id: "fixture", sha: attributesSha },
+            },
+          ),
+          new AbortController().signal,
+        )
+      ).failure?.category,
+    ).toBe("adapter");
+
+    const infoFixture = await repositoryFixture();
+    await mkdir(join(infoFixture.repository, ".git", "info"), { recursive: true });
+    await writeFile(
+      join(infoFixture.repository, ".git", "info", "attributes"),
+      "*.txt diff=evil\n",
+    );
+    expect(
+      (
+        await runtime(infoFixture).run(
+          request(infoFixture, "g10-info"),
+          new AbortController().signal,
+        )
+      ).failure?.category,
+    ).toBe("adapter");
   });
 
   test("[G11] retries receive separate worktrees with no cross-attempt state", async () => {
