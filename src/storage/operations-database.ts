@@ -56,12 +56,20 @@ export interface OperatorCommandAuditRow {
   run_id: string;
 }
 
+export interface OperationStepReplayProjectionRow {
+  run_id: string;
+  skill_digest: string;
+  skill_id: string;
+  step_id: string;
+}
+
 export interface OperationsDatabase {
   effect_projections: OperationEffectProjectionRow;
   event_projections: OperationEventProjectionRow;
   operator_command_audit: OperatorCommandAuditRow;
   run_projections: OperationRunProjectionRow;
   timeline_projections: OperationTimelineProjectionRow;
+  step_replay_projections: OperationStepReplayProjectionRow;
   health_projection: OperationHealthProjectionRow;
 }
 
@@ -143,6 +151,18 @@ export const operationsMigrations = {
           ON operator_command_audit(run_id, requested_at, command_key);
       `,
     },
+    {
+      name: "002_replay_step_skills",
+      sql: `
+        CREATE TABLE IF NOT EXISTS step_replay_projections (
+          run_id TEXT NOT NULL,
+          step_id TEXT NOT NULL,
+          skill_id TEXT NOT NULL,
+          skill_digest TEXT NOT NULL,
+          PRIMARY KEY (run_id, step_id)
+        );
+      `,
+    },
   ],
   postgres: [
     {
@@ -206,6 +226,18 @@ export const operationsMigrations = {
           updated_at TEXT NOT NULL
         );
 
+      `,
+    },
+    {
+      name: "002_replay_step_skills",
+      sql: `
+        CREATE TABLE IF NOT EXISTS chimpbase_operations.step_replay_projections (
+          run_id TEXT NOT NULL,
+          step_id TEXT NOT NULL,
+          skill_id TEXT NOT NULL,
+          skill_digest TEXT NOT NULL,
+          PRIMARY KEY (run_id, step_id)
+        );
       `,
     },
   ],

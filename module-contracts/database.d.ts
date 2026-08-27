@@ -60,6 +60,7 @@ export interface OperationsDatabase {
   "health_projection": Record<string, unknown>;
   "operator_command_audit": Record<string, unknown>;
   "run_projections": Record<string, unknown>;
+  "step_replay_projections": Record<string, unknown>;
   "timeline_projections": Record<string, unknown>;
 }
 

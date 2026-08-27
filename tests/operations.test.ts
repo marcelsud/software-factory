@@ -590,6 +590,7 @@ describe("leaf-08 operations", () => {
         "health_projection",
         "operator_command_audit",
         "run_projections",
+        "step_replay_projections",
         "timeline_projections",
       ]),
     );

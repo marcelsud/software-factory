@@ -89,6 +89,12 @@
       "event": "runs/stepRequested@v2",
       "publisher": "runs",
       "subscription": "project-step-v2"
+    },
+    {
+      "consumer": "operations",
+      "event": "runs/stepRequested@v3",
+      "publisher": "runs",
+      "subscription": "project-step-v3"
     }
   ],
   "modules": [
@@ -14216,10 +14222,12 @@
       "events": [],
       "migrations": {
         "postgres": [
-          "001_projections"
+          "001_projections",
+          "002_replay_step_skills"
         ],
         "sqlite": [
-          "001_projections"
+          "001_projections",
+          "002_replay_step_skills"
         ]
       },
       "name": "operations",
@@ -14230,6 +14238,7 @@
           "health_projection",
           "operator_command_audit",
           "run_projections",
+          "step_replay_projections",
           "timeline_projections"
         ]
       },
@@ -14273,6 +14282,10 @@
         {
           "event": "runs/stepRequested@v2",
           "name": "project-step-v2"
+        },
+        {
+          "event": "runs/stepRequested@v3",
+          "name": "project-step-v3"
         }
       ],
       "version": 1
@@ -17844,6 +17857,56 @@
             "type": "object"
           },
           "version": 2
+        },
+        {
+          "id": "runs/stepRequested@v3",
+          "name": "stepRequested",
+          "payloadSchema": {
+            "properties": {
+              "agentProfileDigest": {
+                "type": "string"
+              },
+              "attemptId": {
+                "type": "string"
+              },
+              "correlationToken": {
+                "type": "string"
+              },
+              "inputArtifactDigests": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "runId": {
+                "type": "string"
+              },
+              "skillDigests": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "skillId": {
+                "type": "string"
+              },
+              "stepId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "agentProfileDigest",
+              "attemptId",
+              "correlationToken",
+              "inputArtifactDigests",
+              "runId",
+              "skillDigests",
+              "skillId",
+              "stepId"
+            ],
+            "type": "object"
+          },
+          "version": 3
         }
       ],
       "migrations": {
@@ -34779,6 +34842,57 @@
       },
       "provider": "runs",
       "version": 2
+    },
+    {
+      "kind": "event",
+      "name": "stepRequested",
+      "payloadSchema": {
+        "properties": {
+          "agentProfileDigest": {
+            "type": "string"
+          },
+          "attemptId": {
+            "type": "string"
+          },
+          "correlationToken": {
+            "type": "string"
+          },
+          "inputArtifactDigests": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "skillDigests": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "skillId": {
+            "type": "string"
+          },
+          "stepId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "agentProfileDigest",
+          "attemptId",
+          "correlationToken",
+          "inputArtifactDigests",
+          "runId",
+          "skillDigests",
+          "skillId",
+          "stepId"
+        ],
+        "type": "object"
+      },
+      "provider": "runs",
+      "version": 3
     }
   ],
   "schemaVersion": 1,

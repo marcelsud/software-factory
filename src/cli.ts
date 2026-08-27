@@ -36,14 +36,22 @@ import {
   DefinitionCompileError,
   type FactoryDefinition,
 } from "./compiler.ts";
-import { type FactoryEvent, factoryEvent, type OperationsHealth } from "./contracts/index.ts";
+import {
+  agentResult,
+  effectResultV3,
+  type FactoryEvent,
+  factoryEvent,
+  type OperationsHealth,
+  type ReplayEvent,
+  replayEvent,
+} from "./contracts/index.ts";
 import {
   DeterministicReplayClock,
   DeterministicReplayIds,
-  executeReplayBundle,
   parseReplayBundle,
   type TrustedReplayPins,
   verifyReplayBundle,
+  verifyReplayObservation,
 } from "./replay.ts";
 import {
   FakeAgentRuntime,
@@ -340,10 +348,23 @@ async function replayCommand(
 
   const ids = new DeterministicReplayIds(bundle.fixtures.ids);
   const clock = new DeterministicReplayClock(bundle.fixtures.clock);
+  const pendingAgentResults = bundle.fixtures.agentResults.map((value) => agentResult.parse(value));
+  const agentRuntime =
+    pendingAgentResults.length === 0
+      ? new FakeAgentRuntime()
+      : new FakeAgentRuntime((request) => {
+          const next = pendingAgentResults.shift();
+          if (next === undefined) throw new Error("replay_fixture_exhausted: agentResults");
+          return agentResult.parse({
+            ...next,
+            attemptId: request.attemptId,
+            timing: { ...next.timing, startedAt: request.startedAt },
+          });
+        });
+  const effectResults = bundle.fixtures.effectResults.map((value) => effectResultV3.parse(value));
   const readTransport = new FakeGitHubReadTransport();
-  const writeTransport = new FakeGitHubWriteTransport();
+  const writeTransport = new FakeGitHubWriteTransport({ applies: effectResults });
   const gitPublisher = new FakeGitPublisher();
-  const agentRuntime = new FakeAgentRuntime();
   const app = createSoftwareFactoryApp({
     agentRuntime,
     artifactByteDriver: new MemoryArtifactByteDriver(),
@@ -369,12 +390,47 @@ async function replayCommand(
     subscriptions: { dispatch: "sync" },
   });
   try {
-    const result = executeReplayBundle(bundle, trusted);
-    const observedWrites =
+    await activateCheckedDefinition(host, values.config, dependencies);
+    const projectedSources = bundle.events
+      .filter((event) => event.kind === "source.accepted")
+      .map((event) =>
+        factoryEvent.parse({ ...(event.payload as Record<string, unknown>), payload: {} }),
+      );
+    const fixtureSources = bundle.fixtures.githubReads.map((value) => factoryEvent.parse(value));
+    const sources = new Map<string, FactoryEvent>();
+    for (const event of [...projectedSources, ...fixtureSources])
+      sources.set(`${event.sourceId}\0${event.deliveryId}`, event);
+    for (const event of sources.values()) {
+      const cursor = (
+        await host.executeAction("intake/getSourceCursor@v1", { sourceId: event.sourceId })
+      ).result as { readonly cursor: string } | null;
+      await host.executeAction("intake/acceptSourceEventV2@v1", {
+        event,
+        expectedCursor: cursor?.cursor ?? null,
+        nextCursor: cursor?.cursor ?? event.sourceRevision,
+      });
+    }
+    await host.drain({ maxDurationMs: 30_000 });
+    const details = (await host.executeAction("operations/showRunV2@v1", { runId: bundle.runId }))
+      .result as { readonly timeline: readonly ReplayEvent[] } | null;
+    const observedEvents = (details?.timeline ?? []).map((event) => replayEvent.parse(event));
+    const fakeWrites =
       writeTransport.calls.length +
       gitPublisher.mutations.length +
       gitPublisher.publications.length;
-    if (observedWrites !== 0) throw new Error("replay_live_write: fake infrastructure wrote");
+    const adapters: Readonly<Record<string, "fake" | "live">> = {
+      agent: "fake",
+      git: "fake",
+      githubRead: "fake",
+      githubWrite: "fake",
+    };
+    const liveWrites = Object.values(adapters).some((adapter) => adapter !== "fake")
+      ? fakeWrites
+      : 0;
+    const result = verifyReplayObservation(bundle, trusted, observedEvents, {
+      fake: fakeWrites,
+      live: liveWrites,
+    });
     const output = {
       replayId: ids.next(),
       ...result,
@@ -384,7 +440,7 @@ async function replayCommand(
     io.stdout(
       values.json
         ? `${canonicalJson(output)}\n`
-        : `replayed ${result.bundleDigest}\ntransitions: ${result.transitions.length}\neffects: ${result.effectIntents.length}\nlive writes: 0\n`,
+        : `replayed ${result.bundleDigest}\ntransitions: ${result.transitions.length}\neffects: ${result.effectIntents.length}\nfake writes: ${result.fakeWrites}\nlive writes: ${result.liveWrites}\n`,
     );
     return 0;
   } finally {
@@ -1099,7 +1155,7 @@ async function loadDefinition(
 }
 
 async function activateCheckedDefinition(
-  host: CliHost,
+  host: Pick<CliHost, "executeAction">,
   config: string,
   dependencies: CliDependencies,
 ): Promise<void> {

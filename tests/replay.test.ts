@@ -1,16 +1,24 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { defineChimpbaseApp } from "chimpbase/core";
 import type { ChimpbaseSinkSpan, ChimpbaseTelemetrySink } from "chimpbase/runtime";
 import { createChimpbase } from "chimpbase/runtime/bun";
 
 import { createSoftwareFactoryApp, FACTORY_RUNS_V2_WORKFLOW_DIGEST } from "../chimpbase.app.ts";
 import { runCli } from "../src/cli.ts";
 import { compileFactoryDefinition } from "../src/compiler.ts";
-import type { ReplayBundle, ReplayEvent, ReplayPins } from "../src/contracts/index.ts";
+import type {
+  FactoryEvent,
+  ReplayBundle,
+  ReplayEvent,
+  ReplayPins,
+} from "../src/contracts/index.ts";
+import { execution as executionModule } from "../src/modules/execution/interface.ts";
 import { unavailableGitHubReadTransport } from "../src/modules/intake/implementation.ts";
+import { runs as runsModule } from "../src/modules/runs/interface.ts";
 import {
   assertEvalSuiteUnbiased,
   createReplayBundle,
@@ -27,6 +35,7 @@ import {
   telemetryRecordsForEvent,
   transitionsFromEvents,
   verifyReplayBundle,
+  verifyReplayObservation,
 } from "../src/replay.ts";
 
 const scratch: string[] = [];
@@ -191,6 +200,60 @@ async function boot(sinks: ChimpbaseTelemetrySink[] = []) {
     subscriptions: { dispatch: "sync" },
   });
 }
+async function bootReplayExport() {
+  const app = createSoftwareFactoryApp({ readTransport: unavailableGitHubReadTransport });
+  const publishers: Record<
+    string,
+    ReadonlyArray<{ payload: { parse(value: unknown): unknown } }>
+  > = {
+    execution: [executionModule.events.attemptFinishedV2],
+    runs: [runsModule.events.runStateChangedV4, runsModule.events.stepRequestedV3],
+  };
+  const modules = app.modules.map((module) => {
+    const owned = publishers[module.interface.name] ?? [];
+    if (owned.length === 0) return module;
+    const contracts = Object.fromEntries(
+      owned.map((event, index) => {
+        const name = `testPublish${index}`;
+        return [
+          name,
+          {
+            errors: [],
+            guarantees: [],
+            id: `${module.interface.name}/${name}@v1`,
+            input: event.payload,
+            kind: "module-call",
+            module: module.interface.name,
+            name,
+            output: event.payload,
+            version: 1,
+          },
+        ];
+      }),
+    );
+    const handlers = Object.fromEntries(
+      owned.map((event, index) => [
+        `testPublish${index}`,
+        async (ctx: { publish(reference: unknown, payload: unknown): void }, input: unknown) => {
+          ctx.publish(event, input);
+          return input;
+        },
+      ]),
+    );
+    return Object.assign({}, module, {
+      calls: { ...module.calls, ...handlers },
+      interface: {
+        ...module.interface,
+        calls: { ...module.interface.calls, ...contracts },
+      },
+    });
+  });
+  return await createChimpbase({
+    app: defineChimpbaseApp({ ...app, modules }),
+    storage: { engine: "memory" },
+    subscriptions: { dispatch: "async" },
+  });
+}
 
 class RecordingSink implements ChimpbaseTelemetrySink {
   readonly logs: Array<{
@@ -287,6 +350,19 @@ describe("leaf 10 replay", () => {
     expect(text).not.toContain("SECRET_MARKER");
     expect(text).not.toContain("private");
     expect(text).toContain("[REDACTED]");
+    expect(() =>
+      bundle({
+        fixtures: {
+          effectResults: [
+            {
+              nested: {
+                contentBase64: Buffer.from("password=super-secret-value").toString("base64"),
+              },
+            },
+          ],
+        },
+      }),
+    ).toThrow("replay_secret_leak");
   });
 
   test("[G4] detects stuck waiting, running, effect states and missing or mismatched correlations", () => {
@@ -370,9 +446,17 @@ describe("leaf 10 replay", () => {
   });
 
   test("[G6] yields an identical transition and effect-intent sequence on repeated replay", () => {
-    const first = executeReplayBundle(bundle(), trusted());
-    const second = executeReplayBundle(bundle(), trusted());
+    const value = bundle();
+    const first = verifyReplayObservation(value, trusted(), value.events, { fake: 1, live: 0 });
+    const second = verifyReplayObservation(value, trusted(), value.events, { fake: 1, live: 0 });
     expect(first).toEqual(second);
+    const diverged = structuredClone(value.events);
+    const state = diverged.find((event) => event.kind === "run.state");
+    if (state === undefined) throw new Error("fixture run state missing");
+    state.payload = { ...(state.payload as object), status: "failed" };
+    expect(() => verifyReplayObservation(value, trusted(), diverged, { fake: 1, live: 0 })).toThrow(
+      "transition_drift",
+    );
   });
 
   test("[G7] rejects a bundle digest or pin mismatch before replay execution", () => {
@@ -420,7 +504,24 @@ describe("leaf 10 replay", () => {
     );
   });
 
-  test("[G10] stores bundles through assets and exposes them through operations", async () => {
+  test("[G10] stores bundles through assets and exposes linked exact-revision exports", async () => {
+    const compatibleV2 = {
+      agentProfileDigest: pins.agentProfileDigests.triage,
+      attemptId: "attempt-v2",
+      correlationToken: "correlation-v2",
+      inputArtifactDigests: [],
+      runId: "run-v2",
+      skillDigests: { reproduce: digest("reproduce") },
+      stepId: "reproduce",
+    };
+    expect(() => runsModule.events.stepRequestedV2.payload.parse(compatibleV2)).not.toThrow();
+    expect(() => runsModule.events.stepRequestedV3.payload.parse(compatibleV2)).toThrow();
+    expect(() =>
+      runsModule.events.stepRequestedV3.payload.parse({
+        ...compatibleV2,
+        skillId: "reproduce",
+      }),
+    ).not.toThrow();
     const host = await boot();
     try {
       const imported = (
@@ -432,18 +533,146 @@ describe("leaf 10 replay", () => {
         })
       ).result as { bundle: ReplayBundle };
       expect(loaded.bundle.bundleDigest).toBe(bundle().bundleDigest);
-      const artifacts = (
-        await host.executeAction("assets/listRunArtifactsV2@v1", { runId: "run-1" })
-      ).result as Array<{ classification: string; name: string }>;
-      expect(artifacts.some((artifact) => artifact.classification === "private")).toBe(true);
-      expect(
-        artifacts.some(
-          (artifact) =>
-            artifact.classification === "public" && artifact.name === "replay-bundle.json",
-        ),
-      ).toBe(true);
     } finally {
       await host.close();
+    }
+
+    const exportHost = await bootReplayExport();
+    const runId = "run-export";
+    const skillDigests = Object.fromEntries(
+      ["reproduce", "fix", "verify", "pr-writer"].map((skill) => [skill, digest(skill)]),
+    );
+    const publishedDigests = new Map<string, string>();
+    try {
+      await exportHost.executeAction("runs/testPublish0@v1", {
+        agentProfileDigests: { triage: pins.agentProfileDigests.triage },
+        auditSequence: 1,
+        definitionDigest: pins.definitionDigest,
+        factoryEventId: "factory-event:export:issue-triage",
+        flowDigest: pins.flowDigest,
+        flowId: "issue-triage",
+        moduleManifestDigest: pins.moduleManifestDigest,
+        outcome: "waiting",
+        runId,
+        skillDigests,
+        startedAt: "2026-01-01T00:00:00.000Z",
+        stateId: "reproduce",
+        status: "running",
+        workflowId: "factory-runs-v2",
+        workflowVersion: 2,
+        workflowVersionDigest: pins.workflowVersionDigest,
+      });
+      for (const [index, skillId] of Object.keys(skillDigests).entries()) {
+        const attemptId = `attempt-${skillId}`;
+        const privateBytes = Buffer.from(`evidence for ${skillId}`, "utf8");
+        const privateDigest = sha256Digest(privateBytes);
+        await exportHost.executeAction("assets/storeArtifactV2@v1", {
+          artifact: {
+            attemptId,
+            classification: "private",
+            createdAt: `2026-01-01T00:00:0${index + 1}.000Z`,
+            digest: privateDigest,
+            kind: "result.json",
+            mediaType: "application/json",
+            name: `${skillId}.json`,
+            redaction: "raw-private",
+            retention: "retained",
+            runId,
+            size: privateBytes.byteLength,
+          },
+          contentBase64: privateBytes.toString("base64"),
+        });
+        const published = (
+          await exportHost.executeAction("assets/publishArtifactV2@v1", {
+            attemptId,
+            createdAt: `2026-01-01T00:00:0${index + 1}.500Z`,
+            digest: privateDigest,
+            runId,
+          })
+        ).result as { artifact: { digest: string } };
+        publishedDigests.set(skillId, published.artifact.digest);
+        await exportHost.executeAction("runs/testPublish1@v1", {
+          agentProfileDigest: pins.agentProfileDigests.triage,
+          attemptId,
+          correlationToken: `correlation-${skillId}`,
+          inputArtifactDigests: [],
+          runId,
+          skillDigests,
+          skillId,
+          stepId: skillId,
+        });
+        const empty = sha256Digest("");
+        await exportHost.executeAction("execution/testPublish0@v1", {
+          agentProfileDigest: pins.agentProfileDigests.triage,
+          attemptId,
+          correlationToken: `correlation-${skillId}`,
+          finishedAt: `2026-01-01T00:00:0${index + 2}.900Z`,
+          result: {
+            attemptId,
+            changedFiles: [],
+            logs: {
+              stderrBytes: 0,
+              stderrDigest: empty,
+              stderrTruncated: false,
+              stdoutBytes: 0,
+              stdoutDigest: empty,
+              stdoutTruncated: false,
+            },
+            outcome: {
+              data: {},
+              outcome: "completed",
+              outputArtifactDigests: [privateDigest],
+              summary: skillId,
+            },
+            resources: { cpuMs: 1, maxRssBytes: 1 },
+            status: "succeeded",
+            tests: [],
+            timing: {
+              durationMs: 1,
+              finishedAt: `2026-01-01T00:00:0${index + 2}.900Z`,
+              startedAt: `2026-01-01T00:00:0${index + 2}.899Z`,
+            },
+          },
+          runId,
+          startedAt: `2026-01-01T00:00:0${index + 2}.899Z`,
+          stepId: skillId,
+        });
+      }
+      await exportHost.drain({ maxDurationMs: 5_000 });
+      const exported = (
+        await exportHost.executeAction("operations/exportReplayBundle@v1", {
+          capabilities: [],
+          createdAt: "2026-01-01T00:00:10.000Z",
+          fixtures: {
+            agentResults: [],
+            clock: ["2026-01-01T00:00:10.000Z"],
+            effectResults: [],
+            githubReads: [],
+            ids: [runId],
+          },
+          redactionPolicy: {
+            maxBytes: 1024 * 1024,
+            maxItems: 100,
+            maxStringBytes: 64 * 1024,
+            privateRetention: "retained",
+            secretMarkers: [],
+          },
+          runId,
+        })
+      ).result as { bundle: ReplayBundle };
+      expect(
+        exported.bundle.resultDocuments.map((result) => [
+          result.skillId,
+          result.skillDigest,
+          result.artifactDigests[0],
+        ]),
+      ).toEqual(
+        Object.keys(skillDigests)
+          .sort()
+          .map((skillId) => [skillId, skillDigests[skillId], publishedDigests.get(skillId)]),
+      );
+    } finally {
+      await exportHost.close();
     }
   });
 
@@ -501,6 +730,60 @@ describe("leaf 10 replay", () => {
       liveWrites: 0,
       storage: "memory",
     });
+    const executable = await realpath(process.env.FACTORY_AGENT_BIN ?? process.execPath);
+    const replayDefinition = compileFactoryDefinition(
+      source.replaceAll("/__factory_agent_bin__", executable),
+      { sourceName: "factory.yaml" },
+    );
+    const replayFlowDigest = replayDefinition.revision.flowDigests["issue-triage"];
+    if (replayFlowDigest === undefined) throw new Error("replay flow missing");
+    const sourceFixture: FactoryEvent = {
+      actor: "reporter",
+      correlationId: "correlation-cli",
+      deliveryId: "delivery-cli",
+      eventType: "issue.opened",
+      observedAt: "2026-01-01T00:00:00.000Z",
+      occurredAt: "2026-01-01T00:00:00.000Z",
+      payload: { title: "replay divergence" },
+      repository: "example/software-factory",
+      sourceId: "github:factory",
+      sourceRevision: "cursor-cli",
+      subject: "issue:1",
+    };
+    const identity = createHash("sha256")
+      .update(["factory-event", sourceFixture.sourceId, sourceFixture.deliveryId].join("\0"))
+      .digest("hex");
+    const replayRunId = createHash("sha256")
+      .update(
+        ["run", replayDefinition.revision.definitionDigest, replayFlowDigest, identity].join("\0"),
+      )
+      .digest("hex");
+    const divergentBundle = createReplayBundle({
+      artifactDigests: [],
+      createdAt: "2026-01-01T00:00:00.000Z",
+      events: [],
+      fixtures: {
+        clock: ["2026-01-01T00:00:00.000Z"],
+        githubReads: [sourceFixture],
+        ids: ["replay-divergence"],
+      },
+      pins: cliPins,
+      runId: replayRunId,
+    });
+    await writeFile(path, JSON.stringify(divergentBundle));
+    let stderr = "";
+    const divergentCode = await runCli(
+      ["replay", path, "--json"],
+      {
+        stderr: (text) => {
+          stderr += text;
+        },
+        stdout: () => {},
+      },
+      { checkModules: async () => {}, readText: (file) => readFile(file, "utf8") },
+    );
+    expect(divergentCode).toBe(1);
+    expect(stderr).toContain("transition_drift");
   });
 
   test("[G13] detects definition, skill, and artifact digest mismatches before execution", () => {
@@ -624,5 +907,16 @@ describe("leaf 10 replay", () => {
     expect(Buffer.byteLength(JSON.stringify(value))).toBeLessThanOrEqual(
       value.redactionPolicy.maxBytes,
     );
+    const itemBounded = bundle({
+      redactionPolicy: {
+        maxBytes: 1024 * 1024,
+        maxItems: 8,
+        maxStringBytes: 64 * 1024,
+        privateRetention: "ephemeral",
+        secretMarkers: [],
+      },
+    });
+    expect(itemBounded.transitions).toEqual(transitionsFromEvents(itemBounded.events));
+    expect(() => verifyReplayBundle(itemBounded, trusted())).not.toThrow();
   });
 });

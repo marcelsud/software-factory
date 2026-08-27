@@ -739,6 +739,40 @@ async function persistReplayBundle(ctx: ReplayCallContext, bundle: ReplayBundle)
   });
 }
 
+async function recordReplayStepSkill(
+  ctx: OperationsContext,
+  value: {
+    runId: string;
+    skillDigests: Record<string, string>;
+    skillId: string;
+    stepId: string;
+  },
+): Promise<void> {
+  const skillDigest = value.skillDigests[value.skillId];
+  if (skillDigest === undefined) throw new Error("projection_conflict: step skill digest missing");
+  const db = dbFrom(ctx);
+  const existing = await db
+    .selectFrom("step_replay_projections")
+    .selectAll()
+    .where("run_id", "=", value.runId)
+    .where("step_id", "=", value.stepId)
+    .executeTakeFirst();
+  if (existing !== undefined) {
+    if (existing.skill_id !== value.skillId || existing.skill_digest !== skillDigest)
+      throw new Error("projection_conflict: step skill revision changed");
+    return;
+  }
+  await db
+    .insertInto("step_replay_projections")
+    .values({
+      run_id: value.runId,
+      skill_digest: skillDigest,
+      skill_id: value.skillId,
+      step_id: value.stepId,
+    })
+    .execute();
+}
+
 function createSubscriptions() {
   return [
     defineChimpbaseModuleSubscription(
@@ -803,6 +837,11 @@ function createSubscriptions() {
           value as unknown as SafeObject,
           value.runId,
         ),
+    ),
+    defineChimpbaseModuleSubscription(
+      runs.events.stepRequestedV3,
+      "project-step-v3",
+      async (ctx, value) => recordReplayStepSkill(ctx, value),
     ),
     defineChimpbaseModuleSubscription(
       execution.events.attemptFinishedV2,
@@ -1383,16 +1422,23 @@ export function createOperationsImplementation(
             }),
         );
         const publicArtifactDigests = new Set(publicArtifacts.map((artifact) => artifact.digest));
-        const stepSkills = new Map<string, [string, string]>();
-        for (const event of events) {
-          if (event.kind !== "step.requested") continue;
-          const payload = event.payload as SafeObject;
-          const skillDigests = payload.skillDigests as Record<string, string> | undefined;
-          const selected = Object.entries(skillDigests ?? {}).sort(([left], [right]) =>
-            left.localeCompare(right),
-          )[0];
-          if (selected !== undefined) stepSkills.set(String(payload.stepId), selected);
-        }
+        const publishedBySource = new Map(
+          artifacts.flatMap((artifact) =>
+            artifact.classification === "public" && artifact.sourceDigest !== undefined
+              ? [[artifact.sourceDigest, artifact.digest] as const]
+              : [],
+          ),
+        );
+        const stepSkillRows = await dbFrom(ctx)
+          .selectFrom("step_replay_projections")
+          .selectAll()
+          .where("run_id", "=", input.runId)
+          .execute();
+        const stepSkills = new Map(
+          stepSkillRows.map(
+            (row) => [row.step_id, [row.skill_id, row.skill_digest] as [string, string]] as const,
+          ),
+        );
         const resultDocuments = events.flatMap((event) => {
           if (event.kind !== "attempt.finished") return [];
           const payload = event.payload as SafeObject;
@@ -1403,8 +1449,12 @@ export function createOperationsImplementation(
           const outputArtifactDigests = Array.isArray(
             (resultDocument as SafeObject).outputArtifactDigests,
           )
-            ? ((resultDocument as SafeObject).outputArtifactDigests as string[]).filter((digest) =>
-                publicArtifactDigests.has(digest),
+            ? ((resultDocument as SafeObject).outputArtifactDigests as string[]).flatMap(
+                (digest) => {
+                  const published = publishedBySource.get(digest);
+                  if (published !== undefined) return [published];
+                  return publicArtifactDigests.has(digest) ? [digest] : [];
+                },
               )
             : [];
           return [
@@ -1463,6 +1513,7 @@ export function createOperationsImplementation(
         "operator_command_audit",
         "run_projections",
         "timeline_projections",
+        "step_replay_projections",
       ],
     },
   });

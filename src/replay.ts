@@ -15,6 +15,7 @@ import {
   type ReplayTransition,
   redactSecrets,
   replayBundle,
+  replayEvent,
 } from "./contracts/index.ts";
 
 const DIGEST = /^sha256:[a-f0-9]{64}$/u;
@@ -52,7 +53,8 @@ export interface TrustedReplayPins extends ReplayPins {
 export interface ReplayExecutionResult {
   readonly bundleDigest: string;
   readonly effectIntents: readonly unknown[];
-  readonly liveWrites: 0;
+  readonly fakeWrites: number;
+  readonly liveWrites: number;
   readonly transitions: readonly ReplayTransition[];
 }
 
@@ -162,27 +164,17 @@ function redactValue(
     return safe;
   }
   if (Array.isArray(value)) {
-    const remaining = Math.max(0, policy.maxItems - count.items);
-    if (value.length > remaining) count.truncated = true;
-    return value.slice(0, remaining).map((entry) => {
-      count.items += 1;
-      return redactValue(entry, policy, count, key);
-    });
+    if (value.length > policy.maxItems) count.truncated = true;
+    const selected = value.slice(0, policy.maxItems);
+    count.items += selected.length;
+    return selected.map((entry) => redactValue(entry, policy, count, key));
   }
   if (value !== null && typeof value === "object") {
-    const entries = Object.entries(value as JsonObject).sort(([left], [right]) =>
-      left.localeCompare(right),
+    return Object.fromEntries(
+      Object.entries(value as JsonObject)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([entryKey, entry]) => [entryKey, redactValue(entry, policy, count, entryKey)]),
     );
-    const result: JsonObject = {};
-    for (const [entryKey, entry] of entries) {
-      if (count.items >= policy.maxItems) {
-        count.truncated = true;
-        break;
-      }
-      count.items += 1;
-      result[entryKey] = redactValue(entry, policy, count, entryKey);
-    }
-    return result;
   }
   return value;
 }
@@ -242,12 +234,18 @@ export function createReplayBundle(input: ReplayBundleInput): ReplayBundle {
       ),
       runId: input.runId,
       schemaVersion: 1,
-      transitions: input.transitions ?? transitionsFromEvents(input.events),
+      transitions: [],
     },
     policy,
   );
+  const redactedBody = redacted.value as Omit<
+    ReplayBundle,
+    "bundleDigest" | "transitions" | "truncation"
+  > & { events: unknown };
+  const redactedEvents = replayEvent.array().parse(redactedBody.events);
   const body = {
-    ...(redacted.value as Omit<ReplayBundle, "bundleDigest" | "truncation">),
+    ...redactedBody,
+    transitions: transitionsFromEvents(redactedEvents),
     truncation: redacted.truncation,
   } as Omit<ReplayBundle, "bundleDigest">;
   const bundle = replayBundle.parse({ ...body, bundleDigest: replayBundleDigest(body) });
@@ -423,21 +421,38 @@ function assertNoSecretLeak(bundle: ReplayBundle): void {
     if (marker !== "" && serialized.includes(marker))
       throw new Error(`replay_secret_leak: ${marker}`);
   }
-  for (const artifact of bundle.artifactDigests) {
-    let text: string;
-    try {
-      text = new TextDecoder("utf-8", { fatal: true }).decode(
-        Buffer.from(artifact.contentBase64, "base64"),
-      );
-    } catch {
-      throw new Error(`replay_secret_leak: public artifact ${artifact.name} is not UTF-8`);
+  const scanEncodedContent = (value: unknown, path = "$"): void => {
+    if (Array.isArray(value)) {
+      value.forEach((entry, index) => {
+        scanEncodedContent(entry, `${path}[${index}]`);
+      });
+      return;
     }
-    if (containsSecret(text))
-      throw new Error(`replay_secret_leak: credential in public artifact ${artifact.name}`);
-    for (const marker of [...DEFAULT_SECRET_MARKERS, ...bundle.redactionPolicy.secretMarkers])
-      if (marker !== "" && text.includes(marker))
-        throw new Error(`replay_secret_leak: marker in public artifact ${artifact.name}`);
-  }
+    if (value === null || typeof value !== "object") return;
+    for (const [key, entry] of Object.entries(value as JsonObject)) {
+      const entryPath = `${path}.${key}`;
+      if (key !== "contentBase64") {
+        scanEncodedContent(entry, entryPath);
+        continue;
+      }
+      if (typeof entry !== "string")
+        throw new Error(`replay_secret_leak: ${entryPath} is not base64 text`);
+      const decoded = Buffer.from(entry, "base64");
+      if (decoded.toString("base64").replace(/=+$/u, "") !== entry.replace(/=+$/u, ""))
+        throw new Error(`replay_secret_leak: ${entryPath} is malformed base64`);
+      let text: string;
+      try {
+        text = new TextDecoder("utf-8", { fatal: true }).decode(decoded);
+      } catch {
+        throw new Error(`replay_secret_leak: ${entryPath} is not UTF-8`);
+      }
+      if (containsSecret(text)) throw new Error(`replay_secret_leak: credential in ${entryPath}`);
+      for (const marker of [...DEFAULT_SECRET_MARKERS, ...bundle.redactionPolicy.secretMarkers])
+        if (marker !== "" && text.includes(marker))
+          throw new Error(`replay_secret_leak: marker in ${entryPath}`);
+    }
+  };
+  scanEncodedContent(bundle);
 }
 
 function assertNormalizedSequence(events: readonly ReplayEvent[]): void {
@@ -511,19 +526,39 @@ export function verifyReplayBundle(
   return bundle;
 }
 
+function effectIntentsFromEvents(events: readonly ReplayEvent[]): unknown[] {
+  return events.filter((event) => event.kind === "effect.requested").map((event) => event.payload);
+}
+
+export function verifyReplayObservation(
+  bundleInput: ReplayBundle | unknown,
+  trusted: TrustedReplayPins,
+  observedEvents: readonly ReplayEvent[],
+  writes: { readonly fake: number; readonly live: number },
+): ReplayExecutionResult {
+  const bundle = verifyReplayBundle(bundleInput, trusted);
+  const transitions = transitionsFromEvents(observedEvents);
+  const effectIntents = effectIntentsFromEvents(observedEvents);
+  if (canonicalJson(transitions) !== canonicalJson(bundle.transitions))
+    throw new Error("transition_drift: replayed app diverged from bundle");
+  if (canonicalJson(effectIntents) !== canonicalJson(effectIntentsFromEvents(bundle.events)))
+    throw new Error("effect_drift: replayed app diverged from bundle");
+  if (writes.live !== 0) throw new Error(`replay_live_write: observed ${writes.live}`);
+  return {
+    bundleDigest: bundle.bundleDigest,
+    effectIntents,
+    fakeWrites: writes.fake,
+    liveWrites: writes.live,
+    transitions,
+  };
+}
+
 export function executeReplayBundle(
   bundleInput: ReplayBundle | unknown,
   trusted: TrustedReplayPins,
 ): ReplayExecutionResult {
   const bundle = verifyReplayBundle(bundleInput, trusted);
-  return {
-    bundleDigest: bundle.bundleDigest,
-    effectIntents: bundle.events
-      .filter((event) => event.kind === "effect.requested")
-      .map((event) => event.payload),
-    liveWrites: 0,
-    transitions: bundle.transitions,
-  };
+  return verifyReplayObservation(bundle, trusted, bundle.events, { fake: 0, live: 0 });
 }
 
 export class DeterministicReplayClock {

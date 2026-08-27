@@ -109,6 +109,7 @@ operations v1
   consumes: assets/skillRevisionPinned@v2 as project-skill-v2
   consumes: intake/factoryEventAccepted@v2 as project-source-event-v2
   consumes: runs/stepRequested@v2 as project-step-v2
+  consumes: runs/stepRequested@v3 as project-step-v3
 runs v1
   depends: assets, definitions, effects, execution, intake
   call: runs/applyOperatorCommand@v1
@@ -140,6 +141,7 @@ runs v1
   event: runs/runStateChanged@v4
   event: runs/stepRequested@v1
   event: runs/stepRequested@v2
+  event: runs/stepRequested@v3
   consumes: execution/attemptFinished@v1 as record-attempt-outcome-v1
   consumes: execution/attemptFinished@v2 as record-attempt-outcome-v2
   consumes: effects/effectFinished@v2 as record-effect-outcome
