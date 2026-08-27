@@ -11,9 +11,12 @@ import type { Kysely } from "kysely";
 import {
   type AttemptFinished,
   CAPABILITY_PRESETS,
+  CAPABILITY_PRESETS_V2,
   type ExecutionPlanV2,
   type FactoryEvent,
   isDataRecord,
+  type PinnedSkillBundle,
+  type PinnedSkillBundleV2,
   type Run,
   type RunV2,
   type RunV3,
@@ -691,7 +694,22 @@ async function scheduleRetry(
   return { delayMs, engine: nextEngine, row: nextRow };
 }
 
-function capabilityPresetFor(capabilities: readonly string[]): keyof typeof CAPABILITY_PRESETS {
+function capabilityPresetFor(capabilities: readonly string[]): keyof typeof CAPABILITY_PRESETS_V2 {
+  for (const [preset, expected] of Object.entries(CAPABILITY_PRESETS_V2) as Array<
+    [keyof typeof CAPABILITY_PRESETS_V2, readonly string[]]
+  >) {
+    if (
+      capabilities.length === expected.length &&
+      expected.every((capability) => capabilities.includes(capability))
+    )
+      return preset;
+  }
+  throw new Error("invalid_revision_pin: agent capabilities do not match an execution preset");
+}
+
+function legacyCapabilityPresetFor(
+  capabilities: readonly string[],
+): keyof typeof CAPABILITY_PRESETS {
   for (const [preset, expected] of Object.entries(CAPABILITY_PRESETS) as Array<
     [keyof typeof CAPABILITY_PRESETS, readonly string[]]
   >) {
@@ -701,7 +719,7 @@ function capabilityPresetFor(capabilities: readonly string[]): keyof typeof CAPA
     )
       return preset;
   }
-  throw new Error("invalid_revision_pin: agent capabilities do not match an execution preset");
+  throw new Error("invalid_revision_pin: legacy capabilities do not match an execution preset");
 }
 
 function validResult(
@@ -2110,16 +2128,35 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
             } else {
               const capabilityPreset = capabilityPresetFor(step.capabilities);
               const selectedSkills = step.skill === undefined ? [] : [step.skill];
-              const selectedBundle =
-                step.skill === undefined
-                  ? null
-                  : await ctx.call(assets.calls.getSkillBundle, {
-                      digest: plan.skillRevisions[step.skill] ?? "",
-                    });
-              if (step.skill !== undefined && selectedBundle === null)
-                throw new Error(`invalid_revision_pin: skill bundle is missing for ${step.skill}`);
+              let selectedStrictBundle: PinnedSkillBundleV2 | null = null;
+              let selectedLegacyBundle: PinnedSkillBundle | null = null;
+              if (step.skill !== undefined) {
+                const digest = plan.skillRevisions[step.skill] ?? "";
+                try {
+                  selectedStrictBundle = await ctx.call(assets.calls.resolveSkillV2, {
+                    digest,
+                    id: step.skill,
+                  });
+                } catch {
+                  selectedLegacyBundle = await ctx.call(assets.calls.getSkillBundle, { digest });
+                  if (selectedLegacyBundle === null)
+                    throw new Error(
+                      `invalid_revision_pin: skill bundle is missing for ${step.skill}`,
+                    );
+                }
+              }
+              if (
+                selectedStrictBundle?.capabilities.some(
+                  (capability) =>
+                    !step.capabilities.includes(capability) ||
+                    !profile.capabilities.includes(capability),
+                ) === true
+              )
+                throw new Error(
+                  `invalid_revision_pin: skill capabilities exceed grants for ${step.skill}`,
+                );
               const strictProfile = {
-                capabilities: [...CAPABILITY_PRESETS[capabilityPreset]],
+                capabilities: [...CAPABILITY_PRESETS_V2[capabilityPreset]],
                 capabilityPreset,
                 command: profile.command,
                 digest: profile.digest,
@@ -2141,7 +2178,7 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
                 model: profile.model,
                 skills: selectedSkills,
               };
-              await ctx.call(execution.calls.requestAttemptV2, {
+              const attemptRequest = {
                 agentProfile: strictProfile,
                 attemptId,
                 budget: {
@@ -2159,14 +2196,30 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
                 })),
                 repository: { id: engine.repository, sha: engine.repository_sha },
                 runId: row.run_id,
-                skills: selectedBundle === null ? [] : [selectedBundle],
                 startedAt: input.now,
                 stepId: step.id,
                 task: {
                   mediaType: "application/json",
                   payload: JSON.parse(engine.task_payload_json) as unknown,
                 },
-              });
+              };
+              if (selectedLegacyBundle !== null) {
+                const legacyPreset = legacyCapabilityPresetFor(step.capabilities);
+                await ctx.call(execution.calls.requestAttemptV2, {
+                  ...attemptRequest,
+                  agentProfile: {
+                    ...strictProfile,
+                    capabilities: [...CAPABILITY_PRESETS[legacyPreset]],
+                    capabilityPreset: legacyPreset,
+                  },
+                  skills: [selectedLegacyBundle],
+                });
+              } else {
+                await ctx.call(execution.calls.requestAttemptV3, {
+                  ...attemptRequest,
+                  skills: selectedStrictBundle === null ? [] : [selectedStrictBundle],
+                });
+              }
             }
           } catch (error) {
             row = await appendAudit(db, row, "infrastructure.failed", input.now, {

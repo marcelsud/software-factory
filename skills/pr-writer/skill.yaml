@@ -1,0 +1,15 @@
+id: pr-writer
+version: 1
+compatibility: 1
+instruction: instructions.md
+includes: [guidance.md]
+inputArtifacts: [patch, report.md, test-result]
+resultSchema:
+  type: object
+  properties:
+    title: { type: string }
+    body: { type: string }
+  required: [title, body]
+  additionalProperties: false
+capabilities: [repository.read]
+customizable: false

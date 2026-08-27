@@ -7,15 +7,18 @@ import {
   type AgentFailure,
   type AgentMaterialization,
   type AgentRequest,
+  type AgentRequestV2,
   type AgentResult,
+  containsSecret,
   parseAgentRequest,
+  parseAgentRequestV2,
   parseAgentResult,
 } from "../contracts/index.ts";
 import type { AgentRuntime } from "./seams.ts";
 
+type AnyAgentRequest = AgentRequest | AgentRequestV2;
+
 const EMPTY_DIGEST = createHash("sha256").update("").digest("hex");
-const SECRET_MARKER =
-  /(?:-----BEGIN [A-Z ]*PRIVATE KEY-----|github_pat_|gh[opsu]_[A-Za-z0-9]|AWS_SECRET_ACCESS_KEY|Bearer\s+[A-Za-z0-9._-]{16})/u;
 const SAFE_ENVIRONMENT_NAMES: Readonly<Record<string, true>> = {
   FACTORY_MODEL_HINT: true,
   LANG: true,
@@ -47,7 +50,7 @@ interface ActiveProcess {
 
 interface Workspace {
   readonly path: string;
-  readonly request: AgentRequest;
+  readonly request: AnyAgentRequest;
 }
 
 interface ProcessCapture {
@@ -103,10 +106,12 @@ export class LocalProcessAgentRuntime implements AgentRuntime {
     await active.terminate();
   }
 
-  async run(rawRequest: AgentRequest, signal: AbortSignal): Promise<AgentResult> {
-    let request: AgentRequest;
+  async run(rawRequest: AnyAgentRequest, signal: AbortSignal): Promise<AgentResult> {
+    let request: AnyAgentRequest;
     try {
-      request = parseAgentRequest(rawRequest);
+      request = rawRequest.skills.some((skill) => "resultSchema" in skill)
+        ? parseAgentRequestV2(rawRequest)
+        : parseAgentRequest(rawRequest);
       validateRequestPaths(request);
       validateEnvironment(request.agentProfile.environment);
     } catch (error) {
@@ -455,8 +460,8 @@ export class LocalProcessAgentRuntime implements AgentRuntime {
         logs,
       );
     if (
-      SECRET_MARKER.test(capture.stdout.toString("utf8")) ||
-      SECRET_MARKER.test(capture.stderr.toString("utf8"))
+      containsSecret(capture.stdout.toString("utf8")) ||
+      containsSecret(capture.stderr.toString("utf8"))
     )
       return failureResult(
         request,
@@ -561,7 +566,7 @@ class WorkspaceManager {
     return this.#contained(`attempt-${sha256(Buffer.from(attemptId)).slice(0, 32)}`);
   }
 
-  async create(request: AgentRequest): Promise<Workspace> {
+  async create(request: AnyAgentRequest): Promise<Workspace> {
     await this.ensureRecovered();
     await this.#validateLocalGitState();
     await this.#validateTree(request.repository.sha, request.agentProfile.limits);
@@ -685,7 +690,7 @@ class WorkspaceManager {
       if (!declaredOutput(path, workspace.request.declaredOutputPaths))
         throw new Error(`agent changed undeclared path: ${path}`);
       const bytes = current.get(path);
-      if (bytes !== undefined && SECRET_MARKER.test(bytes.toString("utf8")))
+      if (bytes !== undefined && containsSecret(bytes.toString("utf8")))
         throw new Error(`agent output contains a secret marker: ${path}`);
     }
     const changedFiles = sorted.map((path) => {
@@ -1014,7 +1019,7 @@ class SandboxError extends Error {
   }
 }
 
-function validateRequestPaths(request: AgentRequest): void {
+function validateRequestPaths(request: AnyAgentRequest): void {
   for (const materialization of request.inputArtifacts) safeRelativePath(materialization.path);
   for (const skill of request.skills) {
     safeSegment(skill.id);
@@ -1030,7 +1035,7 @@ function validateEnvironment(environment: Record<string, string>): void {
   for (const [name, value] of Object.entries(environment)) {
     if (!Object.hasOwn(SAFE_ENVIRONMENT_NAMES, name))
       throw new Error(`environment name is not allowed: ${name}`);
-    if (value.includes("\0") || SECRET_MARKER.test(value))
+    if (value.includes("\0") || containsSecret(value))
       throw new Error(`environment value is not allowed: ${name}`);
   }
 }

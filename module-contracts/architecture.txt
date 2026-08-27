@@ -3,14 +3,26 @@ Chimpbase module architecture
 assets v1
   depends: none
   call: assets/getArtifact@v1
+  call: assets/getArtifactV2@v1
   call: assets/getSkillBundle@v1
+  call: assets/getSkillBundleV2@v1
   call: assets/listRunArtifacts@v1
+  call: assets/listRunArtifactsV2@v1
+  call: assets/listSkillRevisionsV2@v1
   call: assets/materializeArtifact@v1
+  call: assets/materializeForAttemptV2@v1
+  call: assets/publishArtifactV2@v1
   call: assets/putArtifact@v1
   call: assets/putSkillBundle@v1
   call: assets/resolveSkill@v1
+  call: assets/resolveSkillV2@v1
+  call: assets/storeArtifactV2@v1
+  call: assets/storeSkillBundleV2@v1
+  call: assets/verifySkillBundleV2@v1
   event: assets/artifactStored@v1
+  event: assets/artifactStored@v2
   event: assets/skillRevisionPinned@v1
+  event: assets/skillRevisionPinned@v2
 definitions v1
   depends: none
   call: definitions/activateDefinition@v1
@@ -36,14 +48,17 @@ execution v1
   call: execution/cancelAttempt@v1
   call: execution/getAttempt@v1
   call: execution/getAttemptProtocol@v1
+  call: execution/getAttemptProtocolV2@v1
   call: execution/getAttemptV2@v1
   call: execution/getAttemptV3@v1
   call: execution/requestAttempt@v1
   call: execution/requestAttemptV2@v1
+  call: execution/requestAttemptV3@v1
   event: execution/attemptFinished@v1
   event: execution/attemptFinished@v2
   event: execution/attemptQueued@v1
   event: execution/attemptQueued@v2
+  event: execution/attemptQueued@v3
 intake v1
   depends: definitions
   call: intake/acceptSourceEvent@v1

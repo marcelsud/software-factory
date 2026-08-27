@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 
 import type {
   AgentRuntime,
-  ArtifactByteDriver,
   GitHubIssueCommentRecord,
   GitHubIssueRecord,
   GitHubListInput,
@@ -13,7 +12,12 @@ import type {
   GitPublication,
   GitPublisher,
 } from "../adapters/seams.ts";
-import type { AgentRequest, AgentResult } from "../contracts/index.ts";
+
+export { MemoryArtifactByteDriver } from "../adapters/artifact-byte-driver.ts";
+
+import type { AgentRequest, AgentRequestV2, AgentResult } from "../contracts/index.ts";
+
+type AnyAgentRequest = AgentRequest | AgentRequestV2;
 
 export interface FakeGitHubReadTransportScript {
   readonly comments?: ReadonlyArray<Error | GitHubPage<GitHubIssueCommentRecord>>;
@@ -110,14 +114,16 @@ function unlimitedRate(): GitHubRateLimitRecord {
 
 export class FakeAgentRuntime implements AgentRuntime {
   readonly cancelledAttempts: string[] = [];
-  readonly requests: AgentRequest[] = [];
-  readonly #result: AgentResult | ((request: AgentRequest) => AgentResult);
+  readonly requests: AnyAgentRequest[] = [];
+  readonly #result: AgentResult | ((request: AnyAgentRequest) => AgentResult);
 
-  constructor(result: AgentResult | ((request: AgentRequest) => AgentResult) = fakeDomainResult) {
+  constructor(
+    result: AgentResult | ((request: AnyAgentRequest) => AgentResult) = fakeDomainResult,
+  ) {
     this.#result = result;
   }
 
-  async run(request: AgentRequest, signal: AbortSignal): Promise<AgentResult> {
+  async run(request: AnyAgentRequest, signal: AbortSignal): Promise<AgentResult> {
     this.requests.push(request);
     if (signal.aborted) return fakeInfrastructureResult(request, "cancel");
     if (typeof this.#result === "function") return this.#result(request);
@@ -129,7 +135,7 @@ export class FakeAgentRuntime implements AgentRuntime {
   }
 }
 
-function fakeDomainResult(request: AgentRequest): AgentResult {
+function fakeDomainResult(request: AnyAgentRequest): AgentResult {
   const emptyDigest = createHash("sha256").update("").digest("hex");
   return {
     attemptId: request.attemptId,
@@ -154,7 +160,7 @@ function fakeDomainResult(request: AgentRequest): AgentResult {
 }
 
 function fakeInfrastructureResult(
-  request: AgentRequest,
+  request: AnyAgentRequest,
   category: "cancel" | "adapter",
 ): AgentResult {
   const result = fakeDomainResult(request);
@@ -179,32 +185,5 @@ export class FakeGitPublisher implements GitPublisher {
       publication.commitMessage,
     ].join("\0");
     return { revision: createHash("sha256").update(identity, "utf8").digest("hex") };
-  }
-}
-
-export class MemoryArtifactByteDriver implements ArtifactByteDriver {
-  readonly materialized = new Map<string, Uint8Array>();
-  readonly #bytes = new Map<string, Uint8Array>();
-
-  async get(digest: string): Promise<Uint8Array | null> {
-    const bytes = this.#bytes.get(digest);
-    return bytes === undefined ? null : bytes.slice();
-  }
-
-  async materialize(digest: string, destination: string): Promise<void> {
-    const bytes = this.#bytes.get(digest);
-    if (bytes === undefined) throw new Error(`artifact_not_found: ${digest}`);
-    this.materialized.set(destination, bytes.slice());
-  }
-
-  async put(digest: string, bytes: Uint8Array): Promise<void> {
-    const actual = createHash("sha256").update(bytes).digest("hex");
-    if (actual !== digest)
-      throw new Error(`digest_mismatch: expected ${digest}, received ${actual}`);
-    const existing = this.#bytes.get(digest);
-    if (existing !== undefined && !existing.every((byte, index) => byte === bytes[index])) {
-      throw new Error(`immutable_artifact_conflict: ${digest}`);
-    }
-    this.#bytes.set(digest, bytes.slice());
   }
 }

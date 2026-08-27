@@ -1,0 +1,16 @@
+id: verify
+version: 1
+compatibility: 1
+instruction: instructions.md
+includes: [guidance.md]
+inputArtifacts: [patch, report.md]
+resultSchema:
+  type: object
+  properties:
+    passed: { type: boolean }
+    evidence: { type: string }
+    testResults: { type: string-array }
+  required: [passed, evidence, testResults]
+  additionalProperties: false
+capabilities: [repository.read, process.test]
+customizable: false

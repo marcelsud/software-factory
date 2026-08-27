@@ -7,11 +7,13 @@ import { fileURLToPath } from "node:url";
 import { parseArgs, promisify } from "node:util";
 
 import { syncChimpbaseModuleArtifacts } from "chimpbase/tooling/modules";
+import { parseDocument } from "yaml";
 
 import moduleApp, {
   createSoftwareFactoryApp,
   FACTORY_RUNS_V2_WORKFLOW_DIGEST,
 } from "../chimpbase.app.ts";
+import { LocalArtifactByteDriver } from "./adapters/artifact-byte-driver.ts";
 import { GitHubEventNormalizer } from "./adapters/github-event-normalizer.ts";
 import {
   FetchGitHubReadTransport,
@@ -21,6 +23,11 @@ import {
 } from "./adapters/github-read-transport.ts";
 import { LocalProcessAgentRuntime } from "./adapters/local-process-agent-runtime.ts";
 import type { AgentRuntime } from "./adapters/seams.ts";
+import {
+  type ResolvedSkill,
+  type SkillInspection,
+  SkillResolver,
+} from "./assets/skill-resolver.ts";
 import {
   canonicalJson,
   compileFactoryDefinition,
@@ -133,6 +140,9 @@ const defaultDependencies: Required<CliDependencies> = {
     };
     return await runtime.createChimpbase({
       app: createSoftwareFactoryApp({
+        artifactByteDriver: new LocalArtifactByteDriver(
+          resolve(process.env.FACTORY_ARTIFACT_ROOT ?? ".factory/artifacts"),
+        ),
         agentRuntime,
         clock,
         moduleManifestDigest: createHash("sha256").update(manifest).digest("hex"),
@@ -169,13 +179,14 @@ export async function runCli(
     if (command === "poll") return await pollCommand(rest, io, dependencies);
     if (command === "daemon") return await daemonCommand(rest, io, dependencies);
     if (command === "trigger") return await triggerCommand(rest, io, dependencies);
+    if (command === "skills") return await skillsCommand(rest, io, dependencies);
     if (command === "modules" && rest.length === 1 && rest[0] === "check") {
       await dependencies.checkModules();
       io.stdout("Chimpbase modules: 0 fail\n");
       return 0;
     }
     io.stderr(
-      "Usage: factory validate --config <path> | factory plan --config <path> [--json] | factory poll --once [--config <path>] [--repository <id>] | factory daemon [--once] [--config <path>] [--repository <id>] | factory trigger --event <file|stdin> [--config <path>] [--repository <id>] | factory modules check\n",
+      "Usage: factory validate --config <path> | factory plan --config <path> [--json] | factory skills list|inspect|verify --config <path> [--id <skill>] [--json] | factory poll --once [--config <path>] [--repository <id>] | factory daemon [--once] [--config <path>] [--repository <id>] | factory trigger --event <file|stdin> [--config <path>] [--repository <id>] | factory modules check\n",
     );
     return 2;
   } catch (error) {
@@ -190,6 +201,131 @@ export async function runCli(
     io.stderr(`${error instanceof Error ? error.message : String(error)}\n`);
     return 1;
   }
+}
+
+interface ConfiguredSkillResolution {
+  readonly configuredId: string;
+  readonly configuredPath: string;
+  readonly configuredRevision: string;
+  readonly inspection: SkillInspection;
+  readonly resolved: ResolvedSkill;
+}
+
+async function configuredSkills(
+  config: string,
+  source: string,
+): Promise<ConfiguredSkillResolution[]> {
+  const document = parseDocument(source, {
+    customTags: [],
+    merge: false,
+    prettyErrors: false,
+    schema: "core",
+    uniqueKeys: true,
+  });
+  const problems = [...document.errors, ...document.warnings];
+  if (problems.length > 0) throw new Error(`invalid or unsafe YAML: ${problems[0]?.message}`);
+  const value = document.toJS({ maxAliasCount: 0 }) as { readonly skills?: readonly unknown[] };
+  if (!Array.isArray(value.skills)) throw new Error("invalid config: skills must be a list");
+  const configDirectory = dirname(resolve(config));
+  const resolver = new SkillResolver({ roots: [resolve(configDirectory, "skills")] });
+  const seen = new Set<string>();
+  const skills: ConfiguredSkillResolution[] = [];
+  for (const [index, entry] of value.skills.entries()) {
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry))
+      throw new Error(`invalid config: skills[${index}] must be a mapping`);
+    const record = entry as Record<string, unknown>;
+    if (
+      typeof record.id !== "string" ||
+      typeof record.path !== "string" ||
+      typeof record.revision !== "string"
+    )
+      throw new Error(`invalid config: skills[${index}] requires id, path, and revision`);
+    if (seen.has(record.id)) throw new Error(`duplicate skill id: ${record.id}`);
+    seen.add(record.id);
+    const resolved = await resolver.resolve(resolve(configDirectory, record.path));
+    if (resolved.bundle.id !== record.id)
+      throw new Error(`skill id mismatch: configured ${record.id}, manifest ${resolved.bundle.id}`);
+    skills.push({
+      configuredId: record.id,
+      configuredPath: record.path,
+      configuredRevision: record.revision,
+      inspection: resolved.inspection,
+      resolved,
+    });
+  }
+  return skills;
+}
+
+async function skillsCommand(
+  argv: readonly string[],
+  io: CliIo,
+  dependencies: CliDependencies,
+): Promise<number> {
+  const [subcommand, ...rest] = argv;
+  if (subcommand !== "list" && subcommand !== "inspect" && subcommand !== "verify")
+    throw new Error("skills requires list, inspect, or verify");
+  const { values } = parseArgs({
+    allowPositionals: false,
+    args: rest,
+    options: {
+      config: { type: "string" },
+      id: { type: "string" },
+      json: { type: "boolean", default: false },
+    },
+    strict: true,
+  });
+  if (values.config === undefined) throw new Error(`skills ${subcommand} requires --config <path>`);
+  const source = await dependencies.readText(values.config);
+  const configured = await configuredSkills(values.config, source);
+  const selected = configured.filter(
+    (skill) => values.id === undefined || skill.configuredId === values.id,
+  );
+  if (values.id !== undefined && selected.length === 0)
+    throw new Error(`skill not found: ${values.id}`);
+  if (subcommand === "verify") {
+    for (const skill of selected) {
+      if (skill.configuredRevision === "unpinned")
+        throw new Error(`skill revision is unpinned: ${skill.configuredId}`);
+      if (skill.configuredRevision !== skill.inspection.digest)
+        throw new Error(
+          `skill digest mismatch: ${skill.configuredId} claims ${skill.configuredRevision}, resolved ${skill.inspection.digest}`,
+        );
+    }
+  }
+  const output =
+    subcommand === "list"
+      ? selected.map((skill) => ({
+          digest: skill.inspection.digest,
+          id: skill.configuredId,
+          sourcePath: skill.inspection.sourcePath,
+          version: skill.inspection.version,
+        }))
+      : selected.map((skill) => skill.inspection);
+  if (values.json) {
+    io.stdout(`${canonicalJson(output)}\n`);
+    return 0;
+  }
+  for (const skill of selected) {
+    if (subcommand === "list") {
+      io.stdout(
+        `${skill.configuredId} ${skill.inspection.digest} v${skill.inspection.version} compatibility=${skill.inspection.compatibility} ${skill.inspection.sourcePath}\n`,
+      );
+      continue;
+    }
+    if (subcommand === "verify") {
+      io.stdout(`verified ${skill.configuredId} ${skill.inspection.digest}\n`);
+      continue;
+    }
+    io.stdout(`${skill.configuredId} ${skill.inspection.digest}\n`);
+    io.stdout(`  source: ${skill.inspection.sourcePath}\n`);
+    io.stdout(`  version: ${skill.inspection.version}\n`);
+    io.stdout(`  compatibility: ${skill.inspection.compatibility}\n`);
+    io.stdout(`  capabilities: ${skill.inspection.capabilities.join(", ")}\n`);
+    io.stdout(`  input artifact kinds: ${skill.inspection.inputArtifactKinds.join(", ")}\n`);
+    io.stdout(`  result schema: ${canonicalJson(skill.inspection.resultSchema)}\n`);
+    io.stdout(`  files: ${canonicalJson(skill.inspection.files)}\n`);
+  }
+  return 0;
 }
 
 async function validateCommand(
@@ -420,7 +556,10 @@ async function loadDefinition(
   dependencies: CliDependencies,
 ): Promise<FactoryDefinition> {
   const source = await dependencies.readText(config);
-  return compileFactoryDefinition(source, { sourceName: config }).definition;
+  return compileFactoryDefinition(source, {
+    allowUnpinnedSkills: true,
+    sourceName: config,
+  }).definition;
 }
 
 async function activateCheckedDefinition(
@@ -431,17 +570,28 @@ async function activateCheckedDefinition(
   let source = await dependencies.readText(config);
   const agentExecutable = await realpath(process.env.FACTORY_AGENT_BIN ?? process.execPath);
   source = source.replaceAll("/__factory_agent_bin__", agentExecutable);
-  const definition = compileFactoryDefinition(source, { sourceName: config }).definition;
-  for (const skill of definition.skills) {
-    const instructions = await dependencies.readText(resolve(dirname(config), skill.path));
-    const canonical = JSON.stringify({ files: [], instructions });
-    const digest = `sha256:${createHash("sha256").update(canonical).digest("hex")}`;
-    await host.executeAction("assets/putSkillBundle@v1", {
-      bundle: { digest, files: [], id: skill.id, instructions },
-      reference: skill.path,
+  const configured = await configuredSkills(config, source);
+  const document = parseDocument(source, {
+    customTags: [],
+    merge: false,
+    prettyErrors: false,
+    schema: "core",
+    uniqueKeys: true,
+  });
+  for (const [index, skill] of configured.entries()) {
+    if (skill.configuredRevision === "unpinned") {
+      document.setIn(["skills", index, "revision"], skill.inspection.digest);
+    } else if (skill.configuredRevision !== skill.inspection.digest) {
+      throw new Error(
+        `skill digest mismatch: ${skill.configuredId} claims ${skill.configuredRevision}, resolved ${skill.inspection.digest}`,
+      );
+    }
+    await host.executeAction("assets/storeSkillBundleV2@v1", {
+      bundle: skill.resolved.bundle,
+      source: skill.configuredPath,
     });
-    source = source.replace(`revision: ${skill.revision}`, `revision: ${digest}`);
   }
+  source = document.toString();
   const revision = (
     await host.executeAction("definitions/compileDefinition@v1", {
       source,

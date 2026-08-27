@@ -30,6 +30,10 @@ sources:
 capabilities:
   - id: repository.read
     description: Read the pinned repository revision
+  - id: repository.patch
+    description: Modify files in an isolated worktree
+  - id: process.test
+    description: Run declared verification commands
   - id: repository.write
     description: Publish a verified fix revision
   - id: issue.comment
@@ -43,17 +47,20 @@ effectPermissions:
 
 skills:
   - id: reproduce
-    path: skills/reproduce.md
-    revision: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    path: skills/reproduce
+    revision: sha256:0266a4341e7cb8e3065b55798793298899412b82e1200942773882b35dd1aa48
   - id: diagnose
-    path: skills/diagnose.md
-    revision: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+    path: skills/diagnose
+    revision: sha256:5a0f5d986f78dab66c0cb82fcc8285e6fbed5d41a145418cbadc61b7b35d33b3
   - id: fix
-    path: skills/fix.md
-    revision: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+    path: skills/fix
+    revision: sha256:a97a5803faae17f52766c23cd9d96444b7d3ddd36955ee8b1447e7390583a86d
   - id: verify
-    path: skills/verify.md
-    revision: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+    path: skills/verify
+    revision: sha256:d88bbe0b9e12989d982e1a98950e742bf03561f8cdb82fc2b1c3d61f43161082
+  - id: pr-writer
+    path: skills/pr-writer
+    revision: sha256:66449c41c6a3c1427d54f20225a2b1946c992f85de3334d8cc573bd09949ef1f
 
 agentProfiles:
   - id: triage-agent
@@ -64,7 +71,7 @@ agentProfiles:
       timeoutMs: 900000
       maxOutputBytes: 1048576
     skills: [reproduce, diagnose, fix, verify]
-    capabilities: [repository.read]
+    capabilities: [repository.read, repository.patch, process.test]
   - id: verification-agent
     model: trusted-composition-verifier
     command: [/__factory_agent_bin__, /workspace/src/adapters/json-stdio-agent.mjs, --verify]
@@ -73,7 +80,7 @@ agentProfiles:
       timeoutMs: 600000
       maxOutputBytes: 524288
     skills: [verify]
-    capabilities: [repository.read]
+    capabilities: [repository.read, process.test]
 
 flows:
   - id: issue-triage
@@ -119,7 +126,7 @@ flows:
         kind: agent
         agentProfile: verification-agent
         skill: verify
-        capabilities: [repository.read]
+        capabilities: [repository.read, process.test]
         retry: { maxAttempts: 2, backoffMs: 1000 }
         results:
           - { outcome: verified, requiredData: [], requiredArtifactCount: 1 }
@@ -128,7 +135,7 @@ flows:
         kind: agent
         agentProfile: triage-agent
         skill: fix
-        capabilities: [repository.read]
+        capabilities: [repository.read, repository.patch, process.test]
         retry: { maxAttempts: 2, backoffMs: 1000 }
         results:
           - { outcome: fixed, requiredData: [], requiredArtifactCount: 1 }

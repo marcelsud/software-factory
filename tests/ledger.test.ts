@@ -1230,10 +1230,15 @@ postgres(
     const host = await boot();
     const inspectionPool = new Pool({ connectionString: url });
     const columnRows = await inspectionPool.query("SELECT column_name FROM information_schema.columns WHERE table_schema = 'chimpbase_runs' AND table_name = 'runs' ORDER BY column_name");
+    const assetTableRows = await inspectionPool.query("SELECT table_name FROM information_schema.tables WHERE table_schema = 'chimpbase_assets' AND table_name IN ('artifact_blobs_v2', 'artifacts_v2', 'skill_revisions_v2') ORDER BY table_name");
     await inspectionPool.end();
     const postgresColumns = columnRows.rows.map((row) => row.column_name);
     if (JSON.stringify(postgresColumns) !== JSON.stringify([...RUN_COLUMNS].sort())) {
       throw new Error("PostgreSQL runs columns do not match RunRow");
+    }
+    const postgresAssetTables = assetTableRows.rows.map((row) => row.table_name);
+    if (JSON.stringify(postgresAssetTables) !== JSON.stringify(["artifact_blobs_v2", "artifacts_v2", "skill_revisions_v2"])) {
+      throw new Error("PostgreSQL strict assets tables are missing");
     }
     const revision = (await host.executeAction("definitions/compileDefinition@v1", { source, sourceName: "factory.yaml" })).result;
     const plan = (await host.executeAction("definitions/getExecutionPlan@v1", { definitionDigest: revision.definitionDigest, flowId: "issue-triage" })).result;
