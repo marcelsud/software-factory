@@ -164,13 +164,17 @@ export function createDefinitionsImplementation() {
         const db = ctx.db.kysely() as unknown as Kysely<DefinitionsDatabase>;
         const revision = await resolveStoredRevision(db, input.definitionDigest);
         if (revision === null) throw new Error("definition_not_found");
-        await db
-          .insertInto("active_definition")
-          .values({ definition_digest: input.definitionDigest, singleton: 1 })
-          .onConflict((conflict) =>
-            conflict.column("singleton").doUpdateSet({ definition_digest: input.definitionDigest }),
-          )
-          .execute();
+        const updated = await db
+          .updateTable("active_definition")
+          .set({ definition_digest: input.definitionDigest })
+          .where("singleton", "=", 1)
+          .executeTakeFirst();
+        if (updated.numUpdatedRows === 0n) {
+          await db
+            .insertInto("active_definition")
+            .values({ definition_digest: input.definitionDigest, singleton: 1 })
+            .execute();
+        }
         return revision;
       },
       async getActiveDefinition(ctx) {

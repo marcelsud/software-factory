@@ -389,17 +389,21 @@ function admissionScope(
   event: Pick<FactoryEvent, "repository" | "subject">,
 ): string {
   const agent = plan.steps.find((step) => step.agentProfile !== undefined)?.agentProfile ?? "none";
-  const value =
+  const components =
     plan.concurrency.key === "repository"
-      ? event.repository
+      ? [event.repository]
       : plan.concurrency.key === "subject"
-        ? event.subject
+        ? [event.subject]
         : plan.concurrency.key === "flow"
-          ? plan.flowId
+          ? [plan.flowId]
           : plan.concurrency.key === "agent-profile"
-            ? agent
-            : `${event.repository}\0${event.subject}`;
-  return `${plan.concurrency.key}\0${value}`;
+            ? [agent]
+            : [event.repository, event.subject];
+  return `${plan.concurrency.key}:${digestIdentity(
+    "admission-scope",
+    plan.concurrency.key,
+    ...components,
+  )}`;
 }
 
 async function publishProjection(

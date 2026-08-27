@@ -288,6 +288,12 @@ describe("generic runs workflow", () => {
     hosts.splice(hosts.indexOf(host), 1);
     host = await boot(path);
     await host.drain({ maxDurationMs: 5_000 });
+    expect(
+      (await host.executeAction("definitions/getActiveDefinition@v1", {})).result,
+    ).toMatchObject({ definitionDigest: digest });
+    await host.executeAction("definitions/activateDefinition@v1", {
+      definitionDigest: digest,
+    });
     expect(await projection(host, id)).toMatchObject({
       currentAttemptId: before.currentAttemptId,
       stateId: "reproduce",
@@ -521,6 +527,17 @@ describe("generic runs workflow", () => {
     const unrelated = await accept(host, event("92", "issue:other", "other-repository"), digest);
     expect((await projection(host, second)).status).toBe("queued");
     expect((await projection(host, unrelated)).currentAttemptId).toBeDefined();
+    const admissionAudit = (await audit(host, first)).find(
+      (entry) => entry.kind === "admission.granted",
+    );
+    const persistedScope = JSON.parse(admissionAudit?.payloadJson ?? "{}").scope;
+    expect(persistedScope).toBeString();
+    expect(
+      [...String(persistedScope)].every((character) => {
+        const code = character.charCodeAt(0);
+        return code >= 32 && code !== 127;
+      }),
+    ).toBeTrue();
     await host.executeAction("runs/applyOperatorCommandV2@v1", {
       commandId: "pause-queued",
       issuedAt: "2026-01-01T00:59:00Z",
