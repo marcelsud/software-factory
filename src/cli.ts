@@ -57,7 +57,7 @@ import {
   verifyReplayBundle,
   verifyReplayObservation,
 } from "./replay.ts";
-import { executeRunOnce, type RunOnceHost } from "./run-once.ts";
+import { executeRunOnce, type RunOnceHost, runOnceFailureResult } from "./run-once.ts";
 import {
   FakeAgentRuntime,
   FakeGitHubReadTransport,
@@ -443,9 +443,14 @@ async function runOnceCommand(
       ? await (dependencies.readStdin ?? defaultDependencies.readStdin)()
       : await dependencies.readText(eventPath);
   const envelope = parseRunOnceInvocationEnvelope(JSON.parse(source));
-  const prepared = await prepareCheckedDefinition(values.config, dependencies, agentExecutable);
-  if (prepared.compiled.revision.definitionDigest !== envelope.definitionRevision)
-    throw new Error("run_once_invalid: definitionRevision does not match checked configuration");
+  let prepared: PreparedDefinition;
+  try {
+    prepared = await prepareCheckedDefinition(values.config, dependencies, agentExecutable);
+  } catch (error) {
+    const result = runOnceFailureResult(envelope, error, (message) => io.stderr(`${message}\n`));
+    writeRunOnceOutput(result, values.json, io);
+    return result.exitCode;
+  }
   const repositories = githubRepositories(prepared.compiled.definition);
   const composition = repositoryComposition(repositories, values.config);
   const controller = (
@@ -477,16 +482,21 @@ async function runOnceCommand(
       expectedDefinitionRevision: prepared.compiled.revision.definitionDigest,
       maxDurationMs: positiveInteger(values["max-duration-ms"], "--max-duration-ms"),
       maxWork: positiveInteger(values["max-work"], "--max-work"),
+      reportDiagnostic: (message) => io.stderr(`${message}\n`),
     });
   } finally {
     controller.abort();
   }
+  writeRunOnceOutput(result, values.json, io);
+  return result.exitCode;
+}
+
+function writeRunOnceOutput(result: RunOnceResult, json: boolean, io: CliIo): void {
   io.stdout(
-    values.json
+    json
       ? `${canonicalJson(result)}\n`
       : `run-once ${result.resultClass}\nruns: ${result.runIds.join(", ") || "none"}\noutcome: ${result.outcome ?? "none"}\npending: ${result.pending.gates.length} gate, ${result.pending.retries.length} retry, ${result.pending.effects.length} effect\n`,
   );
-  return result.exitCode;
 }
 
 async function replayCommand(

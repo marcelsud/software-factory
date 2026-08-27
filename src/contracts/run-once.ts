@@ -289,6 +289,18 @@ function validatePayloadIdentity(
     invalid("issue_comment payload requires comment");
   if (event.name === "issues" && payload.comment !== undefined)
     invalid("issues payload cannot contain comment");
+  if (event.name === "issues" && (event.action === "labeled" || event.action === "unlabeled")) {
+    const label = strictRecord(payload.label, "payload.label", [
+      "color",
+      "default",
+      "description",
+      "id",
+      "name",
+      "node_id",
+      "url",
+    ]);
+    boundedString(label.name, "payload.label.name", MAX_METADATA_VALUE_LENGTH);
+  }
   isoTimestamp(issue.created_at, "payload.issue.created_at");
   isoTimestamp(issue.updated_at, "payload.issue.updated_at");
   if (event.name === "issue_comment") {

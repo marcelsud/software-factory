@@ -25,6 +25,7 @@ import {
   type RunOnceResult,
 } from "../src/contracts/index.ts";
 import { unavailableGitHubReadTransport } from "../src/modules/intake/implementation.ts";
+import { executeRunOnce, type RunOnceHost } from "../src/run-once.ts";
 import { FakeGitHubReadTransport, MemoryArtifactByteDriver } from "../src/testing/fakes.ts";
 
 const directories: string[] = [];
@@ -54,6 +55,7 @@ interface Scenario {
 }
 
 interface RunOptions {
+  readonly acceptError?: Error;
   readonly acquireDaemonLock?: CliDependencies["acquireDaemonLock"];
   readonly runtime?: AgentRuntime;
   readonly source?: RunOnceInvocationEnvelope["source"];
@@ -322,7 +324,11 @@ async function runOnce(fixture: Scenario, envelope = fixture.envelope, options: 
             await host.close();
           },
           drain: (limits) => host.drain(limits),
-          executeAction: (name, args) => host.executeAction(name, args),
+          executeAction(name, args) {
+            if (name === "intake/acceptSourceEventV2@v1" && options.acceptError !== undefined)
+              throw options.acceptError;
+            return host.executeAction(name, args);
+          },
         };
       },
       readStdin: async () =>
@@ -332,7 +338,13 @@ async function runOnce(fixture: Scenario, envelope = fixture.envelope, options: 
   );
   const json = stdout.find((entry) => entry.startsWith("{"));
   if (json === undefined) throw new Error(stdout.join(""));
-  return { closed, code, opened, result: JSON.parse(json) as RunOnceResult };
+  return {
+    closed,
+    code,
+    diagnostics: stdout.filter((entry) => entry.startsWith("stderr:")),
+    opened,
+    result: JSON.parse(json) as RunOnceResult,
+  };
 }
 
 async function resumeWaiting(fixture: Scenario) {
@@ -373,6 +385,118 @@ async function actionFiles(root = "."): Promise<string[]> {
       files.push(path);
   }
   return files.sort();
+}
+
+interface ScriptedRun {
+  readonly auditSequence: number;
+  readonly currentAttemptId: string | null;
+  readonly currentEffectKey: string | null;
+  readonly currentGateId: string | null;
+  readonly currentGateStatus: string | null;
+  readonly currentStepId: string | null;
+  readonly failureCategory: string | null;
+  readonly flowId: string;
+  readonly outcome: string;
+  readonly runId: string;
+  readonly sourceEvent: { readonly correlationId: string; readonly deliveryId: string } | null;
+  readonly stateId: string;
+  readonly status: string;
+  readonly terminal: boolean;
+}
+
+interface ScriptedRunPage {
+  readonly items: ReadonlyArray<ScriptedRun>;
+  readonly nextCursor: string | null;
+}
+
+function scriptedRun(
+  runId: string,
+  status: "running" | "succeeded" | "waiting",
+  flowId: string,
+  correlated = true,
+): ScriptedRun {
+  return {
+    auditSequence: status === "succeeded" ? 2 : 1,
+    currentAttemptId: null,
+    currentEffectKey: null,
+    currentGateId: status === "waiting" ? "approval" : null,
+    currentGateStatus: status === "waiting" ? "pending" : null,
+    currentStepId: null,
+    failureCategory: null,
+    flowId,
+    outcome: status === "succeeded" ? "completed" : "waiting",
+    runId,
+    sourceEvent: {
+      correlationId: correlated ? "github:example/repo:issue:101" : `github:other/repo:${runId}`,
+      deliveryId: correlated ? "semantic-delivery" : `other:${runId}`,
+    },
+    stateId: status === "waiting" ? "approval" : status,
+    status,
+    terminal: status === "succeeded",
+  };
+}
+
+function scriptedHost(
+  pages: Readonly<Record<string, ScriptedRunPage>>,
+  artifacts: ReadonlyArray<{
+    readonly classification: "private" | "public";
+    readonly digest: string;
+    readonly kind: string;
+    readonly mediaType: string;
+    readonly name: string;
+    readonly runId: string;
+    readonly size: number;
+  }> = [],
+): { readonly calls: string[]; readonly host: RunOnceHost } {
+  const calls: string[] = [];
+  const byId = new Map(
+    Object.values(pages).flatMap((entry) => entry.items.map((run) => [run.runId, run] as const)),
+  );
+  const host: RunOnceHost = {
+    async close() {},
+    async drain() {
+      return { idle: true, stopReason: "idle" };
+    },
+    async executeAction(name, args) {
+      calls.push(name);
+      const input =
+        args !== null && typeof args === "object" && !Array.isArray(args)
+          ? (args as Record<string, unknown>)
+          : {};
+      if (name === "intake/getSourceCursor@v1") return { result: null };
+      if (name === "intake/acceptSourceEventV2@v1") return { result: { idempotent: false } };
+      if (name === "operations/listRunsV2@v1") {
+        const key = typeof input.after === "string" ? input.after : "first";
+        return { result: pages[key] ?? { items: [], nextCursor: null } };
+      }
+      if (name === "runs/getRunV4@v1") return { result: byId.get(String(input.runId)) ?? null };
+      if (name === "operations/showRunV2@v1") return { result: { timeline: [] } };
+      if (name === "runs/getRunAudit@v1") return { result: [] };
+      if (name === "assets/listRunArtifactsV2@v1") return { result: artifacts };
+      if (name === "assets/getPublicArtifactV2@v1")
+        return { result: { contentBase64: Buffer.from("public").toString("base64") } };
+      if (name === "operations/listEffectsV2@v1")
+        return { result: { items: [], nextCursor: null } };
+      throw new Error(`unexpected_action: ${name}`);
+    },
+  };
+  return { calls, host };
+}
+
+async function executeScripted(
+  fixture: Scenario,
+  host: RunOnceHost,
+  artifactExport = join(fixture.directory, "public"),
+) {
+  return await executeRunOnce({
+    activate: async () => undefined,
+    artifactExport,
+    boot: async () => host,
+    envelope: fixture.envelope,
+    expectedDefinitionRevision: fixture.envelope.definitionRevision,
+    maxDurationMs: 1_000,
+    maxWork: 100,
+  });
 }
 
 afterEach(async () => {
@@ -667,5 +791,104 @@ describe("run-once leaf gates", () => {
     expect(factoryConcurrencyKey("example/repo", "issue:101", "once")).toBe(
       "example%2Frepo/issue%3A101/once",
     );
+  });
+
+  test("[R1] mixed succeeded and unfinished matching flows remain resumable", async () => {
+    const fixture = await scenario("completed");
+    const scripted = scriptedHost({
+      first: {
+        items: [
+          scriptedRun("run-succeeded", "succeeded", "flow-a"),
+          scriptedRun("run-running", "running", "flow-b"),
+        ],
+        nextCursor: null,
+      },
+    });
+    const result = await executeScripted(fixture, scripted.host);
+    expect(result.resultClass).toBe("waiting");
+    expect(result.runIds).toEqual(["run-running", "run-succeeded"]);
+  });
+
+  test("[R2] paged lookup finds an older correlated run after 100 unrelated runs", async () => {
+    const fixture = await scenario("completed");
+    const newer = Array.from({ length: 100 }, (_, index) =>
+      scriptedRun(`newer-${index}`, "succeeded", "unrelated", false),
+    );
+    const scripted = scriptedHost({
+      first: { items: newer, nextCursor: "older" },
+      older: {
+        items: [scriptedRun("older-correlated", "waiting", "once")],
+        nextCursor: null,
+      },
+    });
+    const result = await executeScripted(fixture, scripted.host);
+    expect(result.runIds).toEqual(["older-correlated"]);
+    expect(result.resultClass).toBe("waiting");
+    expect(scripted.calls.filter((name) => name === "operations/listRunsV2@v1")).toHaveLength(2);
+  });
+
+  test("[R3] one-shot projection never runs a global rebuild", async () => {
+    const fixture = await scenario("completed");
+    const scripted = scriptedHost({
+      first: {
+        items: [scriptedRun("run-complete", "succeeded", "once")],
+        nextCursor: null,
+      },
+    });
+    await executeScripted(fixture, scripted.host);
+    expect(scripted.calls).not.toContain("operations/rebuildProjections@v1");
+  });
+
+  test("[R4] permanent delivery conflict is terminal and emits only a safe diagnostic", async () => {
+    const fixture = await scenario("completed");
+    const run = await runOnce(fixture, fixture.envelope, {
+      acceptError: new Error("delivery_conflict: secret-token-value"),
+    });
+    expect(run.code).toBe(1);
+    expect(run.result.resultClass).toBe("terminal-failure");
+    expect(run.diagnostics).toEqual(["stderr:run-once: delivery_conflict\n"]);
+    expect(JSON.stringify(run)).not.toContain("secret-token-value");
+  });
+
+  test("[R5] labeled invocation requires a non-empty label name before boot", async () => {
+    const fixture = await scenario("completed");
+    const payload = fixture.envelope.payload;
+    if (payload === null || typeof payload !== "object" || Array.isArray(payload))
+      throw new Error("fixture payload must be an object");
+    const withoutLabel = {
+      ...fixture.envelope,
+      event: { action: "labeled", name: "issues" },
+      payload: { ...payload, action: "labeled" },
+    };
+    expect(() => parseRunOnceInvocationEnvelope(withoutLabel)).toThrow(/payload.label/);
+    expect(() =>
+      parseRunOnceInvocationEnvelope({
+        ...withoutLabel,
+        payload: { ...withoutLabel.payload, label: { name: "" } },
+      }),
+    ).toThrow(/payload.label.name/);
+  });
+
+  test("[R6] failed public artifact export is retryable and omits the reference", async () => {
+    const fixture = await scenario("completed");
+    const blockedExport = join(fixture.directory, "blocked-export");
+    await writeFile(blockedExport, "not a directory");
+    const waiting = scriptedRun("run-waiting-artifact", "waiting", "once");
+    const scripted = scriptedHost({ first: { items: [waiting], nextCursor: null } }, [
+      {
+        classification: "public",
+        digest: "a".repeat(64),
+        kind: "report.md",
+        mediaType: "text/markdown",
+        name: "report.md",
+        runId: waiting.runId,
+        size: 6,
+      },
+    ]);
+    const result = await executeScripted(fixture, scripted.host, blockedExport);
+    expect(result.resultClass).toBe("retryable-infrastructure-failure");
+    expect(result.exitCode).toBe(75);
+    expect(result.artifacts).toEqual([]);
+    expect(result.truncation).toMatchObject({ artifactsOmitted: 1, truncated: true });
   });
 });

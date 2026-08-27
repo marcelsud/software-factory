@@ -38,6 +38,7 @@ export interface RunOnceOptions {
   readonly expectedDefinitionRevision: string;
   readonly maxDurationMs: number;
   readonly maxWork: number;
+  readonly reportDiagnostic?: (message: string) => void;
 }
 
 interface ProjectedRun {
@@ -65,15 +66,21 @@ interface TimelineEntry {
 
 export async function executeRunOnce(options: RunOnceOptions): Promise<RunOnceResult> {
   const envelope = parseRunOnceInvocationEnvelope(options.envelope);
-  if (envelope.definitionRevision !== options.expectedDefinitionRevision)
-    throw new Error("run_once_invalid: definitionRevision does not match checked configuration");
-  positive(options.maxDurationMs, "maxDurationMs");
-  positive(options.maxWork, "maxWork");
-  const source = options.eventSource ?? new GitHubInvocationEventSource();
-  const events = source.normalize(envelope);
+  let events: readonly FactoryEvent[];
+  try {
+    if (envelope.definitionRevision !== options.expectedDefinitionRevision)
+      throw new Error("run_once_invalid: definitionRevision does not match checked configuration");
+    positive(options.maxDurationMs, "maxDurationMs");
+    positive(options.maxWork, "maxWork");
+    const source = options.eventSource ?? new GitHubInvocationEventSource();
+    events = source.normalize(envelope);
+  } catch (error) {
+    return runOnceFailureResult(envelope, error, options.reportDiagnostic);
+  }
   if (events.length === 0) return emptyResult(envelope, "no-match");
 
   let host: RunOnceHost | undefined;
+  let result: RunOnceResult;
   try {
     host = await options.boot();
     await options.activate(host);
@@ -88,12 +95,28 @@ export async function executeRunOnce(options: RunOnceOptions): Promise<RunOnceRe
     } catch {
       // Projection and runs state remain readable when an adapter reports a retryable failure.
     }
-    return await projectResult(host, envelope, options.artifactExport, drainedToIdle);
-  } catch {
-    return emptyResult(envelope, "retryable-infrastructure-failure");
-  } finally {
-    await host?.close();
+    result = await projectResult(host, envelope, options.artifactExport, drainedToIdle);
+  } catch (error) {
+    result = runOnceFailureResult(envelope, error, options.reportDiagnostic);
   }
+  if (host !== undefined) {
+    try {
+      await host.close();
+    } catch (error) {
+      options.reportDiagnostic?.(`run-once: ${safeErrorCode(error)}`);
+      result = emptyResult(envelope, "retryable-infrastructure-failure");
+    }
+  }
+  return result;
+}
+
+export function runOnceFailureResult(
+  envelope: RunOnceInvocationEnvelope,
+  error: unknown,
+  reportDiagnostic?: (message: string) => void,
+): RunOnceResult {
+  reportDiagnostic?.(`run-once: ${safeErrorCode(error)}`);
+  return emptyResult(envelope, failureResultClass(error));
 }
 
 async function acceptEvent(host: RunOnceHost, event: FactoryEvent): Promise<void> {
@@ -107,23 +130,51 @@ async function acceptEvent(host: RunOnceHost, event: FactoryEvent): Promise<void
   });
 }
 
+async function collectMatchingRuns(
+  host: RunOnceHost,
+  envelope: RunOnceInvocationEnvelope,
+): Promise<{ readonly items: ProjectedRun[]; readonly omitted: number }> {
+  const items: ProjectedRun[] = [];
+  const seenCursors = new Set<string>();
+  let after: string | null | undefined;
+  let omitted = 0;
+  while (after !== null) {
+    const page = (
+      await host.executeAction("operations/listRunsV2@v1", {
+        ...(after === undefined ? {} : { after }),
+        limit: RUN_ONCE_MAX_OUTPUT_ITEMS,
+      })
+    ).result as {
+      readonly items: ReadonlyArray<ProjectedRun>;
+      readonly nextCursor: string | null;
+    };
+    for (const run of page.items) {
+      if (
+        run.sourceEvent?.correlationId !== semanticCorrelation(envelope) &&
+        run.sourceEvent?.deliveryId !== envelope.deliveryId
+      )
+        continue;
+      if (items.length < RUN_ONCE_MAX_OUTPUT_ITEMS) items.push(run);
+      else omitted += 1;
+    }
+    if (page.nextCursor !== null) {
+      if (seenCursors.has(page.nextCursor))
+        throw new Error("operations_cursor_conflict: repeated listRuns cursor");
+      seenCursors.add(page.nextCursor);
+    }
+    after = page.nextCursor;
+  }
+  return { items, omitted };
+}
+
 async function projectResult(
   host: RunOnceHost,
   envelope: RunOnceInvocationEnvelope,
   artifactExport: string,
   drainedToIdle: boolean,
 ): Promise<RunOnceResult> {
-  await host.executeAction("operations/rebuildProjections@v1", {});
-  const page = (
-    await host.executeAction("operations/listRunsV2@v1", { limit: RUN_ONCE_MAX_OUTPUT_ITEMS })
-  ).result as { readonly items: readonly ProjectedRun[]; readonly nextCursor: string | null };
-  const projected = page.items
-    .filter(
-      (run) =>
-        run.sourceEvent?.correlationId === semanticCorrelation(envelope) ||
-        run.sourceEvent?.deliveryId === envelope.deliveryId,
-    )
-    .sort((left, right) => left.runId.localeCompare(right.runId));
+  const collection = await collectMatchingRuns(host, envelope);
+  const projected = collection.items.sort((left, right) => left.runId.localeCompare(right.runId));
   const matched = await Promise.all(
     projected.map(async (run) => ({
       ...run,
@@ -227,20 +278,20 @@ async function projectResult(
         artifactsOmitted += 1;
         continue;
       }
-      const reference = `artifact://${artifact.digest}`;
-      artifacts.push({
-        digest: artifact.digest,
-        kind: artifact.kind,
-        mediaType: artifact.mediaType,
-        name: bounded(artifact.name),
-        reference,
-        runId: artifact.runId,
-        size: artifact.size,
-      });
       try {
         await exportPublicArtifact(host, artifact.digest, artifactExport);
+        artifacts.push({
+          digest: artifact.digest,
+          kind: artifact.kind,
+          mediaType: artifact.mediaType,
+          name: bounded(artifact.name),
+          reference: `artifact://${artifact.digest}`,
+          runId: artifact.runId,
+          size: artifact.size,
+        });
       } catch {
         artifactExportFailed = true;
+        artifactsOmitted += 1;
       }
     }
     const effectPage = (
@@ -324,10 +375,10 @@ async function projectResult(
       bytes: 0,
       effectsOmitted,
       receiptsOmitted,
-      runsOmitted: page.nextCursor === null ? 0 : 1,
+      runsOmitted: collection.omitted,
       transitionsOmitted,
       truncated:
-        page.nextCursor !== null ||
+        collection.omitted > 0 ||
         artifactsOmitted + effectsOmitted + receiptsOmitted + transitionsOmitted > 0,
     },
   };
@@ -346,6 +397,7 @@ function classify(
     )
   )
     return "policy-rejection";
+  if (infrastructureFailure) return "retryable-infrastructure-failure";
   if (runs.some((run) => run.status === "retrying")) return "waiting";
   if (runs.some((run) => run.failureCategory !== null && !run.terminal))
     return "retryable-infrastructure-failure";
@@ -359,10 +411,31 @@ function classify(
     )
   )
     return "waiting";
-  if (infrastructureFailure) return "retryable-infrastructure-failure";
   if (runs.every((run) => run.status === "succeeded")) return "completed";
-  if (runs.some((run) => run.terminal)) return "terminal-failure";
+  if (runs.some((run) => run.status === "failed" || run.status === "cancelled"))
+    return "terminal-failure";
   return drainedToIdle ? "waiting" : "retryable-infrastructure-failure";
+}
+
+function failureResultClass(error: unknown): RunOnceResultClass {
+  const message =
+    error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  if (/(?:policy|permission|capability|rejected)/.test(message)) return "policy-rejection";
+  if (
+    /(?:adapter_unavailable|connection|database|econn|infrastructure|postgres|sqlite|storage|timeout|unavailable|worker)/.test(
+      message,
+    )
+  )
+    return "retryable-infrastructure-failure";
+  return "terminal-failure";
+}
+
+function safeErrorCode(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  const normalized = message.toLowerCase();
+  if (normalized.includes("skill digest mismatch")) return "skill_digest_mismatch";
+  if (normalized.includes("definition digest")) return "definition_digest_mismatch";
+  return message.match(/^[A-Za-z][A-Za-z0-9_.-]*/)?.[0] ?? "terminal_failure";
 }
 
 async function exportPublicArtifact(
