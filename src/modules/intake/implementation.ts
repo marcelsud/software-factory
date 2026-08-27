@@ -171,6 +171,10 @@ async function acceptDurably(
         updated_at: event.observedAt,
       })
       .execute();
+  } else {
+    throw new Error(
+      "invalid_source_event: source cursor already exists; use acceptSourceEventV2 with expectedCursor and nextCursor",
+    );
   }
   const accepted = { event, idempotent: false, payloadDigest };
   ctx.publish(intake.events.factoryEventAcceptedV1, event);

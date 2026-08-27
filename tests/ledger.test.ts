@@ -447,6 +447,8 @@ describe("leaf-02 domain ledger", () => {
     expect(accepted.emittedEvents).toHaveLength(2);
     await afterReadCrash.close();
 
+    const legacyFirst = { ...sourceEvent("22"), sourceId: "legacy-source" };
+    const legacySecond = { ...sourceEvent("23"), sourceId: "legacy-source" };
     const afterCommitCrash = await bootSqlite(path);
     try {
       const duplicate = await afterCommitCrash.executeAction(
@@ -462,8 +464,47 @@ describe("leaf-02 domain ledger", () => {
           })
         ).result,
       ).toMatchObject({ cursor: event.sourceRevision });
+      await afterCommitCrash.executeAction("intake/acceptSourceEvent@v1", legacyFirst);
+      await expect(
+        afterCommitCrash.executeAction("intake/acceptSourceEvent@v1", legacySecond),
+      ).rejects.toThrow("use acceptSourceEventV2");
+      expect(
+        (
+          await afterCommitCrash.executeAction("intake/getSourceCursor@v1", {
+            sourceId: legacyFirst.sourceId,
+          })
+        ).result,
+      ).toMatchObject({ cursor: legacyFirst.sourceRevision });
     } finally {
       await afterCommitCrash.close();
+    }
+    const ledgerDatabase = new Database(path, { readonly: true });
+    try {
+      const counts = ledgerDatabase
+        .query<{ dedupe: number; events: number; snapshots: number }, [string]>(`SELECT
+          (SELECT COUNT(*) FROM delivery_deduplication WHERE source_id = ?1) AS dedupe,
+          (SELECT COUNT(*) FROM factory_events WHERE source_id = ?1) AS events,
+          (SELECT COUNT(*) FROM source_payload_snapshots WHERE source_id = ?1) AS snapshots`)
+        .get(legacyFirst.sourceId);
+      expect(counts).toEqual({ dedupe: 1, events: 1, snapshots: 1 });
+    } finally {
+      ledgerDatabase.close();
+    }
+    const legacyAdvance = await bootSqlite(path);
+    try {
+      await legacyAdvance.executeAction(
+        "intake/acceptSourceEventV2@v1",
+        acceptance(legacySecond, legacyFirst.sourceRevision, "legacy-position:23"),
+      );
+      expect(
+        (
+          await legacyAdvance.executeAction("intake/getSourceCursor@v1", {
+            sourceId: legacyFirst.sourceId,
+          })
+        ).result,
+      ).toMatchObject({ cursor: "legacy-position:23" });
+    } finally {
+      await legacyAdvance.close();
     }
     const rollbackProbe = defineChimpbaseModuleInterface({
       name: "rollback-probe",
