@@ -570,10 +570,10 @@ export function createAssetsImplementation(dependencies: AssetsImplementationDep
           .selectAll()
           .where("digest", "=", input.digest)
           .where("run_id", "=", input.runId)
+          .where("attempt_id", "=", input.attemptId)
+          .where("classification", "=", "private")
           .executeTakeFirst();
-        if (source === undefined || source.attempt_id !== input.attemptId)
-          throw new Error("artifact_access_denied");
-        if (source.classification !== "private") throw new Error("artifact_not_publishable");
+        if (source === undefined) throw new Error("artifact_access_denied");
         const raw = await strictBytes(db, byteDriver, source.digest);
         if (raw === null || raw.byteLength !== source.size)
           throw new Error(`artifact_corrupt: ${source.digest}`);

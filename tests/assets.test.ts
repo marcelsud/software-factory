@@ -734,10 +734,14 @@ describe("assets", () => {
     const { host } = await boot();
     try {
       const contentBase64 = bytes.toString("base64");
-      for (const name of ["one.patch", "two.patch"]) {
+      const sources = [
+        { attemptId: "same-bytes-attempt-one", name: "one.patch" },
+        { attemptId: "same-bytes-attempt-two", name: "two.patch" },
+      ];
+      for (const { attemptId, name } of sources) {
         await host.executeAction("assets/storeArtifactV2@v1", {
           artifact: {
-            attemptId: "same-bytes-attempt",
+            attemptId,
             classification: "private",
             createdAt: now,
             digest: value,
@@ -759,6 +763,28 @@ describe("assets", () => {
       ).result as Array<{ digest: string; name: string }>;
       expect(records).toHaveLength(2);
       expect(records.map(({ name }) => name).sort()).toEqual(["one.patch", "two.patch"]);
+      for (const { attemptId } of sources) {
+        const publication = (
+          await host.executeAction("assets/publishArtifactV2@v1", {
+            attemptId,
+            createdAt: now,
+            digest: value,
+            runId: "same-bytes-run",
+          })
+        ).result as {
+          artifact: { attemptId: string; sourceDigest: string };
+        };
+        expect(publication.artifact).toMatchObject({
+          attemptId,
+          sourceDigest: value,
+        });
+      }
+      const allRecords = (
+        await host.executeAction("assets/listRunArtifactsV2@v1", {
+          runId: "same-bytes-run",
+        })
+      ).result as Array<{ classification: string }>;
+      expect(allRecords).toHaveLength(4);
     } finally {
       await host.close();
     }
