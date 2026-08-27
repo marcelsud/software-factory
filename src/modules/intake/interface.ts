@@ -12,10 +12,16 @@ const calls = {
     guarantees: ["acceptance is idempotent by source and delivery identity"],
   },
   acceptSourceEventV2: {
-    input: factoryEvent,
+    input: v.object({
+      event: factoryEvent,
+      expectedCursor: v.string().nullable(),
+      nextCursor: v.string(),
+    }),
     output: acceptedFactoryEvent,
-    errors: ["module_unavailable", "delivery_conflict", "invalid_source_event"],
-    guarantees: ["returns explicit idempotency and payload-digest acceptance metadata"],
+    errors: ["module_unavailable", "cursor_conflict", "delivery_conflict", "invalid_source_event"],
+    guarantees: [
+      "atomically compares the committed cursor and advances to the supplied next position",
+    ],
   },
   getSourceCursor: {
     input: v.object({ sourceId: v.string() }),

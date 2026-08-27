@@ -2348,59 +2348,83 @@
         {
           "errors": [
             "module_unavailable",
+            "cursor_conflict",
             "delivery_conflict",
             "invalid_source_event"
           ],
           "guarantees": [
-            "returns explicit idempotency and payload-digest acceptance metadata"
+            "atomically compares the committed cursor and advances to the supplied next position"
           ],
           "id": "intake/acceptSourceEventV2@v1",
           "inputSchema": {
             "properties": {
-              "actor": {
-                "type": "string"
+              "event": {
+                "properties": {
+                  "actor": {
+                    "type": "string"
+                  },
+                  "correlationId": {
+                    "type": "string"
+                  },
+                  "deliveryId": {
+                    "type": "string"
+                  },
+                  "eventType": {
+                    "type": "string"
+                  },
+                  "observedAt": {
+                    "type": "string"
+                  },
+                  "occurredAt": {
+                    "type": "string"
+                  },
+                  "payload": {},
+                  "repository": {
+                    "type": "string"
+                  },
+                  "sourceId": {
+                    "type": "string"
+                  },
+                  "sourceRevision": {
+                    "type": "string"
+                  },
+                  "subject": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "actor",
+                  "correlationId",
+                  "deliveryId",
+                  "eventType",
+                  "observedAt",
+                  "occurredAt",
+                  "payload",
+                  "repository",
+                  "sourceId",
+                  "sourceRevision",
+                  "subject"
+                ],
+                "type": "object"
               },
-              "correlationId": {
-                "type": "string"
+              "expectedCursor": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               },
-              "deliveryId": {
-                "type": "string"
-              },
-              "eventType": {
-                "type": "string"
-              },
-              "observedAt": {
-                "type": "string"
-              },
-              "occurredAt": {
-                "type": "string"
-              },
-              "payload": {},
-              "repository": {
-                "type": "string"
-              },
-              "sourceId": {
-                "type": "string"
-              },
-              "sourceRevision": {
-                "type": "string"
-              },
-              "subject": {
+              "nextCursor": {
                 "type": "string"
               }
             },
             "required": [
-              "actor",
-              "correlationId",
-              "deliveryId",
-              "eventType",
-              "observedAt",
-              "occurredAt",
-              "payload",
-              "repository",
-              "sourceId",
-              "sourceRevision",
-              "subject"
+              "event",
+              "expectedCursor",
+              "nextCursor"
             ],
             "type": "object"
           },
@@ -4483,6 +4507,7 @@
           "operator_commands",
           "run_audit",
           "run_gates",
+          "run_identities",
           "runs",
           "workflow_signals"
         ],
@@ -6579,50 +6604,73 @@
     {
       "inputSchema": {
         "properties": {
-          "actor": {
-            "type": "string"
+          "event": {
+            "properties": {
+              "actor": {
+                "type": "string"
+              },
+              "correlationId": {
+                "type": "string"
+              },
+              "deliveryId": {
+                "type": "string"
+              },
+              "eventType": {
+                "type": "string"
+              },
+              "observedAt": {
+                "type": "string"
+              },
+              "occurredAt": {
+                "type": "string"
+              },
+              "payload": {},
+              "repository": {
+                "type": "string"
+              },
+              "sourceId": {
+                "type": "string"
+              },
+              "sourceRevision": {
+                "type": "string"
+              },
+              "subject": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "actor",
+              "correlationId",
+              "deliveryId",
+              "eventType",
+              "observedAt",
+              "occurredAt",
+              "payload",
+              "repository",
+              "sourceId",
+              "sourceRevision",
+              "subject"
+            ],
+            "type": "object"
           },
-          "correlationId": {
-            "type": "string"
+          "expectedCursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
-          "deliveryId": {
-            "type": "string"
-          },
-          "eventType": {
-            "type": "string"
-          },
-          "observedAt": {
-            "type": "string"
-          },
-          "occurredAt": {
-            "type": "string"
-          },
-          "payload": {},
-          "repository": {
-            "type": "string"
-          },
-          "sourceId": {
-            "type": "string"
-          },
-          "sourceRevision": {
-            "type": "string"
-          },
-          "subject": {
+          "nextCursor": {
             "type": "string"
           }
         },
         "required": [
-          "actor",
-          "correlationId",
-          "deliveryId",
-          "eventType",
-          "observedAt",
-          "occurredAt",
-          "payload",
-          "repository",
-          "sourceId",
-          "sourceRevision",
-          "subject"
+          "event",
+          "expectedCursor",
+          "nextCursor"
         ],
         "type": "object"
       },

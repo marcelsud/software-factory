@@ -22,6 +22,30 @@ export interface RunRow {
   workflow_version: number;
   workflow_version_digest: string;
 }
+export const RUN_COLUMNS = [
+  "agent_profile_digests_json",
+  "audit_sequence",
+  "current_attempt_id",
+  "current_correlation_token",
+  "current_effect_key",
+  "current_gate_id",
+  "current_gate_status",
+  "current_step_id",
+  "definition_digest",
+  "factory_event_id",
+  "finished_at",
+  "flow_digest",
+  "flow_id",
+  "module_manifest_digest",
+  "run_id",
+  "skill_digests_json",
+  "started_at",
+  "state_id",
+  "status",
+  "workflow_id",
+  "workflow_version",
+  "workflow_version_digest",
+] as const satisfies readonly (keyof RunRow)[];
 
 export interface RunGateRow {
   accepted_json: string;
@@ -49,6 +73,10 @@ export interface RunAuditRow {
   run_id: string;
   sequence: number;
 }
+export interface RunIdentityRow {
+  initial_correlation_json: string;
+  run_id: string;
+}
 
 export interface WorkflowSignalRow {
   correlation_token: string;
@@ -61,6 +89,7 @@ export interface WorkflowSignalRow {
 
 export interface RunsDatabase {
   operator_commands: OperatorCommandRow;
+  run_identities: RunIdentityRow;
   run_audit: RunAuditRow;
   run_gates: RunGateRow;
   runs: RunRow;
@@ -101,6 +130,11 @@ export const runsMigrations = {
     {
       name: "002_audit_and_gates",
       sql: `
+        CREATE TABLE IF NOT EXISTS run_identities (
+          run_id TEXT PRIMARY KEY,
+          initial_correlation_json TEXT NOT NULL,
+          FOREIGN KEY (run_id) REFERENCES runs(run_id)
+        );
         CREATE TABLE IF NOT EXISTS run_gates (
           run_id TEXT NOT NULL,
           gate_id TEXT NOT NULL,
@@ -175,6 +209,14 @@ export const runsMigrations = {
     {
       name: "002_audit_and_gates",
       sql: `
+        ALTER TABLE chimpbase_runs.runs
+          ADD COLUMN IF NOT EXISTS current_step_id TEXT;
+        ALTER TABLE chimpbase_runs.runs
+          DROP COLUMN IF EXISTS initial_correlation_json;
+        CREATE TABLE IF NOT EXISTS chimpbase_runs.run_identities (
+          run_id TEXT PRIMARY KEY REFERENCES chimpbase_runs.runs(run_id),
+          initial_correlation_json TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS chimpbase_runs.run_gates (
           run_id TEXT NOT NULL REFERENCES chimpbase_runs.runs(run_id),
           gate_id TEXT NOT NULL,

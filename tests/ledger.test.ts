@@ -28,6 +28,7 @@ import {
   RESOURCE_OWNERS,
   SQLITE_MODULE_LIMITATIONS,
 } from "../src/contracts/index.ts";
+import { RUN_COLUMNS } from "../src/storage/runs-database.ts";
 
 const factorySource = await readFile(new URL("../factory.yaml", import.meta.url), "utf8");
 const tempDirectories: string[] = [];
@@ -120,6 +121,41 @@ function sourceEvent(id: string, payload: unknown = { action: "opened" }): Facto
     subject: `issue:${id}`,
   };
 }
+function acceptance(
+  event: FactoryEvent,
+  expectedCursor: string | null = null,
+  nextCursor = event.sourceRevision,
+) {
+  return { event, expectedCursor, nextCursor };
+}
+
+function runRequest(
+  plan: ExecutionPlan,
+  id: string,
+  correlation?: {
+    attemptId?: string;
+    correlationToken: string;
+    effectKey?: string;
+    gateId?: string;
+    stepId?: string;
+  },
+) {
+  return {
+    agentProfileDigests: plan.agentProfileDigests,
+    ...(correlation === undefined ? {} : { correlation }),
+    definitionDigest: plan.definitionDigest,
+    factoryEventId: `event:${id}`,
+    flowDigest: plan.flowDigest,
+    flowId: plan.flowId,
+    moduleManifestDigest: `manifest:${id}`,
+    runId: `run:${id}`,
+    skillDigests: plan.skillRevisions,
+    startedAt,
+    workflowId: `workflow:${id}`,
+    workflowVersion: 1,
+    workflowVersionDigest: "workflow:v1",
+  };
+}
 
 async function startRun(
   host: LedgerHost,
@@ -133,23 +169,8 @@ async function startRun(
     stepId?: string;
   },
 ) {
-  return (
-    await host.executeAction("runs/startRunV2@v1", {
-      agentProfileDigests: plan.agentProfileDigests,
-      ...(correlation === undefined ? {} : { correlation }),
-      definitionDigest: plan.definitionDigest,
-      factoryEventId: `event:${id}`,
-      flowDigest: plan.flowDigest,
-      flowId: plan.flowId,
-      moduleManifestDigest: `manifest:${id}`,
-      runId: `run:${id}`,
-      skillDigests: plan.skillRevisions,
-      startedAt,
-      workflowId: `workflow:${id}`,
-      workflowVersion: 1,
-      workflowVersionDigest: "workflow:v1",
-    })
-  ).result as Record<string, unknown>;
+  return (await host.executeAction("runs/startRunV2@v1", runRequest(plan, id, correlation)))
+    .result as Record<string, unknown>;
 }
 
 function attemptRequest(plan: ExecutionPlan, id: string, token: string) {
@@ -178,6 +199,12 @@ function successfulAttempt(attemptId: string) {
       outputArtifactDigests: [],
       summary: "reproduced",
     },
+  };
+}
+function failedAttempt(attemptId: string) {
+  return {
+    ...successfulAttempt(attemptId),
+    outcome: "failed" as const,
   };
 }
 
@@ -255,7 +282,7 @@ describe("leaf-02 domain ledger", () => {
     expect(new Set(allOwnedTables).size).toBe(allOwnedTables.length);
   });
 
-  test("[G3] module SQL cannot access another owner schema", async () => {
+  test("[G3] raw SQL and PostgreSQL migrations reject foreign schemas", async () => {
     const intruder = defineChimpbaseModuleInterface({
       name: "intruder",
       version: 1,
@@ -305,8 +332,10 @@ describe("leaf-02 domain ledger", () => {
   test("[G4] SQLite limitations and PostgreSQL ownership guards are explicit", () => {
     const migrations = composeChimpbaseModuleMigrations(app.modules);
     expect(SQLITE_MODULE_LIMITATIONS).toEqual({
+      kyselyOwnerEnforcement: false,
       physicalOwnerSchemas: false,
-      protection: "logical table ownership plus Chimpbase runtime SQL guards",
+      protection: "generated owner-only database types and trusted-process discipline",
+      rawSqlOwnerEnforcement: true,
     });
     const sqliteDomain = migrations.sqlite.filter((migration) => migration.owner !== undefined);
     expect(sqliteDomain.every((migration) => !migration.sql.includes("CREATE SCHEMA"))).toBe(true);
@@ -319,6 +348,12 @@ describe("leaf-02 domain ledger", () => {
       const schema = `chimpbase_${migration.owner?.replaceAll("-", "_")}`;
       expect(migration.sql).toContain(schema);
     }
+    const runsModule = app.modules.find((module) => module.interface.name === "runs");
+    expect(runsModule).toBeDefined();
+    for (const engine of ["sqlite", "postgres"] as const) {
+      const runsSql = runsModule?.migrations[engine][0]?.sql ?? "";
+      for (const column of RUN_COLUMNS) expect(runsSql).toContain(`${column} `);
+    }
   });
 
   test("[G5] empty and prior-version migrations boot and upgrade", async () => {
@@ -327,6 +362,17 @@ describe("leaf-02 domain ledger", () => {
     const plan = await compilePlan(empty);
     expect(plan.flowId).toBe("issue-triage");
     await empty.close();
+    const emptyDatabase = new Database(emptyPath, { readonly: true });
+    try {
+      const columns = emptyDatabase
+        .query<{ name: string }, []>("PRAGMA table_info(runs)")
+        .all()
+        .map((column) => column.name)
+        .sort();
+      expect(columns).toEqual([...RUN_COLUMNS].sort());
+    } finally {
+      emptyDatabase.close();
+    }
 
     const previousModules = app.modules.map((module) => ({
       ...module,
@@ -394,7 +440,10 @@ describe("leaf-02 domain ledger", () => {
     await before.close();
 
     const afterReadCrash = await bootSqlite(path);
-    const accepted = await afterReadCrash.executeAction("intake/acceptSourceEventV2@v1", event);
+    const accepted = await afterReadCrash.executeAction(
+      "intake/acceptSourceEventV2@v1",
+      acceptance(event),
+    );
     expect(accepted.emittedEvents).toHaveLength(2);
     await afterReadCrash.close();
 
@@ -402,7 +451,7 @@ describe("leaf-02 domain ledger", () => {
     try {
       const duplicate = await afterCommitCrash.executeAction(
         "intake/acceptSourceEventV2@v1",
-        event,
+        acceptance(event),
       );
       expect(duplicate.result).toMatchObject({ idempotent: true });
       expect(duplicate.emittedEvents).toHaveLength(0);
@@ -468,6 +517,24 @@ describe("leaf-02 domain ledger", () => {
       stepId: request.stepId,
     });
     await first.executeAction("execution/requestAttempt@v1", request);
+    await expect(
+      first.executeAction("execution/requestAttempt@v1", {
+        ...request,
+        skillDigests: { ...request.skillDigests, changed: "digest" },
+      }),
+    ).rejects.toThrow("different pins");
+    await expect(
+      first.executeAction("execution/requestAttempt@v1", {
+        ...request,
+        inputArtifactDigests: ["changed"],
+      }),
+    ).rejects.toThrow("different pins");
+    await expect(
+      first.executeAction("execution/requestAttempt@v1", {
+        ...request,
+        startedAt: "2026-01-01T00:00:09Z",
+      }),
+    ).rejects.toThrow("different pins");
     await first.close();
 
     const database = new Database(path);
@@ -524,6 +591,14 @@ describe("leaf-02 domain ledger", () => {
           correlationToken: "stale-gate-token",
         }),
       ).rejects.toThrow("stale or missing gate correlation");
+      await expect(
+        host.executeAction("runs/applyOperatorCommandV2@v1", {
+          commandId: "retry-pending:08",
+          issuedAt: "2026-01-01T00:01:00Z",
+          kind: "retry",
+          runId: "run:08",
+        }),
+      ).rejects.toThrow("retry cannot bypass a pending gate");
       expect(
         (await host.executeAction("runs/getRunV2@v1", { runId: "run:08" })).result,
       ).toMatchObject({ auditSequence: 1, currentGateStatus: "pending" });
@@ -531,11 +606,23 @@ describe("leaf-02 domain ledger", () => {
       const duplicate = await host.executeAction("runs/applyOperatorCommandV2@v1", command);
       expect(first.result).toMatchObject({ auditSequence: 2, currentGateStatus: "approved" });
       expect(duplicate.result).toEqual(first.result);
+      await expect(
+        host.executeAction("runs/applyOperatorCommandV2@v1", {
+          ...command,
+          issuedAt: "2026-01-01T00:09:00Z",
+        }),
+      ).rejects.toThrow("command identity has different fields");
       const intent = effectIntent("08");
       const receipt = await host.executeAction("effects/requestEffectV2@v1", intent);
       const repeated = await host.executeAction("effects/requestEffectV2@v1", intent);
       expect(repeated.result).toEqual(receipt.result);
       expect(repeated.emittedEvents).toHaveLength(0);
+      await expect(
+        host.executeAction("effects/requestEffectV2@v1", {
+          ...intent,
+          requestedAt: "2026-01-01T00:09:00Z",
+        }),
+      ).rejects.toThrow("different intent");
     } finally {
       await host.close();
     }
@@ -546,6 +633,18 @@ describe("leaf-02 domain ledger", () => {
     try {
       const plan = await compilePlan(host);
       const original = await startRun(host, plan, "09");
+      await expect(
+        host.executeAction("runs/startRunV2@v1", {
+          ...runRequest(plan, "09"),
+          moduleManifestDigest: "manifest:changed",
+        }),
+      ).rejects.toThrow("immutable run identity has different pins");
+      await expect(
+        host.executeAction("runs/startRunV2@v1", {
+          ...runRequest(plan, "09-other"),
+          factoryEventId: "event:09",
+        }),
+      ).rejects.toThrow("factory event identity has different pins");
       await compilePlan(host, factorySource.replace("owner: example", "owner: changed"));
       const stored = (await host.executeAction("runs/getRunV2@v1", { runId: "run:09" })).result;
       expect(stored).toMatchObject({
@@ -566,7 +665,7 @@ describe("leaf-02 domain ledger", () => {
     const first = await bootSqlite(path);
     const plan = await compilePlan(first);
     const event = sourceEvent("10");
-    await first.executeAction("intake/acceptSourceEventV2@v1", event);
+    await first.executeAction("intake/acceptSourceEventV2@v1", acceptance(event));
     const request = attemptRequest(plan, "10", "token:10");
     await startRun(first, plan, "10", {
       attemptId: request.attemptId,
@@ -624,8 +723,11 @@ describe("leaf-02 domain ledger", () => {
     try {
       const plan = await compilePlan(host);
       const event = sourceEvent("11");
-      const first = await host.executeAction("intake/acceptSourceEventV2@v1", event);
-      const duplicate = await host.executeAction("intake/acceptSourceEventV2@v1", event);
+      const first = await host.executeAction("intake/acceptSourceEventV2@v1", acceptance(event));
+      const duplicate = await host.executeAction(
+        "intake/acceptSourceEventV2@v1",
+        acceptance(event),
+      );
       expect(first.result).toMatchObject({ idempotent: false });
       expect(duplicate.result).toMatchObject({ idempotent: true });
       expect(first.emittedEvents).toHaveLength(2);
@@ -644,20 +746,26 @@ describe("leaf-02 domain ledger", () => {
     const unread = await bootSqlite(path);
     await unread.close();
     const retry = await bootSqlite(path);
-    await retry.executeAction("intake/acceptSourceEventV2@v1", event);
+    await retry.executeAction("intake/acceptSourceEventV2@v1", acceptance(event));
     await retry.close();
     const overlap = await bootSqlite(path);
     try {
-      const duplicate = await overlap.executeAction("intake/acceptSourceEventV2@v1", {
-        ...event,
-        payload: { issue: 12, labels: ["bug"] },
-      });
+      const duplicate = await overlap.executeAction(
+        "intake/acceptSourceEventV2@v1",
+        acceptance({
+          ...event,
+          payload: { issue: 12, labels: ["bug"] },
+        }),
+      );
       expect(duplicate.result).toMatchObject({ idempotent: true });
       await expect(
-        overlap.executeAction("intake/acceptSourceEventV2@v1", {
-          ...event,
-          payload: { issue: 13 },
-        }),
+        overlap.executeAction(
+          "intake/acceptSourceEventV2@v1",
+          acceptance({
+            ...event,
+            payload: { issue: 13 },
+          }),
+        ),
       ).rejects.toThrow("delivery_conflict");
       expect(
         (
@@ -666,21 +774,49 @@ describe("leaf-02 domain ledger", () => {
           })
         ).result,
       ).toMatchObject({ cursor: event.sourceRevision });
+      const next = sourceEvent("20");
+      await overlap.executeAction(
+        "intake/acceptSourceEventV2@v1",
+        acceptance(next, event.sourceRevision, "position:20"),
+      );
+      const stale = sourceEvent("21");
+      await expect(
+        overlap.executeAction(
+          "intake/acceptSourceEventV2@v1",
+          acceptance(stale, event.sourceRevision, "position:21"),
+        ),
+      ).rejects.toThrow("cursor_conflict");
+      const acceptedAfterRollback = await overlap.executeAction(
+        "intake/acceptSourceEventV2@v1",
+        acceptance(stale, "position:20", "position:21"),
+      );
+      expect(acceptedAfterRollback.result).toMatchObject({ idempotent: false });
+      expect(
+        (
+          await overlap.executeAction("intake/getSourceCursor@v1", {
+            sourceId: event.sourceId,
+          })
+        ).result,
+      ).toMatchObject({ cursor: "position:21" });
     } finally {
       await overlap.close();
     }
   });
 
-  test("[G13] workflow restart resumes once and stale attempt/effect facts cannot mutate runs", async () => {
+  test("[G13] workflow restart resumes once and stale or late facts cannot mutate runs", async () => {
     const path = await newSqlitePath("workflow-restart");
     const first = await bootSqlite(path);
     const plan = await compilePlan(first);
     await startRun(first, plan, "13", {
-      attemptId: "attempt:new",
+      attemptId: "attempt:13",
       correlationToken: "token:new",
       effectKey: "effect-key:new",
       stepId: "reproduce",
     });
+    await first.executeAction(
+      "execution/requestAttempt@v1",
+      attemptRequest(plan, "13", "token:new"),
+    );
     await first.executeAction("effects/requestEffectV2@v1", effectIntent("13", "token:old"));
     await first.close();
 
@@ -694,6 +830,9 @@ describe("leaf-02 domain ledger", () => {
 
     const restarted = await bootSqlite(path);
     try {
+      await restarted.processNextQueueJob();
+      await restarted.processNextQueueJob();
+      await expect(restarted.processNextQueueJob()).rejects.toThrow("effect_adapter_unavailable");
       await restarted.executeAction(injectEffectOutcome.name, {
         externalRevision: "revision:13",
         finishedAt: "2026-01-01T00:03:00Z",
@@ -701,32 +840,43 @@ describe("leaf-02 domain ledger", () => {
         outcome: "applied",
       });
       await restarted.drain({ maxDurationMs: 5_000 });
-      const staleProtected = (
-        await restarted.executeAction("runs/getRunV2@v1", {
-          runId: "run:13",
-        })
-      ).result;
-      expect(staleProtected).toMatchObject({
+      expect(
+        (await restarted.executeAction("runs/getRunV2@v1", { runId: "run:13" })).result,
+      ).toMatchObject({
         auditSequence: 1,
-        currentAttemptId: "attempt:new",
+        currentAttemptId: "attempt:13",
         currentEffectKey: "effect-key:new",
       });
+
       const cancelled = await restarted.executeAction("runs/applyOperatorCommandV2@v1", {
         commandId: "cancel:13",
         issuedAt: "2026-01-01T00:04:00Z",
         kind: "cancel",
         runId: "run:13",
       });
-      expect(cancelled.result).toMatchObject({ status: "cancelled" });
+      expect(cancelled.result).toMatchObject({ auditSequence: 2, status: "cancelled" });
+      expect(cancelled.result).not.toHaveProperty("currentAttemptId");
+      expect(cancelled.result).not.toHaveProperty("currentCorrelationToken");
+      await restarted.executeAction(injectAttemptOutcome.name, successfulAttempt("attempt:13"));
       await restarted.drain({ maxDurationMs: 5_000 });
+      expect(
+        (await restarted.executeAction("runs/getRunV2@v1", { runId: "run:13" })).result,
+      ).toMatchObject({ auditSequence: 2, status: "cancelled" });
     } finally {
       await restarted.close();
     }
   });
 
-  test("[G14] committed effect intent remains pending and recoverable after restart", async () => {
+  test("[G14] pending effect intent retries and rejection finishes its workflow", async () => {
     const path = await newSqlitePath("effect-pending");
     const first = await bootSqlite(path);
+    const plan = await compilePlan(first);
+    const run = await startRun(first, plan, "14", {
+      correlationToken: "token:14",
+      effectKey: "effect-key:14",
+      stepId: "comment",
+    });
+    const workflowId = String(run.workflowId);
     const intent = effectIntent("14");
     const pending = await first.executeAction("effects/requestEffectV2@v1", intent);
     expect(pending.result).toMatchObject({
@@ -734,6 +884,7 @@ describe("leaf-02 domain ledger", () => {
       outcome: "pending",
     });
     await first.close();
+
     const restarted = await bootSqlite(path);
     try {
       const recovered = await restarted.executeAction("effects/requestEffectV2@v1", intent);
@@ -747,11 +898,21 @@ describe("leaf-02 domain ledger", () => {
           })
         ).result,
       ).toMatchObject({ outcome: "pending" });
+      await restarted.processNextQueueJob();
+      await expect(restarted.processNextQueueJob()).rejects.toThrow("effect_adapter_unavailable");
+      expect(
+        (
+          await restarted.executeAction("effects/getReceiptV2@v1", {
+            idempotencyKey: intent.idempotencyKey,
+          })
+        ).result,
+      ).toMatchObject({ outcome: "pending" });
+
       await restarted.executeAction(injectEffectOutcome.name, {
         externalRevision: null,
         finishedAt: "2026-01-01T00:11:00Z",
         idempotencyKey: intent.idempotencyKey,
-        outcome: "ambiguous",
+        outcome: "rejected",
       });
       await restarted.drain({ maxDurationMs: 5_000 });
       expect(
@@ -761,9 +922,26 @@ describe("leaf-02 domain ledger", () => {
             observedAt: "2026-01-01T00:12:00Z",
           })
         ).result,
-      ).toMatchObject({ outcome: "ambiguous" });
+      ).toMatchObject({ outcome: "rejected" });
+      const failed = (await restarted.executeAction("runs/getRunV2@v1", { runId: "run:14" }))
+        .result;
+      expect(failed).toMatchObject({ auditSequence: 2, status: "failed" });
+      expect(failed).not.toHaveProperty("currentEffectKey");
+      expect(failed).not.toHaveProperty("currentCorrelationToken");
     } finally {
       await restarted.close();
+    }
+
+    const persisted = new Database(path, { readonly: true });
+    try {
+      const workflow = persisted
+        .query<{ status: string }, [string]>(
+          "SELECT status FROM _chimpbase_workflow_instances WHERE workflow_id = ?",
+        )
+        .get(workflowId);
+      expect(workflow?.status).toBe("completed");
+    } finally {
+      persisted.close();
     }
   });
 
@@ -821,6 +999,9 @@ describe("leaf-02 domain ledger", () => {
       runId: "run:16-gate",
     });
     expect(paused.result).toMatchObject({ auditSequence: 3, status: "paused" });
+    expect(paused.emittedEvents.map((event) => event.name)).toEqual(
+      expect.arrayContaining(["runs/runStateChanged@v1", "runs/runStateChanged@v2"]),
+    );
     const resumed = await host.executeAction("runs/applyOperatorCommandV2@v1", {
       commandId: "resume:16",
       issuedAt: "2026-01-01T00:03:00Z",
@@ -842,6 +1023,8 @@ describe("leaf-02 domain ledger", () => {
       runId: "run:16-gate",
     });
     expect(cancelled.result).toMatchObject({ auditSequence: 6, status: "cancelled" });
+    expect(cancelled.result).not.toHaveProperty("currentCorrelationToken");
+    expect(cancelled.result).not.toHaveProperty("currentGateId");
     await startRun(host, plan, "16-reject", {
       correlationToken: "reject-token:16",
       gateId: "approve-fix",
@@ -859,7 +1042,36 @@ describe("leaf-02 domain ledger", () => {
       currentGateStatus: "rejected",
       status: "failed",
     });
+    expect(rejected.result).not.toHaveProperty("currentCorrelationToken");
+    expect(rejected.result).not.toHaveProperty("currentGateId");
+    const failureRequest = attemptRequest(plan, "16-failure", "failure-token:16");
+    const failureRun = await startRun(host, plan, "16-failure", {
+      attemptId: failureRequest.attemptId,
+      correlationToken: failureRequest.correlationToken,
+      stepId: failureRequest.stepId,
+    });
+    await host.executeAction("execution/requestAttempt@v1", failureRequest);
+    await host.executeAction(injectAttemptOutcome.name, failedAttempt(failureRequest.attemptId));
+    await host.drain({ maxDurationMs: 5_000 });
+    const attemptFailed = (
+      await host.executeAction("runs/getRunV2@v1", { runId: "run:16-failure" })
+    ).result;
+    expect(attemptFailed).toMatchObject({ auditSequence: 2, status: "failed" });
+    expect(attemptFailed).not.toHaveProperty("currentAttemptId");
+    expect(attemptFailed).not.toHaveProperty("currentCorrelationToken");
+    const failureWorkflowId = String(failureRun.workflowId);
     await host.close();
+    const workflowDatabase = new Database(path, { readonly: true });
+    try {
+      const workflow = workflowDatabase
+        .query<{ status: string }, [string]>(
+          "SELECT status FROM _chimpbase_workflow_instances WHERE workflow_id = ?",
+        )
+        .get(failureWorkflowId);
+      expect(workflow?.status).toBe("completed");
+    } finally {
+      workflowDatabase.close();
+    }
     const restarted = await bootSqlite(path);
     try {
       expect(
@@ -898,7 +1110,7 @@ describe("leaf-02 domain ledger", () => {
       try {
         const plan = await compilePlan(host);
         const event = sourceEvent(mode === "memory" ? "18" : "19");
-        await host.executeAction("intake/acceptSourceEventV2@v1", event);
+        await host.executeAction("intake/acceptSourceEventV2@v1", acceptance(event));
         const id = mode === "memory" ? "18" : "19";
         await startRun(host, plan, id, {
           correlationToken: `token:${id}`,
@@ -921,7 +1133,6 @@ describe("leaf-02 domain ledger", () => {
         });
         const attempt = attemptRequest(plan, id, `token:${id}`);
         await host.executeAction("execution/requestAttempt@v1", attempt);
-        await host.drain({ maxDurationMs: 5_000 });
         expect(
           (
             await host.executeAction("intake/getSourceCursor@v1", {
@@ -969,15 +1180,24 @@ postgres(
     import { createHash } from "node:crypto";
     import { readFile } from "node:fs/promises";
     import { createChimpbase } from "chimpbase/runtime/node";
+    import { Pool } from "pg";
+    import { RUN_COLUMNS } from "./src/storage/runs-database.ts";
     import app from "./chimpbase.app.ts";
     const url = process.env.FACTORY_TEST_POSTGRES_URL;
     const source = await readFile("factory.yaml", "utf8");
     const boot = () => createChimpbase({ app, projectDir: process.cwd(), storage: { engine: "postgres", url } });
     const host = await boot();
+    const inspectionPool = new Pool({ connectionString: url });
+    const columnRows = await inspectionPool.query("SELECT column_name FROM information_schema.columns WHERE table_schema = 'chimpbase_runs' AND table_name = 'runs' ORDER BY column_name");
+    await inspectionPool.end();
+    const postgresColumns = columnRows.rows.map((row) => row.column_name);
+    if (JSON.stringify(postgresColumns) !== JSON.stringify([...RUN_COLUMNS].sort())) {
+      throw new Error("PostgreSQL runs columns do not match RunRow");
+    }
     const revision = (await host.executeAction("definitions/compileDefinition@v1", { source, sourceName: "factory.yaml" })).result;
     const plan = (await host.executeAction("definitions/getExecutionPlan@v1", { definitionDigest: revision.definitionDigest, flowId: "issue-triage" })).result;
     const event = { actor: "postgres", correlationId: "pg-correlation", deliveryId: "pg-delivery", eventType: "issue.opened", observedAt: "2026-01-02T00:00:00Z", occurredAt: "2026-01-02T00:00:00Z", payload: { issue: 1 }, repository: "example/repository", sourceId: "pg-source", sourceRevision: "pg-cursor", subject: "issue:1" };
-    await host.executeAction("intake/acceptSourceEventV2@v1", event);
+    await host.executeAction("intake/acceptSourceEventV2@v1", { event, expectedCursor: null, nextCursor: event.sourceRevision });
     await host.executeAction("runs/startRunV2@v1", { agentProfileDigests: plan.agentProfileDigests, definitionDigest: plan.definitionDigest, factoryEventId: "pg-event", flowDigest: plan.flowDigest, flowId: plan.flowId, moduleManifestDigest: "pg-manifest", runId: "pg-run", skillDigests: plan.skillRevisions, startedAt: "2026-01-02T00:00:00Z", workflowId: "pg-workflow", workflowVersion: 1, workflowVersionDigest: "workflow:v1" });
     const profile = plan.agentProfiles["triage-agent"];
     await host.executeAction("execution/requestAttempt@v1", { agentProfile: profile, attemptId: "pg-attempt", correlationToken: "pg-token", inputArtifactDigests: [], runId: "pg-run", skillDigests: plan.skillRevisions, startedAt: "2026-01-02T00:00:01Z", stepId: "reproduce" });

@@ -43,6 +43,7 @@ export interface RunsDatabase {
   "operator_commands": Record<string, unknown>;
   "run_audit": Record<string, unknown>;
   "run_gates": Record<string, unknown>;
+  "run_identities": Record<string, unknown>;
   "runs": Record<string, unknown>;
   "workflow_signals": Record<string, unknown>;
 }

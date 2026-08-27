@@ -48,10 +48,15 @@ function canonicalJson(value: unknown, ancestors = new Set<object>()): string {
   }
   throw new Error(`invalid_source_event: unsupported payload value ${typeof value}`);
 }
+interface CursorAdvance {
+  expectedCursor: string | null;
+  nextCursor: string;
+}
 
 async function acceptDurably(
   ctx: ChimpbaseModuleContext<IntakeDatabase>,
   input: FactoryEvent,
+  cursorAdvance?: CursorAdvance,
 ): Promise<AcceptedFactoryEvent> {
   const event = factoryEvent.parse(input);
   const payloadJson = canonicalJson(event.payload);
@@ -126,7 +131,38 @@ async function acceptDurably(
     .selectAll()
     .where("source_id", "=", event.sourceId)
     .executeTakeFirst();
-  if (cursor === undefined) {
+  if (cursorAdvance !== undefined) {
+    if ((cursor?.cursor ?? null) !== cursorAdvance.expectedCursor) {
+      throw new Error("cursor_conflict: committed source cursor does not match expected cursor");
+    }
+    if (cursor === undefined) {
+      const inserted = await db
+        .insertInto("source_cursors")
+        .values({
+          cursor: cursorAdvance.nextCursor,
+          source_id: event.sourceId,
+          updated_at: event.observedAt,
+        })
+        .onConflict((conflict) => conflict.column("source_id").doNothing())
+        .executeTakeFirst();
+      if (inserted.numInsertedOrUpdatedRows !== 1n) {
+        throw new Error("cursor_conflict: source cursor changed during acceptance");
+      }
+    } else {
+      const updated = await db
+        .updateTable("source_cursors")
+        .set({
+          cursor: cursorAdvance.nextCursor,
+          updated_at: event.observedAt,
+        })
+        .where("source_id", "=", event.sourceId)
+        .where("cursor", "=", cursorAdvance.expectedCursor ?? "")
+        .executeTakeFirst();
+      if (updated.numUpdatedRows !== 1n) {
+        throw new Error("cursor_conflict: source cursor changed during acceptance");
+      }
+    }
+  } else if (cursor === undefined) {
     await db
       .insertInto("source_cursors")
       .values({
@@ -134,15 +170,6 @@ async function acceptDurably(
         source_id: event.sourceId,
         updated_at: event.observedAt,
       })
-      .execute();
-  } else if (event.observedAt >= cursor.updated_at) {
-    await db
-      .updateTable("source_cursors")
-      .set({
-        cursor: event.sourceRevision,
-        updated_at: event.observedAt,
-      })
-      .where("source_id", "=", event.sourceId)
       .execute();
   }
   const accepted = { event, idempotent: false, payloadDigest };
@@ -184,7 +211,11 @@ export const intakeImplementation = defineChimpbaseModuleImplementation({
       }
     },
     async acceptSourceEventV2(ctx, input) {
-      return await acceptDurably(ctx as unknown as ChimpbaseModuleContext<IntakeDatabase>, input);
+      return await acceptDurably(
+        ctx as unknown as ChimpbaseModuleContext<IntakeDatabase>,
+        input.event,
+        { expectedCursor: input.expectedCursor, nextCursor: input.nextCursor },
+      );
     },
     async getSourceCursor(ctx, input) {
       const db = ctx.db.kysely() as unknown as Kysely<IntakeDatabase>;

@@ -174,7 +174,11 @@ export const executionImplementation = defineChimpbaseModuleImplementation({
           existing.correlation_token !== input.correlationToken ||
           existing.run_id !== input.runId ||
           existing.step_id !== input.stepId ||
-          existing.agent_profile_digest !== input.agentProfile.digest
+          existing.agent_profile_digest !== input.agentProfile.digest ||
+          existing.started_at !== input.startedAt ||
+          existing.input_artifact_digests_json !== JSON.stringify(input.inputArtifactDigests) ||
+          JSON.stringify(Object.entries(JSON.parse(existing.skill_digests_json)).sort()) !==
+            JSON.stringify(Object.entries(input.skillDigests).sort())
         ) {
           throw new Error("attempt_exists: immutable attempt identity has different pins");
         }

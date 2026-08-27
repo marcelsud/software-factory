@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
 import {
   type ChimpbaseModuleInterface,
+  chimpbaseModuleResourcePrefix,
   defineChimpbaseModuleImplementation,
   defineChimpbaseModuleSubscription,
 } from "chimpbase/core";
-import { workflow } from "chimpbase/runtime";
+import { type Infer, workflow } from "chimpbase/runtime";
 import type { Kysely } from "kysely";
 
 import {
@@ -43,6 +44,49 @@ function recordsEqual(left: Record<string, string>, right: Record<string, string
   return (
     JSON.stringify(Object.entries(left).sort()) === JSON.stringify(Object.entries(right).sort())
   );
+}
+
+type StartRunV2Input = Infer<typeof runs.calls.startRunV2.input>;
+
+function isTerminal(status: string): boolean {
+  return status === "succeeded" || status === "failed" || status === "cancelled";
+}
+
+function scopedWorkflowId(workflowId: string): string {
+  const prefix = chimpbaseModuleResourcePrefix("runs", "workflow-instance");
+  return workflowId.startsWith(prefix) ? workflowId : `${prefix}${workflowId}`;
+}
+
+function sameRunIdentity(
+  row: RunRow,
+  input: StartRunV2Input,
+  initialCorrelationJson: string,
+): boolean {
+  return (
+    row.run_id === input.runId &&
+    row.factory_event_id === input.factoryEventId &&
+    row.workflow_id === scopedWorkflowId(input.workflowId) &&
+    row.workflow_version === input.workflowVersion &&
+    row.workflow_version_digest === input.workflowVersionDigest &&
+    row.definition_digest === input.definitionDigest &&
+    row.flow_id === input.flowId &&
+    row.flow_digest === input.flowDigest &&
+    recordsEqual(JSON.parse(row.agent_profile_digests_json), input.agentProfileDigests) &&
+    recordsEqual(JSON.parse(row.skill_digests_json), input.skillDigests) &&
+    row.module_manifest_digest === input.moduleManifestDigest &&
+    row.started_at === input.startedAt &&
+    initialCorrelationJson === JSON.stringify(input.correlation ?? null)
+  );
+}
+
+async function loadInitialCorrelation(db: Kysely<RunsDatabase>, runId: string): Promise<string> {
+  const identity = await db
+    .selectFrom("run_identities")
+    .select("initial_correlation_json")
+    .where("run_id", "=", runId)
+    .executeTakeFirst();
+  if (identity === undefined) throw new Error("run_exists: immutable run identity is missing");
+  return identity.initial_correlation_json;
 }
 
 function runFromRow(row: RunRow): RunV2 {
@@ -184,6 +228,7 @@ const attemptFinishedSubscription = defineChimpbaseModuleSubscription(
       .executeTakeFirst();
     if (
       row === undefined ||
+      isTerminal(row.status) ||
       row.current_attempt_id !== outcome.attemptId ||
       row.current_correlation_token !== outcome.correlationToken
     )
@@ -197,6 +242,11 @@ const attemptFinishedSubscription = defineChimpbaseModuleSubscription(
       outcome,
       {
         current_attempt_id: null,
+        current_correlation_token: failed ? null : row.current_correlation_token,
+        current_effect_key: failed ? null : row.current_effect_key,
+        current_gate_id: failed ? null : row.current_gate_id,
+        current_gate_status: failed ? null : row.current_gate_status,
+        current_step_id: failed ? null : row.current_step_id,
         finished_at: failed ? outcome.finishedAt : row.finished_at,
         status: failed ? "failed" : "running",
       },
@@ -205,6 +255,7 @@ const attemptFinishedSubscription = defineChimpbaseModuleSubscription(
     ctx.publish(runs.events.runStateChangedV1, runV1FromV2(projection));
     ctx.publish(runs.events.runStateChangedV2, projection);
     if (failed) {
+      await ctx.workflow.signal(row.workflow_id, "finish", {});
       ctx.publish(runs.events.runFinishedV1, finishedV1FromV2(projection));
       ctx.publish(runs.events.runFinishedV2, finishedFromRun(projection));
     }
@@ -224,6 +275,7 @@ const effectFinishedSubscription = defineChimpbaseModuleSubscription(
       .executeTakeFirst();
     if (
       row === undefined ||
+      isTerminal(row.status) ||
       row.current_effect_key !== outcome.idempotencyKey ||
       row.current_correlation_token !== outcome.correlationToken
     )
@@ -236,7 +288,12 @@ const effectFinishedSubscription = defineChimpbaseModuleSubscription(
       outcome.finishedAt,
       outcome,
       {
+        current_attempt_id: failed ? null : row.current_attempt_id,
+        current_correlation_token: failed ? null : row.current_correlation_token,
         current_effect_key: outcome.outcome === "ambiguous" ? row.current_effect_key : null,
+        current_gate_id: failed ? null : row.current_gate_id,
+        current_gate_status: failed ? null : row.current_gate_status,
+        current_step_id: failed ? null : row.current_step_id,
         finished_at: failed ? outcome.finishedAt : row.finished_at,
         status: failed ? "failed" : outcome.outcome === "ambiguous" ? "waiting" : "running",
       },
@@ -245,6 +302,7 @@ const effectFinishedSubscription = defineChimpbaseModuleSubscription(
     ctx.publish(runs.events.runStateChangedV1, runV1FromV2(projection));
     ctx.publish(runs.events.runStateChangedV2, projection);
     if (failed) {
+      await ctx.workflow.signal(row.workflow_id, "finish", {});
       ctx.publish(runs.events.runFinishedV1, finishedV1FromV2(projection));
       ctx.publish(runs.events.runFinishedV2, finishedFromRun(projection));
     }
@@ -259,7 +317,14 @@ export const runsImplementation = defineChimpbaseModuleImplementation({
   subscriptions: [attemptFinishedSubscription, effectFinishedSubscription],
   resources: {
     collections: ["operator-commands", "run-gates", "runs", "workflow-signals"],
-    tables: ["operator_commands", "run_audit", "run_gates", "runs", "workflow_signals"],
+    tables: [
+      "operator_commands",
+      "run_audit",
+      "run_gates",
+      "run_identities",
+      "runs",
+      "workflow_signals",
+    ],
     workflows: ["factory-runs"],
   },
   calls: {
@@ -278,13 +343,29 @@ export const runsImplementation = defineChimpbaseModuleImplementation({
         .selectAll()
         .where("run_id", "=", input.runId)
         .executeTakeFirst();
-      if (existing !== undefined) return runFromRow(existing);
+      if (existing !== undefined) {
+        if (!sameRunIdentity(existing, input, await loadInitialCorrelation(db, existing.run_id))) {
+          throw new Error("run_exists: immutable run identity has different pins");
+        }
+        return runFromRow(existing);
+      }
       const existingEvent = await db
         .selectFrom("runs")
         .selectAll()
         .where("factory_event_id", "=", input.factoryEventId)
         .executeTakeFirst();
-      if (existingEvent !== undefined) return runFromRow(existingEvent);
+      if (existingEvent !== undefined) {
+        if (
+          !sameRunIdentity(
+            existingEvent,
+            input,
+            await loadInitialCorrelation(db, existingEvent.run_id),
+          )
+        ) {
+          throw new Error("run_exists: factory event identity has different pins");
+        }
+        return runFromRow(existingEvent);
+      }
       if (input.workflowVersion !== factoryRunWorkflow.definition.version) {
         throw new Error("invalid_revision_pin: unsupported workflow version");
       }
@@ -340,6 +421,13 @@ export const runsImplementation = defineChimpbaseModuleImplementation({
         workflow_version_digest: input.workflowVersionDigest,
       };
       await db.insertInto("runs").values(row).execute();
+      await db
+        .insertInto("run_identities")
+        .values({
+          initial_correlation_json: JSON.stringify(input.correlation ?? null),
+          run_id: input.runId,
+        })
+        .execute();
       await db
         .insertInto("run_audit")
         .values({
@@ -411,12 +499,16 @@ export const runsImplementation = defineChimpbaseModuleImplementation({
       if (row === undefined) throw new Error("run_not_found");
       const duplicate = await db
         .selectFrom("operator_commands")
-        .select("command_id")
+        .select(["command_json", "run_id"])
         .where("command_id", "=", input.commandId)
         .executeTakeFirst();
-      if (duplicate !== undefined) return runFromRow(row);
-      const terminal = ["succeeded", "failed", "cancelled"].includes(row.status);
-      if (terminal) throw new Error("command_not_allowed: run is terminal");
+      if (duplicate !== undefined) {
+        if (duplicate.command_json !== JSON.stringify(input) || duplicate.run_id !== input.runId) {
+          throw new Error("command_not_allowed: command identity has different fields");
+        }
+        return runFromRow(row);
+      }
+      if (isTerminal(row.status)) throw new Error("command_not_allowed: run is terminal");
 
       let patch: Partial<RunRow>;
       if (input.kind === "pause") {
@@ -426,8 +518,20 @@ export const runsImplementation = defineChimpbaseModuleImplementation({
         if (row.status !== "paused") throw new Error("command_not_allowed: run is not paused");
         patch = { status: row.current_gate_status === "pending" ? "waiting" : "running" };
       } else if (input.kind === "cancel") {
-        patch = { finished_at: input.issuedAt, status: "cancelled" };
+        patch = {
+          current_attempt_id: null,
+          current_correlation_token: null,
+          current_effect_key: null,
+          current_gate_id: null,
+          current_gate_status: null,
+          current_step_id: null,
+          finished_at: input.issuedAt,
+          status: "cancelled",
+        };
       } else if (input.kind === "retry") {
+        if (row.current_gate_status === "pending") {
+          throw new Error("command_not_allowed: retry cannot bypass a pending gate");
+        }
         const token = createHash("sha256")
           .update(`${row.current_correlation_token ?? row.run_id}\0${input.commandId}`)
           .digest("hex");
@@ -465,7 +569,16 @@ export const runsImplementation = defineChimpbaseModuleImplementation({
         patch =
           input.kind === "approve"
             ? { current_gate_status: "approved", status: "running" }
-            : { current_gate_status: "rejected", finished_at: input.issuedAt, status: "failed" };
+            : {
+                current_attempt_id: null,
+                current_correlation_token: null,
+                current_effect_key: null,
+                current_gate_id: null,
+                current_gate_status: "rejected",
+                current_step_id: null,
+                finished_at: input.issuedAt,
+                status: "failed",
+              };
       }
       await db
         .insertInto("operator_commands")
@@ -497,14 +610,12 @@ export const runsImplementation = defineChimpbaseModuleImplementation({
         patch,
       );
       const projection = runFromRow(updated);
-      if (["cancelled", "failed"].includes(projection.status)) {
+      if (isTerminal(projection.status)) {
         await ctx.workflow.signal(row.workflow_id, "finish", {});
       }
-      if (projection.status !== "paused") {
-        ctx.publish(runs.events.runStateChangedV1, runV1FromV2(projection));
-      }
+      ctx.publish(runs.events.runStateChangedV1, runV1FromV2(projection));
       ctx.publish(runs.events.runStateChangedV2, projection);
-      if (["cancelled", "failed"].includes(projection.status)) {
+      if (isTerminal(projection.status)) {
         ctx.publish(runs.events.runFinishedV1, finishedV1FromV2(projection));
         ctx.publish(runs.events.runFinishedV2, finishedFromRun(projection));
       }

@@ -83,7 +83,8 @@ async function requestDurably(
       existingIntent.capability === input.capability &&
       existingIntent.target === input.target &&
       existingIntent.expected_external_revision === input.expectedExternalRevision &&
-      existingIntent.payload_digest === input.payloadDigest;
+      existingIntent.payload_digest === input.payloadDigest &&
+      existingIntent.requested_at === input.requestedAt;
     if (!same) throw new Error("effect_forbidden: idempotency key already has a different intent");
     const receipt = await loadReceipt(db, input.idempotencyKey);
     if (receipt === null) throw new Error("receipt_not_found");
@@ -208,7 +209,14 @@ export const recordEffectOutcome = action({
 const effectWorker = worker(
   "effect-workers",
   async (ctx, payload: { idempotencyKey: string; outcome?: EffectOutcome }) => {
-    if (payload.outcome !== undefined) await ctx.action(recordEffectOutcome, payload.outcome);
+    if (payload.outcome === undefined) {
+      const receipt = await loadReceipt(ctx.db.kysely<EffectsDatabase>(), payload.idempotencyKey);
+      if (receipt !== null && receipt.outcome !== "pending") return;
+      throw new Error(
+        `effect_adapter_unavailable: no trusted adapter configured for ${payload.idempotencyKey}`,
+      );
+    }
+    await ctx.action(recordEffectOutcome, payload.outcome);
   },
 );
 

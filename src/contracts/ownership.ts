@@ -23,8 +23,10 @@ export const MODULE_DEPENDENCIES = {
 
 export type ModuleName = keyof typeof MODULE_DEPENDENCIES;
 export const SQLITE_MODULE_LIMITATIONS = {
+  kyselyOwnerEnforcement: false,
   physicalOwnerSchemas: false,
-  protection: "logical table ownership plus Chimpbase runtime SQL guards",
+  protection: "generated owner-only database types and trusted-process discipline",
+  rawSqlOwnerEnforcement: true,
 } as const;
 
 export const MODULE_RESOURCES = {
@@ -78,7 +80,14 @@ export const MODULE_RESOURCES = {
   },
   runs: {
     collections: ["operator-commands", "run-gates", "runs", "workflow-signals"],
-    tables: ["operator_commands", "run_audit", "run_gates", "runs", "workflow_signals"],
+    tables: [
+      "operator_commands",
+      "run_audit",
+      "run_gates",
+      "run_identities",
+      "runs",
+      "workflow_signals",
+    ],
     workflows: ["factory-runs"],
   },
 } as const;
@@ -141,6 +150,7 @@ export const RESOURCE_OWNERS = {
   "repository-poll-crons": "intake",
   run_audit: "runs",
   run_gates: "runs",
+  run_identities: "runs",
   "run-gates": "runs",
   "run-projections": "operations",
   runs: "runs",
