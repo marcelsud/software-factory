@@ -606,6 +606,10 @@ describe("generic runs workflow", () => {
       "      - { from: reproduce, to: diagnose, on: reproduced }\n",
       "      - { from: reproduce, to: diagnose, on: reproduced, mode: signal }\n",
     );
+    const immediateFromGate = source.replace(
+      "      - { from: approve, to: fix, on: operator.approve, mode: signal }\n",
+      "      - { from: approve, to: fix, on: operator.approve }\n",
+    );
     const secondProfile = source
       .replace(
         "\nflows:\n",
@@ -618,6 +622,7 @@ describe("generic runs workflow", () => {
       );
     expect(diagnosticCode(duplicateGitHub)).toBe("ambiguous_source_identity");
     expect(diagnosticCode(signalFromStep)).toBe("invalid_signal_transition");
+    expect(diagnosticCode(immediateFromGate)).toBe("invalid_gate_transition_mode");
     expect(diagnosticCode(secondProfile)).toBe("ambiguous_agent_profile_scope");
   });
 

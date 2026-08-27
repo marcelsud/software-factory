@@ -1261,6 +1261,14 @@ function validateDefinition(definition: FactoryDefinition): void {
         );
       }
       if (fromState?.gate !== undefined) {
+        if (transition.mode !== "signal") {
+          fail(
+            `${path}.transitions[${index}].mode`,
+            "gate transition must declare signal mode",
+            "set mode: signal on every transition from a gate-backed state",
+            "invalid_gate_transition_mode",
+          );
+        }
         const gate = flow.gates.find((entry) => entry.id === fromState.gate);
         if (gate !== undefined && !gate.accepted.includes(transition.on)) {
           fail(
