@@ -18,20 +18,29 @@ definitions v1
 effects v1
   depends: assets, definitions
   call: effects/getReceipt@v1
+  call: effects/getReceiptV2@v1
   call: effects/reconcileEffect@v1
+  call: effects/reconcileEffectV2@v1
   call: effects/requestEffect@v1
+  call: effects/requestEffectV2@v1
   event: effects/effectFinished@v1
+  event: effects/effectFinished@v2
+  event: effects/effectQueued@v1
 execution v1
   depends: assets
   call: execution/getAttempt@v1
+  call: execution/getAttemptV2@v1
   call: execution/requestAttempt@v1
   event: execution/attemptFinished@v1
+  event: execution/attemptQueued@v1
 intake v1
   depends: definitions
   call: intake/acceptSourceEvent@v1
+  call: intake/acceptSourceEventV2@v1
   call: intake/getSourceCursor@v1
   call: intake/pollRepository@v1
   event: intake/factoryEventAccepted@v1
+  event: intake/factoryEventAccepted@v2
 operations v1
   depends: assets, definitions, effects, execution, intake, runs
   call: operations/getHealth@v1
@@ -42,9 +51,17 @@ operations v1
 runs v1
   depends: assets, definitions, effects, execution
   call: runs/applyOperatorCommand@v1
+  call: runs/applyOperatorCommandV2@v1
   call: runs/getRun@v1
+  call: runs/getRunV2@v1
   call: runs/startRun@v1
+  call: runs/startRunV2@v1
   event: runs/effectRequested@v1
+  event: runs/effectRequested@v2
   event: runs/runFinished@v1
+  event: runs/runFinished@v2
   event: runs/runStateChanged@v1
+  event: runs/runStateChanged@v2
   event: runs/stepRequested@v1
+  consumes: execution/attemptFinished@v1 as record-attempt-outcome
+  consumes: effects/effectFinished@v2 as record-effect-outcome

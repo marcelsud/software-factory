@@ -103,6 +103,12 @@ export const factoryEvent = v.object({
   subject: v.string(),
 });
 
+export const acceptedFactoryEvent = v.object({
+  event: factoryEvent,
+  idempotent: v.boolean(),
+  payloadDigest: digest,
+});
+
 export const sourceCursor = v
   .object({
     cursor: v.string(),
@@ -144,6 +150,26 @@ export const stepAttempt = v.object({
   stepId: identifier,
 });
 
+export const stepAttemptV2 = v.object({
+  agentProfileDigest: digest,
+  attemptId: identifier,
+  correlationToken: identifier,
+  finishedAt: isoTimestamp.optional(),
+  outcome: v.enum(["pending", "succeeded", "failed"]),
+  result: stepResultDocument.optional(),
+  runId: identifier,
+  startedAt: isoTimestamp,
+  stepId: identifier,
+  workspaceStatus: v.enum(["queued", "ready", "finished"]),
+});
+
+export const attemptOutcome = v.object({
+  attemptId: identifier,
+  finishedAt: isoTimestamp,
+  outcome: v.enum(["succeeded", "failed"]),
+  result: stepResultDocument,
+});
+
 export const attemptFinished = v.object({
   agentProfileDigest: digest,
   attemptId: identifier,
@@ -167,7 +193,30 @@ export const effectIntent = v.object({
   target: v.string(),
 });
 
+export const effectIntentV2 = v.object({
+  capability: v.string(),
+  correlationToken: identifier,
+  expectedExternalRevision: v.string().nullable(),
+  idempotencyKey: identifier,
+  payloadDigest: digest,
+  provenance: v.string(),
+  requestedAt: isoTimestamp,
+  runId: identifier,
+  target: v.string(),
+});
+
 export const effectReceipt = v.object({
+  effectId: identifier,
+  externalRevision: v.string().nullable(),
+  finishedAt: isoTimestamp.optional(),
+  idempotencyKey: identifier,
+  outcome: v.enum(["pending", "applied", "rejected", "ambiguous"]),
+  recordedAt: isoTimestamp,
+  runId: identifier,
+});
+
+export const effectReceiptV2 = v.object({
+  correlationToken: identifier,
   effectId: identifier,
   externalRevision: v.string().nullable(),
   finishedAt: isoTimestamp.optional(),
@@ -187,6 +236,24 @@ export const effectFinished = v.object({
   runId: identifier,
 });
 
+export const effectFinishedV2 = v.object({
+  correlationToken: identifier,
+  effectId: identifier,
+  externalRevision: v.string().nullable(),
+  finishedAt: isoTimestamp,
+  idempotencyKey: identifier,
+  outcome: v.enum(["applied", "rejected", "ambiguous"]),
+  recordedAt: isoTimestamp,
+  runId: identifier,
+});
+
+export const effectOutcome = v.object({
+  externalRevision: v.string().nullable(),
+  finishedAt: isoTimestamp,
+  idempotencyKey: identifier,
+  outcome: v.enum(["applied", "rejected", "ambiguous"]),
+});
+
 export const run = v.object({
   agentProfileDigests: v.record(digest),
   definitionDigest: digest,
@@ -200,6 +267,31 @@ export const run = v.object({
   startedAt: isoTimestamp,
   stateId: identifier,
   status: v.enum(["running", "waiting", "succeeded", "failed", "cancelled"]),
+  workflowVersionDigest: digest,
+});
+
+export const runV2 = v.object({
+  agentProfileDigests: v.record(digest),
+  auditSequence: v.integer(),
+  currentAttemptId: identifier.optional(),
+  currentCorrelationToken: identifier.optional(),
+  currentEffectKey: identifier.optional(),
+  currentGateId: identifier.optional(),
+  currentGateStatus: v.enum(["pending", "approved", "rejected"]).optional(),
+  currentStepId: identifier.optional(),
+  definitionDigest: digest,
+  finishedAt: isoTimestamp.optional(),
+  factoryEventId: identifier,
+  flowDigest: digest,
+  flowId: identifier,
+  moduleManifestDigest: digest,
+  runId: identifier,
+  skillDigests: v.record(digest),
+  startedAt: isoTimestamp,
+  stateId: identifier,
+  status: v.enum(["running", "waiting", "paused", "succeeded", "failed", "cancelled"]),
+  workflowId: identifier,
+  workflowVersion: v.integer(),
   workflowVersionDigest: digest,
 });
 
@@ -219,10 +311,38 @@ export const runFinished = v.object({
   workflowVersionDigest: digest,
 });
 
+export const runFinishedV2 = v.object({
+  agentProfileDigests: v.record(digest),
+  auditSequence: v.integer(),
+  definitionDigest: digest,
+  factoryEventId: identifier,
+  finishedAt: isoTimestamp,
+  flowDigest: digest,
+  flowId: identifier,
+  moduleManifestDigest: digest,
+  runId: identifier,
+  skillDigests: v.record(digest),
+  startedAt: isoTimestamp,
+  stateId: identifier,
+  status: v.enum(["succeeded", "failed", "cancelled"]),
+  workflowId: identifier,
+  workflowVersion: v.integer(),
+  workflowVersionDigest: digest,
+});
+
 export const operatorCommand = v.object({
   commandId: identifier,
   issuedAt: isoTimestamp,
   kind: v.enum(["approve", "reject", "cancel", "retry"]),
+  runId: identifier,
+});
+
+export const operatorCommandV2 = v.object({
+  commandId: identifier,
+  correlationToken: identifier.optional(),
+  gateId: identifier.optional(),
+  issuedAt: isoTimestamp,
+  kind: v.enum(["approve", "reject", "cancel", "retry", "pause", "resume"]),
   runId: identifier,
 });
 
@@ -245,9 +365,18 @@ export type FactoryEvent = Infer<typeof factoryEvent>;
 export type Artifact = Infer<typeof artifact>;
 export type StepResultDocument = Infer<typeof stepResultDocument>;
 export type StepAttempt = Infer<typeof stepAttempt>;
+export type StepAttemptV2 = Infer<typeof stepAttemptV2>;
 export type AttemptFinished = Infer<typeof attemptFinished>;
 export type EffectIntent = Infer<typeof effectIntent>;
+export type EffectIntentV2 = Infer<typeof effectIntentV2>;
 export type EffectReceipt = Infer<typeof effectReceipt>;
+export type EffectReceiptV2 = Infer<typeof effectReceiptV2>;
 export type EffectFinished = Infer<typeof effectFinished>;
+export type EffectFinishedV2 = Infer<typeof effectFinishedV2>;
 export type Run = Infer<typeof run>;
+export type RunV2 = Infer<typeof runV2>;
 export type RunFinished = Infer<typeof runFinished>;
+export type RunFinishedV2 = Infer<typeof runFinishedV2>;
+export type AcceptedFactoryEvent = Infer<typeof acceptedFactoryEvent>;
+export type AttemptOutcome = Infer<typeof attemptOutcome>;
+export type EffectOutcome = Infer<typeof effectOutcome>;

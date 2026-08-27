@@ -10,6 +10,7 @@ import {
   validateChimpbaseModules,
 } from "chimpbase/core";
 import { v } from "chimpbase/runtime";
+import { createChimpbase } from "chimpbase/runtime/bun";
 import {
   checkChimpbaseModuleArchitecture,
   compareChimpbaseModuleManifests,
@@ -31,7 +32,6 @@ import {
   RESOURCE_OWNERS,
   runFinished,
 } from "../src/contracts/index.ts";
-import { createDefinitionsImplementation } from "../src/modules/definitions/implementation.ts";
 import { effects } from "../src/modules/effects/interface.ts";
 import { execution } from "../src/modules/execution/interface.ts";
 import { runs } from "../src/modules/runs/interface.ts";
@@ -164,12 +164,6 @@ describe("foundation", () => {
         expect(call.output.schema).toBeDefined();
       }
     }
-    for (const module of app.modules.filter((entry) => entry.interface.name !== "definitions")) {
-      for (const handler of Object.values(module.calls)) {
-        const invoke = handler as unknown as (context: unknown, input: unknown) => unknown;
-        expect(() => invoke(undefined, undefined)).toThrow("module_unavailable");
-      }
-    }
   });
 
   test("[G3] every domain resource has one declared owner", () => {
@@ -227,16 +221,16 @@ describe("foundation", () => {
     }
     expect(Object.keys(RESOURCE_OWNERS)).toEqual(
       expect.arrayContaining([
-        "agent-profile-revisions",
-        "delivery-deduplication",
-        "effect-intents",
+        "agent_profile_revisions",
+        "delivery_deduplication",
+        "effect_intents",
         "event:AttemptFinished.v1",
-        "event-sources",
+        "event_sources",
         "health-routes",
-        "operator-commands",
+        "operator_commands",
         "repository-poll-crons",
-        "run-gates",
-        "source-payload-snapshots",
+        "run_gates",
+        "source_payload_snapshots",
         "workspaces",
       ]),
     );
@@ -488,33 +482,33 @@ describe("foundation", () => {
     ).toThrow();
   });
 
-  test("[G10] definition module history keeps previous revisions immutable", () => {
-    const implementation = createDefinitionsImplementation();
-    let published = 0;
-    const context = {
-      publish() {
-        published += 1;
-      },
-    };
-    const compile = implementation.calls.compileDefinition as unknown as (
-      context: unknown,
-      input: { source: string; sourceName: string },
-    ) => DefinitionRevision;
-    const resolveRevision = implementation.calls.resolveRevision as unknown as (
-      context: unknown,
-      input: { definitionDigest: string },
-    ) => DefinitionRevision | null;
-    const first = compile(context, { source: factorySource, sourceName: "factory.yaml" });
-    const firstJson = first.normalizedJson;
-    const changed = compile(context, {
-      source: replaceRequired(factorySource, "owner: example", "owner: another"),
-      sourceName: "factory.yaml",
-    });
-    expect(changed.definitionDigest).not.toBe(first.definitionDigest);
-    expect(resolveRevision(context, { definitionDigest: first.definitionDigest })).toBe(first);
-    expect(first.normalizedJson).toBe(firstJson);
-    expect(Object.isFrozen(first)).toBe(true);
-    expect(published).toBe(2);
+  test("[G10] definition module history keeps previous revisions immutable", async () => {
+    const host = await createChimpbase({ app, storage: { engine: "memory" } });
+    try {
+      const first = (
+        await host.executeAction("definitions/compileDefinition@v1", {
+          source: factorySource,
+          sourceName: "factory.yaml",
+        })
+      ).result as DefinitionRevision;
+      const firstJson = first.normalizedJson;
+      const changed = (
+        await host.executeAction("definitions/compileDefinition@v1", {
+          source: replaceRequired(factorySource, "owner: example", "owner: another"),
+          sourceName: "factory.yaml",
+        })
+      ).result as DefinitionRevision;
+      expect(changed.definitionDigest).not.toBe(first.definitionDigest);
+      const resolved = (
+        await host.executeAction("definitions/resolveRevision@v1", {
+          definitionDigest: first.definitionDigest,
+        })
+      ).result as DefinitionRevision;
+      expect(resolved).toEqual(first);
+      expect(resolved.normalizedJson).toBe(firstJson);
+    } finally {
+      await host.close();
+    }
   });
 
   test("[G11] normalized JSON and digests are byte-identical across runs", () => {

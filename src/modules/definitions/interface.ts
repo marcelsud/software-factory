@@ -2,35 +2,39 @@ import { defineChimpbaseModuleInterface } from "chimpbase/core";
 import { v } from "chimpbase/runtime";
 
 import { definitionRevision, executionPlan } from "../../contracts/index.ts";
+import type { DefinitionsDatabase } from "../../storage/definitions-database.ts";
 
-export const definitions = defineChimpbaseModuleInterface({
-  name: "definitions",
-  version: 1,
-  calls: {
-    compileDefinition: {
-      input: v.object({ source: v.string(), sourceName: v.string() }),
-      output: definitionRevision,
-      errors: ["invalid_definition"],
-      guarantees: ["returns a byte-stable immutable revision for equivalent input"],
-    },
-    resolveRevision: {
-      input: v.object({ definitionDigest: v.string() }),
-      output: definitionRevision.nullable(),
-      errors: [],
-      guarantees: ["never mutates a published revision"],
-    },
-    getExecutionPlan: {
-      input: v.object({ definitionDigest: v.string(), flowId: v.string() }),
-      output: executionPlan.nullable(),
-      errors: [],
-      guarantees: ["returns the plan pinned to the requested definition and flow digests"],
-    },
+const calls = {
+  compileDefinition: {
+    input: v.object({ source: v.string(), sourceName: v.string() }),
+    output: definitionRevision,
+    errors: ["invalid_definition"],
+    guarantees: ["returns a byte-stable immutable revision for equivalent input"],
   },
-  events: {
-    definitionPublishedV1: {
-      name: "definitionPublished",
-      payload: definitionRevision,
-      version: 1,
-    },
+  resolveRevision: {
+    input: v.object({ definitionDigest: v.string() }),
+    output: definitionRevision.nullable(),
+    errors: [],
+    guarantees: ["never mutates a published revision"],
   },
-});
+  getExecutionPlan: {
+    input: v.object({ definitionDigest: v.string(), flowId: v.string() }),
+    output: executionPlan.nullable(),
+    errors: [],
+    guarantees: ["returns the plan pinned to the requested definition and flow digests"],
+  },
+} as const;
+
+const events = {
+  definitionPublishedV1: {
+    name: "definitionPublished",
+    payload: definitionRevision,
+    version: 1,
+  },
+} as const;
+
+export const definitions = defineChimpbaseModuleInterface<
+  DefinitionsDatabase,
+  typeof calls,
+  typeof events
+>({ calls, events, name: "definitions", version: 1 });
