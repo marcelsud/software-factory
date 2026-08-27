@@ -87,12 +87,14 @@ interface PollResource {
 }
 
 class DeferredPollError extends Error {
-  constructor(
-    readonly delayMs: number,
-    override readonly cause: unknown,
-  ) {
+  readonly delayMs: number;
+  override readonly cause: unknown;
+
+  constructor(delayMs: number, cause: unknown) {
     super("transport_failure: GitHub poll deferred to a Chimpbase worker");
     this.name = "DeferredPollError";
+    this.delayMs = delayMs;
+    this.cause = cause;
   }
 }
 

@@ -22,23 +22,27 @@ export interface GitHubTokenProvider {
 }
 
 export class GitHubReadError extends Error {
-  constructor(
-    message: string,
-    readonly status: number,
-    readonly rate: GitHubRateLimitRecord,
-  ) {
+  readonly status: number;
+  readonly rate: GitHubRateLimitRecord;
+
+  constructor(message: string, status: number, rate: GitHubRateLimitRecord) {
     super(message);
     this.name = "GitHubReadError";
+    this.status = status;
+    this.rate = rate;
   }
 }
 
 export class PersonalAccessTokenProvider implements GitHubTokenProvider {
-  constructor(private readonly token: string) {
+  readonly #token: string;
+
+  constructor(token: string) {
     if (token.trim() === "") throw new Error("GitHub token must not be empty");
+    this.#token = token;
   }
 
   async getToken(): Promise<string> {
-    return this.token;
+    return this.#token;
   }
 }
 

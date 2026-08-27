@@ -227,8 +227,6 @@ export const intakeMigrations = {
           snapshot_json TEXT NOT NULL,
           PRIMARY KEY (repository_id, issue_id)
         );
-        CREATE INDEX IF NOT EXISTS chimpbase_intake.github_issue_snapshots_position
-          ON chimpbase_intake.github_issue_snapshots(repository_id, updated_at, issue_id);
         CREATE TABLE IF NOT EXISTS chimpbase_intake.github_comment_snapshots (
           repository_id TEXT NOT NULL,
           comment_id TEXT NOT NULL,
@@ -238,8 +236,6 @@ export const intakeMigrations = {
           snapshot_json TEXT NOT NULL,
           PRIMARY KEY (repository_id, comment_id)
         );
-        CREATE INDEX IF NOT EXISTS chimpbase_intake.github_comment_snapshots_position
-          ON chimpbase_intake.github_comment_snapshots(repository_id, updated_at, comment_id);
         CREATE TABLE IF NOT EXISTS chimpbase_intake.github_poll_state (
           repository_id TEXT PRIMARY KEY,
           source_position TEXT,
