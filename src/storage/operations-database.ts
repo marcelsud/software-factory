@@ -1,7 +1,14 @@
+export interface OperationHealthProjectionRow {
+  id: string;
+  last_sequence: number;
+  updated_at: string;
+}
+
 export interface OperationRunProjectionRow {
   finished_at: string | null;
   projection_json: string;
   run_id: string;
+  source_key: string;
   started_at: string;
   status: string;
   updated_at: string;
@@ -55,6 +62,7 @@ export interface OperationsDatabase {
   operator_command_audit: OperatorCommandAuditRow;
   run_projections: OperationRunProjectionRow;
   timeline_projections: OperationTimelineProjectionRow;
+  health_projection: OperationHealthProjectionRow;
 }
 
 export const operationsMigrations = {
@@ -82,10 +90,13 @@ export const operationsMigrations = {
           started_at TEXT NOT NULL,
           updated_at TEXT NOT NULL,
           finished_at TEXT,
+          source_key TEXT NOT NULL,
           projection_json TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS operations_runs_order
           ON run_projections(started_at DESC, run_id);
+        CREATE INDEX IF NOT EXISTS operations_runs_source
+          ON run_projections(source_key, run_id);
 
         CREATE TABLE IF NOT EXISTS timeline_projections (
           run_id TEXT NOT NULL,
@@ -123,6 +134,11 @@ export const operationsMigrations = {
           command_json TEXT NOT NULL,
           result_json TEXT
         );
+        CREATE TABLE IF NOT EXISTS health_projection (
+          id TEXT PRIMARY KEY,
+          last_sequence INTEGER NOT NULL,
+          updated_at TEXT NOT NULL
+        );
         CREATE INDEX IF NOT EXISTS operations_commands_run_order
           ON operator_command_audit(run_id, requested_at, command_key);
       `,
@@ -148,6 +164,7 @@ export const operationsMigrations = {
           started_at TEXT NOT NULL,
           updated_at TEXT NOT NULL,
           finished_at TEXT,
+          source_key TEXT NOT NULL,
           projection_json TEXT NOT NULL
         );
 
@@ -182,6 +199,12 @@ export const operationsMigrations = {
           error TEXT,
           command_json TEXT NOT NULL,
           result_json TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS chimpbase_operations.health_projection (
+          id TEXT PRIMARY KEY,
+          last_sequence BIGINT NOT NULL,
+          updated_at TEXT NOT NULL
         );
       `,
     },

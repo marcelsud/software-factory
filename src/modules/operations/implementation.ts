@@ -191,6 +191,7 @@ async function recordFact(
     .selectFrom("event_projections")
     .select(({ fn }) => fn.max<number>("sequence").as("sequence"))
     .executeTakeFirst();
+  const sequence = (last?.sequence ?? 0) + 1;
   await db
     .insertInto("event_projections")
     .values({
@@ -199,12 +200,49 @@ async function recordFact(
       occurred_at: occurredAt,
       payload_json: payloadJson,
       run_id: runId,
-      sequence: (last?.sequence ?? 0) + 1,
+      sequence,
       source_key: sourceKey,
     })
     .execute();
   if (runId !== null) await rebuild(db, runId);
   else if (kind === "definition.published" || kind === "skill.pinned") await rebuild(db);
+  else if (kind === "source.accepted" && sourceKey !== null) {
+    const matchingRuns = await db
+      .selectFrom("run_projections")
+      .selectAll()
+      .where("source_key", "=", sourceKey)
+      .execute();
+    for (const matchingRun of matchingRuns) {
+      const projection = operationsRun.parse({
+        ...JSON.parse(matchingRun.projection_json),
+        sourceEvent: payload,
+      });
+      await db
+        .updateTable("run_projections")
+        .set({ projection_json: canonical(projection) })
+        .where("run_id", "=", matchingRun.run_id)
+        .execute();
+      await db
+        .insertInto("timeline_projections")
+        .values({
+          event_id: eventId,
+          kind,
+          occurred_at: occurredAt,
+          payload_json: payloadJson,
+          run_id: matchingRun.run_id,
+          sequence: (last?.sequence ?? 0) + 1,
+        })
+        .onConflict((conflict) => conflict.columns(["run_id", "event_id"]).doNothing())
+        .execute();
+    }
+  }
+  await db
+    .insertInto("health_projection")
+    .values({ id: "projection-worker", last_sequence: sequence, updated_at: occurredAt })
+    .onConflict((conflict) =>
+      conflict.column("id").doUpdateSet({ last_sequence: sequence, updated_at: occurredAt }),
+    )
+    .execute();
   return true;
 }
 
@@ -236,6 +274,7 @@ async function nextRunTime(ctx: OperationsContext, runId: string): Promise<strin
     .selectFrom("event_projections")
     .select("occurred_at")
     .where("run_id", "=", runId)
+    .orderBy("occurred_at", "desc")
     .orderBy("sequence", "desc")
     .executeTakeFirst();
   if (latest === undefined) return new Date(0).toISOString();
@@ -248,6 +287,7 @@ async function nextGlobalTime(ctx: OperationsContext): Promise<string> {
   const latest = await dbFrom(ctx)
     .selectFrom("event_projections")
     .select("occurred_at")
+    .orderBy("occurred_at", "desc")
     .orderBy("sequence", "desc")
     .executeTakeFirst();
   if (latest === undefined) return new Date(0).toISOString();
@@ -258,9 +298,56 @@ async function nextGlobalTime(ctx: OperationsContext): Promise<string> {
 }
 
 async function rebuild(database: Kysely<OperationsDatabase>, onlyRunId?: string) {
-  const facts = (await database.selectFrom("event_projections").selectAll().execute()).sort(
-    factOrder,
-  );
+  let facts: OperationEventProjectionRow[];
+  if (onlyRunId === undefined) {
+    facts = await database.selectFrom("event_projections").selectAll().execute();
+  } else {
+    const scoped = await database
+      .selectFrom("event_projections")
+      .selectAll()
+      .where("run_id", "=", onlyRunId)
+      .execute();
+    const global = await database
+      .selectFrom("event_projections")
+      .selectAll()
+      .where("kind", "in", ["definition.published", "skill.pinned"])
+      .execute();
+    const currentRun = await database
+      .selectFrom("event_projections")
+      .selectAll()
+      .where("kind", "=", "run.state")
+      .orderBy("occurred_at", "desc")
+      .orderBy("sequence", "desc")
+      .executeTakeFirst();
+    const latestState = scoped
+      .filter((fact) => fact.kind === "run.state")
+      .sort(factOrder)
+      .at(-1);
+    const source =
+      latestState === undefined
+        ? undefined
+        : await database
+            .selectFrom("event_projections")
+            .selectAll()
+            .where(
+              "source_key",
+              "=",
+              sourceKey(
+                String((JSON.parse(latestState.payload_json) as SafeObject).factoryEventId),
+              ),
+            )
+            .executeTakeFirst();
+    const unique = new Map<string, OperationEventProjectionRow>();
+    for (const fact of [
+      ...global,
+      ...scoped,
+      ...(currentRun === undefined ? [] : [currentRun]),
+      ...(source === undefined ? [] : [source]),
+    ])
+      unique.set(fact.event_id, fact);
+    facts = [...unique.values()];
+  }
+  facts.sort(factOrder);
   const db = database;
 
   if (onlyRunId === undefined) {
@@ -360,6 +447,7 @@ async function rebuild(database: Kysely<OperationsDatabase>, onlyRunId?: string)
       finished_at: run.finishedAt,
       projection_json: canonical(run),
       run_id: runId,
+      source_key: sourceKey(factoryEventId),
       started_at: run.startedAt,
       status: run.status,
       updated_at: run.updatedAt,
@@ -555,6 +643,7 @@ function createSubscriptions() {
           runTime(value as unknown as SafeObject),
           value as unknown as SafeObject,
           value.runId,
+          sourceKey(value.factoryEventId),
         ),
     ),
     defineChimpbaseModuleSubscription(
@@ -792,6 +881,7 @@ export function createOperationsImplementation(
       },
       async getHealthV2(ctx) {
         const db = dbFrom(ctx);
+        const checkedAt = (dependencies.now ?? (() => new Date()))();
         let storageReady = await booleanProbe(dependencies.storageReady);
         let pendingEffects = 0;
         let unreconciledEffects = 0;
@@ -817,7 +907,30 @@ export function createOperationsImplementation(
         let pollLagMs: number | null = null;
         let staleLocks = 0;
         try {
-          pollLagMs = (await dependencies.pollLagMs?.()) ?? null;
+          if (dependencies.pollLagMs !== undefined) {
+            pollLagMs = await dependencies.pollLagMs();
+          } else {
+            const sourceFacts = await db
+              .selectFrom("event_projections")
+              .select("payload_json")
+              .where("kind", "=", "source.accepted")
+              .execute();
+            let newestCursorAt: number | null = null;
+            for (const sourceId of new Set(
+              sourceFacts.map(({ payload_json }) =>
+                String((JSON.parse(payload_json) as SafeObject).sourceId),
+              ),
+            )) {
+              const cursor = await ctx.call(intake.calls.getSourceCursor, { sourceId });
+              if (cursor === null) continue;
+              const updatedAt = Date.parse(cursor.updatedAt);
+              if (Number.isFinite(updatedAt))
+                newestCursorAt =
+                  newestCursorAt === null ? updatedAt : Math.max(newestCursorAt, updatedAt);
+            }
+            pollLagMs =
+              newestCursorAt === null ? null : Math.max(0, checkedAt.getTime() - newestCursorAt);
+          }
         } catch {
           pollLagMs = null;
         }
@@ -828,7 +941,28 @@ export function createOperationsImplementation(
         }
         const credentialsPresent = await booleanProbe(dependencies.credentialsPresent);
         const workflowReady = await booleanProbe(dependencies.workflowReady);
-        const workerReady = await booleanProbe(dependencies.workerReady);
+        let workerReady: boolean;
+        if (dependencies.workerReady !== undefined) {
+          workerReady = await booleanProbe(dependencies.workerReady);
+        } else {
+          try {
+            const newest = await db
+              .selectFrom("event_projections")
+              .select(({ fn }) => fn.max<number>("sequence").as("sequence"))
+              .executeTakeFirst();
+            const heartbeat = await db
+              .selectFrom("health_projection")
+              .select("last_sequence")
+              .where("id", "=", "projection-worker")
+              .executeTakeFirst();
+            workerReady =
+              newest?.sequence === null ||
+              newest?.sequence === undefined ||
+              (heartbeat !== undefined && heartbeat.last_sequence >= newest.sequence);
+          } catch {
+            workerReady = false;
+          }
+        }
         const degraded =
           !storageReady ||
           !workflowReady ||
@@ -839,7 +973,7 @@ export function createOperationsImplementation(
           Object.values(repositories).includes("unreachable");
         return operationsHealth.parse({
           adapters: { credentialsPresent, repositories },
-          checkedAt: (dependencies.now ?? (() => new Date()))().toISOString(),
+          checkedAt: checkedAt.toISOString(),
           pendingEffects,
           pollLagMs,
           staleLocks,
@@ -1041,6 +1175,7 @@ export function createOperationsImplementation(
       tables: [
         "effect_projections",
         "event_projections",
+        "health_projection",
         "operator_command_audit",
         "run_projections",
         "timeline_projections",

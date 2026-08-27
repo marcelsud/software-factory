@@ -5,7 +5,6 @@ import { link, mkdir, readFile, realpath, rm, unlink, writeFile } from "node:fs/
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs, promisify } from "node:util";
-
 import { syncChimpbaseModuleArtifacts } from "chimpbase/tooling/modules";
 import { parseDocument } from "yaml";
 
@@ -44,7 +43,6 @@ export interface CliIo {
 interface CliHost {
   close(): Promise<void>;
   executeAction(name: string, args?: unknown): Promise<{ readonly result: unknown }>;
-  markPoll?(observedAt: string): void;
 }
 
 export interface CliDependencies {
@@ -174,30 +172,36 @@ const defaultDependencies: Required<CliDependencies> = {
         await attemptOwners.get(attemptId)?.cancel(attemptId);
       },
     };
-    let lastPollAt: Date | null = null;
+    let workflowRegistered = false;
     const workflowVersionDigest = FACTORY_RUNS_V2_WORKFLOW_DIGEST;
+    const factoryApp = createSoftwareFactoryApp({
+      artifactByteDriver: new LocalArtifactByteDriver(
+        resolve(process.env.FACTORY_ARTIFACT_ROOT ?? ".factory/artifacts"),
+      ),
+      agentRuntime,
+      clock,
+      credentialsPresent: environmentCredentialsPresent,
+      moduleManifestDigest: createHash("sha256").update(manifest).digest("hex"),
+      readTransport,
+      repositoryEvents,
+      repositoryPins,
+      repositoryReachability: () => defaultDependencies.repositoryReachability(repositories),
+      signal,
+      sourceRepositories,
+      staleLocks: async () => ((await defaultInspectDaemonLock()) === "stale" ? 1 : 0),
+      workflowReady: () => workflowRegistered,
+      workflowVersionDigest,
+    });
+    workflowRegistered = factoryApp.modules
+      .flatMap((module) => module.registrations)
+      .some(
+        (registration) =>
+          registration.kind === "workflow" &&
+          registration.definition.name === "factory-runs-v2" &&
+          registration.definition.version === 2,
+      );
     const host = await runtime.createChimpbase({
-      app: createSoftwareFactoryApp({
-        artifactByteDriver: new LocalArtifactByteDriver(
-          resolve(process.env.FACTORY_ARTIFACT_ROOT ?? ".factory/artifacts"),
-        ),
-        agentRuntime,
-        clock,
-        credentialsPresent: environmentCredentialsPresent,
-        moduleManifestDigest: createHash("sha256").update(manifest).digest("hex"),
-        pollLagMs: () =>
-          lastPollAt === null ? null : Math.max(0, clock().getTime() - lastPollAt.getTime()),
-        readTransport,
-        repositoryEvents,
-        repositoryPins,
-        repositoryReachability: () => defaultDependencies.repositoryReachability(repositories),
-        signal,
-        sourceRepositories,
-        staleLocks: async () => ((await defaultInspectDaemonLock()) === "stale" ? 1 : 0),
-        workerReady: () => !signal.aborted,
-        workflowReady: () => workflowVersionDigest === FACTORY_RUNS_V2_WORKFLOW_DIGEST,
-        workflowVersionDigest,
-      }),
+      app: factoryApp,
       projectDir: process.cwd(),
       storage: { engine: "sqlite", path },
       subscriptions: { dispatch: "async" },
@@ -205,9 +209,6 @@ const defaultDependencies: Required<CliDependencies> = {
     return {
       close: () => host.close(),
       executeAction: (name: string, args?: unknown) => host.executeAction(name, args),
-      markPoll(observedAt: string) {
-        lastPollAt = new Date(observedAt);
-      },
     };
   },
   async readStdin() {
@@ -1088,7 +1089,6 @@ async function pollOnce(
     ).result as { readonly accepted: number };
     accepted += summary.accepted;
   }
-  host.markPoll?.(observedAt);
   return accepted;
 }
 

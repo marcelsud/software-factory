@@ -127,6 +127,7 @@ export const MODULE_RESOURCES = {
     tables: [
       "effect_projections",
       "event_projections",
+      "health_projection",
       "operator_command_audit",
       "run_projections",
       "timeline_projections",
@@ -190,6 +191,7 @@ export const RESOURCE_OWNERS = {
   effect_preconditions: "effects",
   "effect-projections": "operations",
   effect_projections: "operations",
+  health_projection: "operations",
   "effect-intents": "effects",
   effect_receipts: "effects",
   effect_reconciliation: "effects",

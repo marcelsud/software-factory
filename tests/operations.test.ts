@@ -36,12 +36,12 @@ afterEach(async () => {
 
 type Host = Awaited<ReturnType<typeof createChimpbase>>;
 
-async function boot(probe = new FakeOperationsProbe()): Promise<Host> {
+async function boot(probe = new FakeOperationsProbe(), includePollLagProbe = true): Promise<Host> {
   const app = createSoftwareFactoryApp({
     credentialsPresent: probe.credentialsPresent,
     moduleManifestDigest: "manifest:operations",
     now: () => new Date(now),
-    pollLagMs: probe.pollLagMs,
+    ...(includePollLagProbe ? { pollLagMs: probe.pollLagMs } : {}),
     readTransport: unavailableGitHubReadTransport,
     repositoryReachability: probe.repositoryReachability,
     staleLocks: probe.staleLocks,
@@ -480,6 +480,28 @@ describe("leaf-08 operations", () => {
       },
       status: "ready",
     });
+    await host.executeAction("runs/testPublish0@v1", runState("22"));
+    await host.drain({ maxDurationMs: 5_000 });
+    expect((await show(host, "run:22")).run.sourceEvent).toBeNull();
+    const lateSource = sourceEvent("22");
+    await host.executeAction("intake/testPublish0@v1", {
+      event: lateSource,
+      idempotent: false,
+      payloadDigest: digest(canonicalJson(lateSource.payload)),
+    });
+    await host.drain({ maxDurationMs: 5_000 });
+    const lateDetails = await show(host, "run:22");
+    const lateEvents = (await host.executeAction("operations/listEventsV2@v1", { limit: 100 }))
+      .result as {
+      items: Array<{ kind: string; payload: { deliveryId?: string } }>;
+    };
+    expect(
+      lateEvents.items.some(
+        ({ kind, payload }) => kind === "source.accepted" && payload.deliveryId === "delivery:22",
+      ),
+    ).toBe(true);
+    expect(lateDetails.run.sourceEvent?.deliveryId).toBe("delivery:22");
+    expect(lateDetails.timeline[0]?.kind).toBe("source.accepted");
   });
 
   test("[G2] Projection rebuild from facts is deterministic/idempotent", async () => {
@@ -505,6 +527,7 @@ describe("leaf-08 operations", () => {
       new Set([
         "effect_projections",
         "event_projections",
+        "health_projection",
         "operator_command_audit",
         "run_projections",
         "timeline_projections",
@@ -627,6 +650,22 @@ describe("leaf-08 operations", () => {
     degradedProbe.worker = false;
     degradedProbe.workflow = false;
     const degradedHost = await boot(degradedProbe);
+    const persistedHealthHost = await boot(new FakeOperationsProbe(), false);
+    const persistedEvent = {
+      ...sourceEvent("23"),
+      observedAt: "2026-08-27T11:59:00.000Z",
+      sourceId: "github:persisted-health",
+    };
+    await persistedHealthHost.executeAction("intake/acceptSourceEventV2@v1", {
+      event: persistedEvent,
+      expectedCursor: null,
+      nextCursor: persistedEvent.sourceRevision,
+    });
+    await persistedHealthHost.drain({ maxDurationMs: 5_000 });
+    const persistedHealth = (
+      await persistedHealthHost.executeAction("operations/getHealthV2@v1", {})
+    ).result as { pollLagMs: number | null };
+    expect(persistedHealth.pollLagMs).toBe(60_000);
     const degraded = (await degradedHost.executeAction("operations/getHealthV2@v1", {})).result as {
       pollLagMs: number | null;
       status: string;
@@ -1197,11 +1236,13 @@ describe("leaf-08 operations", () => {
     expect(invalid.out).toContain('"config"');
     expect(invalid.out).toContain('"status":"fail"');
     const cliSource = await readFile(new URL("../src/cli.ts", import.meta.url), "utf8");
-    expect(cliSource).toContain("pollLagMs: () =>");
-    expect(cliSource).toContain("workerReady: () => !signal.aborted");
-    expect(cliSource).toContain(
-      "workflowReady: () => workflowVersionDigest === FACTORY_RUNS_V2_WORKFLOW_DIGEST",
+    expect(cliSource).toContain("workflowReady: () => workflowRegistered");
+    const operationsSource = await readFile(
+      new URL("../src/modules/operations/implementation.ts", import.meta.url),
+      "utf8",
     );
+    expect(operationsSource).toContain("ctx.call(intake.calls.getSourceCursor");
+    expect(operationsSource).toContain('.selectFrom("health_projection")');
   });
 });
 

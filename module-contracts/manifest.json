@@ -9943,7 +9943,7 @@
             "command_conflict"
           ],
           "guarantees": [
-            "records every request before routing an idempotent command through runs"
+            "audits successful routing atomically; after a routing error the caller must invoke recordOperatorCommandRejection in a separate root action"
           ],
           "id": "operations/applyOperatorCommand@v1",
           "inputSchema": {
@@ -11834,6 +11834,7 @@
         "tables": [
           "effect_projections",
           "event_projections",
+          "health_projection",
           "operator_command_audit",
           "run_projections",
           "timeline_projections"
