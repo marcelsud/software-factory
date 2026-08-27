@@ -136,6 +136,13 @@ function capability(kind: EffectOperationV3["kind"]): string {
   return "repository.write";
 }
 
+function stepId(kind: EffectOperationV3["kind"]): string {
+  if (kind === "add-label" || kind === "remove-label") return "label-fix-pending";
+  if (kind === "create-comment" || kind === "update-comment") return "publish-comment";
+  if (kind === "create-pull-request" || kind === "update-pull-request") return "publish-pr";
+  return "publish-branch";
+}
+
 function intent(
   id: string,
   effect: EffectOperationV3 = operation("add-label", id),
@@ -155,7 +162,7 @@ function intent(
       flowId: "issue-triage",
       requestedBy: "runs",
       runId: `run:${id}`,
-      stepId: "publish",
+      stepId: stepId(effect.kind),
     },
     requestedAt: now,
     target: { repository: "factory", subject: "issue:26" },
@@ -971,12 +978,7 @@ describe("leaf-07 effects", () => {
     } finally {
       await host.close();
     }
-    const narrowedPolicy = compileEffectPolicy(
-      factorySource.replace(
-        "capabilities: [repository.write, issue.comment, issue.label, pull-request.write]",
-        "capabilities: [repository.write, issue.comment, pull-request.write]",
-      ),
-    );
+    const narrowedPolicy = policy;
     const narrowed = await boot({ effectPolicy: narrowedPolicy });
     try {
       const base = intent("g15-step-scope", operation("add-label"));
@@ -986,6 +988,7 @@ describe("leaf-07 effects", () => {
           provenance: {
             ...base.provenance,
             definitionDigest: narrowedPolicy.definitionDigest,
+            stepId: "publish-comment",
           },
         }),
       ).rejects.toThrow("effect_forbidden");

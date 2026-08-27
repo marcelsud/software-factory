@@ -2,7 +2,12 @@ import { type ChimpbaseModuleInterface, defineChimpbaseModuleImplementation } fr
 import type { Kysely } from "kysely";
 
 import { compileFactoryDefinition } from "../../compiler.ts";
-import { definitionRevision, executionPlan, executionPlanV2 } from "../../contracts/index.ts";
+import {
+  definitionRevision,
+  executionPlan,
+  executionPlanV2,
+  executionPlanV3,
+} from "../../contracts/index.ts";
 import {
   type DefinitionsDatabase,
   definitionsMigrations,
@@ -48,6 +53,7 @@ export function createDefinitionsImplementation() {
         "definition-revisions",
         "execution-plans",
         "execution-plans-v2",
+        "execution-plans-v3",
         "flow-revisions",
       ],
       tables: [
@@ -56,6 +62,7 @@ export function createDefinitionsImplementation() {
         "definition_revisions",
         "execution_plans",
         "execution_plans_v2",
+        "execution_plans_v3",
         "flow_revisions",
       ],
     },
@@ -97,6 +104,21 @@ export function createDefinitionsImplementation() {
               flow_digest: planV2.flowDigest,
               flow_id: flowId,
               plan_json: JSON.stringify(planV2),
+            })
+            .onConflict((conflict) =>
+              conflict.columns(["definition_digest", "flow_id"]).doNothing(),
+            )
+            .execute();
+          const planV3 = compiled.plansV3[flowId];
+          if (planV3 === undefined)
+            throw new Error(`invalid_definition: missing V3 plan for ${flowId}`);
+          await db
+            .insertInto("execution_plans_v3")
+            .values({
+              definition_digest: planV3.definitionDigest,
+              flow_digest: planV3.flowDigest,
+              flow_id: flowId,
+              plan_json: JSON.stringify(planV3),
             })
             .onConflict((conflict) =>
               conflict.columns(["definition_digest", "flow_id"]).doNothing(),
@@ -159,6 +181,16 @@ export function createDefinitionsImplementation() {
           .where("flow_id", "=", input.flowId)
           .executeTakeFirst();
         return row === undefined ? null : executionPlanV2.parse(JSON.parse(row.plan_json));
+      },
+      async getExecutionPlanV3(ctx, input) {
+        const db = ctx.db.kysely() as unknown as Kysely<DefinitionsDatabase>;
+        const row = await db
+          .selectFrom("execution_plans_v3")
+          .select("plan_json")
+          .where("definition_digest", "=", input.definitionDigest)
+          .where("flow_id", "=", input.flowId)
+          .executeTakeFirst();
+        return row === undefined ? null : executionPlanV3.parse(JSON.parse(row.plan_json));
       },
       async activateDefinition(ctx, input) {
         const db = ctx.db.kysely() as unknown as Kysely<DefinitionsDatabase>;

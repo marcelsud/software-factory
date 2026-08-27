@@ -7,6 +7,125 @@ export const digest = v.string();
 export const isoTimestamp = v.string();
 export const stringMap = v.record(v.string());
 
+export const triageOutcome = v.enum([
+  "not_actionable",
+  "needs_reproduction",
+  "skipped",
+  "unable_to_reproduce",
+  "intended_behavior",
+  "unable_to_fix",
+  "fix_pending",
+  "fix_rejected",
+  "fix_verified",
+  "failed",
+  "completed",
+]);
+
+export const executionTerminalOutcomeV2 = v.enum([
+  "not_actionable",
+  "needs_reproduction",
+  "skipped",
+  "unable_to_reproduce",
+  "intended_behavior",
+  "unable_to_fix",
+  "fix_pending",
+  "fix_rejected",
+  "fix_verified",
+  "failed",
+  "waiting",
+  "completed",
+  "cancelled",
+]);
+
+export const reproductionReportV1 = v.object({
+  evidence: v.array(v.string()),
+  expectedBehavior: v.string().nullable(),
+  observedBehavior: v.string(),
+  outcome: v.enum([
+    "not_actionable",
+    "needs_reproduction",
+    "skipped",
+    "unable_to_reproduce",
+    "fix_pending",
+    "failed",
+  ]),
+  reproductionSteps: v.array(v.string()),
+  schemaVersion: v.literal(1),
+  summary: v.string(),
+});
+
+export const diagnosisReportV1 = v.object({
+  architectureChecked: v.boolean(),
+  confidence: v.number(),
+  docsChecked: v.boolean(),
+  evidence: v.array(v.string()),
+  outcome: v.enum(["intended_behavior", "unable_to_fix", "fix_pending", "failed"]),
+  rootCause: v.string(),
+  schemaVersion: v.literal(1),
+  summary: v.string(),
+});
+
+export const verificationReportV1 = v.object({
+  approvedAttemptId: v.string(),
+  checks: v.array(v.string()),
+  decision: v.enum([
+    "unable_to_reproduce",
+    "intended_behavior",
+    "fix_pending",
+    "fix_rejected",
+    "fix_verified",
+    "failed",
+  ]),
+  evidence: v.array(v.string()),
+  producerAttemptId: v.string(),
+  schemaVersion: v.literal(1),
+  summary: v.string(),
+});
+
+export const patchTestReportV1 = v.object({
+  changedFiles: v.array(v.string()),
+  failingTestObserved: v.boolean(),
+  outcome: v.enum(["unable_to_fix", "fix_pending", "fix_rejected", "fix_verified", "failed"]),
+  passingTestObserved: v.boolean(),
+  reproductionException: v.string().nullable(),
+  schemaVersion: v.literal(1),
+
+  summary: v.string(),
+  tests: v.array(v.string()),
+  treeDigest: digest,
+});
+
+export function parseVerificationReportV1(value: unknown): Infer<typeof verificationReportV1> {
+  const report = verificationReportV1.parse(value);
+  if (report.producerAttemptId === report.approvedAttemptId) {
+    throw new Error("independent_verifier_required: producer and verifier attempts must differ");
+  }
+  return report;
+}
+
+export const pullRequestMetadataReportV1 = v.object({
+  base: v.string(),
+  body: v.string(),
+  head: v.string(),
+  issueNumber: v.integer(),
+  linkedIssue: v.string(),
+  schemaVersion: v.literal(1),
+  title: v.string(),
+});
+
+export function parsePatchTestReportV1(value: unknown): Infer<typeof patchTestReportV1> {
+  const report = patchTestReportV1.parse(value);
+  if (report.outcome === "fix_pending" || report.outcome === "fix_verified") {
+    const exception = report.reproductionException?.trim() ?? "";
+    if (!(report.failingTestObserved && report.passingTestObserved) && exception.length === 0) {
+      throw new Error(
+        "behavioral_test_required: record a failing-then-passing test or why reproduction is impossible",
+      );
+    }
+  }
+  return report;
+}
+
 export const retryPolicy = v.object({
   backoffMs: v.integer(),
   maxAttempts: v.integer(),
@@ -114,6 +233,15 @@ export const resultContract = v.object({
   requiredData: v.array(v.string()),
 });
 
+export const resultContractV3 = v.object({
+  behavioralTest: v.enum(["failing-then-passing", "reproduction-exception"]).optional(),
+  dataTypes: v.record(v.enum(["boolean", "number", "string", "unknown"])),
+  legacyOnly: v.boolean().optional(),
+  outcome: v.string(),
+  requiredArtifactCount: v.integer(),
+  requiredData: v.array(v.string()),
+});
+
 export const executionStepV2 = v.object({
   agentProfile: v.string().optional(),
   capabilities: v.array(v.string()),
@@ -124,6 +252,37 @@ export const executionStepV2 = v.object({
   id: identifier,
   kind: v.enum(["agent", "deterministic", "effect"]),
   resultContracts: v.array(resultContract),
+  retry: retryPolicy,
+  skill: v.string().optional(),
+});
+
+export const executionStepV3 = v.object({
+  agentProfile: v.string().optional(),
+  capabilities: v.array(v.string()),
+  deterministicOutcome: v.string().optional(),
+  effectBase: v.string().optional(),
+  effectCapability: v.string().optional(),
+  effectKind: v
+    .enum([
+      "add-label",
+      "remove-label",
+      "create-comment",
+      "update-comment",
+      "create-branch",
+      "delete-branch",
+      "push-verified-commit",
+      "create-pull-request",
+      "update-pull-request",
+    ])
+    .optional(),
+  effectLabel: v.string().optional(),
+  effectPayloadDigest: digest.optional(),
+  effectRevisionStep: v.string().optional(),
+  effectTarget: v.string().optional(),
+  effectTitle: v.string().optional(),
+  id: identifier,
+  kind: v.enum(["agent", "deterministic", "effect"]),
+  resultContracts: v.array(resultContractV3),
   retry: retryPolicy,
   skill: v.string().optional(),
 });
@@ -158,6 +317,27 @@ export const executionStateV2 = v.object({
     .optional(),
 });
 
+export const executionStateV3 = v.object({
+  gate: v.string().optional(),
+  id: identifier,
+  step: v.string().optional(),
+  terminal: v.enum(["success", "failure"]).optional(),
+  terminalOutcome: executionTerminalOutcomeV2.optional(),
+});
+
+export const executionTransitionV3 = v.object({
+  from: identifier,
+  mode: v.enum(["immediate", "signal"]),
+  on: v.string(),
+  retriage: v.boolean().optional(),
+  to: identifier,
+});
+
+export const executionRetriageV3 = v.object({
+  exhaustedState: identifier,
+  maxAttempts: v.integer(),
+});
+
 export const executionPlanV2 = v.object({
   agentProfileDigests: v.record(digest),
   agentProfiles: v.record(pinnedAgentProfile),
@@ -176,6 +356,28 @@ export const executionPlanV2 = v.object({
   states: v.array(executionStateV2),
   steps: v.array(executionStepV2),
   transitions: v.array(executionTransition),
+  triggers: v.array(executionTriggerV2),
+});
+
+export const executionPlanV3 = v.object({
+  agentProfileDigests: v.record(digest),
+  agentProfiles: v.record(pinnedAgentProfile),
+  artifactHandoffs: v.array(artifactHandoff),
+  calls: v.array(v.string()),
+  concurrency: concurrencyPolicy,
+  definitionDigest: digest,
+  effectPermissions: v.array(executionEffectPermission),
+  events: v.array(v.string()),
+  flowDigest: digest,
+  flowId: identifier,
+  gates: v.array(executionGateV2),
+  initialState: identifier,
+  normalizedJson: v.string(),
+  retriage: executionRetriageV3.optional(),
+  skillRevisions: v.record(v.string()),
+  states: v.array(executionStateV3),
+  steps: v.array(executionStepV3),
+  transitions: v.array(executionTransitionV3),
   triggers: v.array(executionTriggerV2),
 });
 
@@ -980,6 +1182,22 @@ export const runOutcome = v.enum([
   "cancelled",
 ]);
 
+export const runOutcomeV4 = v.enum([
+  "not_actionable",
+  "needs_reproduction",
+  "skipped",
+  "unable_to_reproduce",
+  "intended_behavior",
+  "unable_to_fix",
+  "fix_pending",
+  "fix_rejected",
+  "fix_verified",
+  "failed",
+  "waiting",
+  "completed",
+  "cancelled",
+]);
+
 export const runV3 = v.object({
   agentProfileDigests: v.record(digest),
   auditSequence: v.integer(),
@@ -1015,6 +1233,41 @@ export const runV3 = v.object({
   workflowVersionDigest: digest,
 });
 
+export const runV4 = v.object({
+  agentProfileDigests: v.record(digest),
+  auditSequence: v.integer(),
+  currentAttemptId: identifier.optional(),
+  currentCorrelationToken: identifier.optional(),
+  currentEffectKey: identifier.optional(),
+  currentGateId: identifier.optional(),
+  currentGateStatus: v.enum(["pending", "approved", "rejected"]).optional(),
+  currentStepId: identifier.optional(),
+  definitionDigest: digest,
+  factoryEventId: identifier,
+  finishedAt: isoTimestamp.optional(),
+  flowDigest: digest,
+  flowId: identifier,
+  moduleManifestDigest: digest,
+  outcome: runOutcomeV4,
+  runId: identifier,
+  skillDigests: v.record(digest),
+  startedAt: isoTimestamp,
+  stateId: identifier,
+  status: v.enum([
+    "queued",
+    "running",
+    "retrying",
+    "waiting",
+    "paused",
+    "succeeded",
+    "failed",
+    "cancelled",
+  ]),
+  workflowId: identifier,
+  workflowVersion: v.integer(),
+  workflowVersionDigest: digest,
+});
+
 export const runFinishedV3 = v.object({
   agentProfileDigests: v.record(digest),
   auditSequence: v.integer(),
@@ -1025,6 +1278,26 @@ export const runFinishedV3 = v.object({
   flowId: identifier,
   moduleManifestDigest: digest,
   outcome: runOutcome,
+  runId: identifier,
+  skillDigests: v.record(digest),
+  startedAt: isoTimestamp,
+  stateId: identifier,
+  status: v.enum(["succeeded", "failed", "cancelled"]),
+  workflowId: identifier,
+  workflowVersion: v.integer(),
+  workflowVersionDigest: digest,
+});
+
+export const runFinishedV4 = v.object({
+  agentProfileDigests: v.record(digest),
+  auditSequence: v.integer(),
+  definitionDigest: digest,
+  factoryEventId: identifier,
+  finishedAt: isoTimestamp,
+  flowDigest: digest,
+  flowId: identifier,
+  moduleManifestDigest: digest,
+  outcome: runOutcomeV4,
   runId: identifier,
   skillDigests: v.record(digest),
   startedAt: isoTimestamp,
@@ -1229,10 +1502,17 @@ export type PinnedSkillBundleV2 = Infer<typeof pinnedSkillBundleV2>;
 export type SkillResultSchema = Infer<typeof skillResultSchema>;
 export type SkillRevisionV2 = Infer<typeof skillRevisionV2>;
 export type ArtifactV2 = Infer<typeof artifactV2>;
+export type TriageOutcome = Infer<typeof triageOutcome>;
+export type ReproductionReportV1 = Infer<typeof reproductionReportV1>;
+export type DiagnosisReportV1 = Infer<typeof diagnosisReportV1>;
+export type VerificationReportV1 = Infer<typeof verificationReportV1>;
+export type PatchTestReportV1 = Infer<typeof patchTestReportV1>;
+export type PullRequestMetadataReportV1 = Infer<typeof pullRequestMetadataReportV1>;
 
 export type DefinitionRevision = Infer<typeof definitionRevision>;
 export type ExecutionPlan = Infer<typeof executionPlan>;
 export type ExecutionPlanV2 = Infer<typeof executionPlanV2>;
+export type ExecutionPlanV3 = Infer<typeof executionPlanV3>;
 export type PinnedAgentProfile = Infer<typeof pinnedAgentProfile>;
 export type FactoryEvent = Infer<typeof factoryEvent>;
 export type Artifact = Infer<typeof artifact>;
@@ -1264,9 +1544,11 @@ export type EffectFailureCategoryV3 = Infer<typeof effectFailureCategoryV3>;
 export type Run = Infer<typeof run>;
 export type RunV2 = Infer<typeof runV2>;
 export type RunV3 = Infer<typeof runV3>;
+export type RunV4 = Infer<typeof runV4>;
 export type RunFinished = Infer<typeof runFinished>;
 export type RunFinishedV2 = Infer<typeof runFinishedV2>;
 export type RunFinishedV3 = Infer<typeof runFinishedV3>;
+export type RunFinishedV4 = Infer<typeof runFinishedV4>;
 export type AcceptedFactoryEvent = Infer<typeof acceptedFactoryEvent>;
 export type AttemptOutcome = Infer<typeof attemptOutcome>;
 export type EffectOutcome = Infer<typeof effectOutcome>;

@@ -3,14 +3,20 @@ version: 1
 compatibility: 1
 instruction: instructions.md
 includes: [guidance.md]
-inputArtifacts: [report.md, test-result, reproduction]
+inputArtifacts: [report.md, result.json, reproduction]
 resultSchema:
   type: object
   properties:
+    schemaVersion: { type: number }
+    outcome: { type: string }
     summary: { type: string }
     changedFiles: { type: string-array }
     tests: { type: string-array }
-  required: [summary, changedFiles, tests]
+    failingTestObserved: { type: boolean }
+    passingTestObserved: { type: boolean }
+    reproductionException: { type: string }
+    treeDigest: { type: string }
+  required: [schemaVersion, outcome, summary, changedFiles, tests, failingTestObserved, passingTestObserved, reproductionException, treeDigest]
   additionalProperties: false
 capabilities: [repository.read, repository.patch, process.test]
 customizable: false

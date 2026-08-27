@@ -222,7 +222,7 @@ describe("assets", () => {
       capabilities: ["process.test", "repository.read"],
       compatibility: 1,
       id: "verify",
-      inputArtifactKinds: ["patch", "report.md"],
+      inputArtifactKinds: ["patch", "report.md", "result.json", "test-result"],
       version: 1,
     });
     expect(inspection.files.map(({ path }) => path)).toEqual([
@@ -230,12 +230,36 @@ describe("assets", () => {
       "instructions.md",
       "skill.yaml",
     ]);
-    expect(inspection.resultSchema.properties.passed?.type).toBe("boolean");
+    expect(inspection.resultSchema).toEqual({
+      additionalProperties: false,
+      properties: {
+        approvedAttemptId: { type: "string" },
+        checks: { type: "string-array" },
+        decision: { type: "string" },
+        evidence: { type: "string-array" },
+        producerAttemptId: { type: "string" },
+        schemaVersion: { type: "number" },
+        summary: { type: "string" },
+      },
+      required: [
+        "schemaVersion",
+        "decision",
+        "summary",
+        "evidence",
+        "checks",
+        "producerAttemptId",
+        "approvedAttemptId",
+      ],
+      type: "object",
+    });
     const source = await readFile(join(process.cwd(), "factory.yaml"), "utf8");
-    const plan = compileFactoryDefinition(source).plansV2["issue-triage"];
-    const verifyStep = plan?.steps.find(({ id }) => id === "verify");
+    const plan = compileFactoryDefinition(source).plansV3["issue-triage"];
+    const verifySteps = plan?.steps.filter(({ id }) => id.startsWith("verify-"));
     const fixStep = plan?.steps.find(({ id }) => id === "fix");
-    expect(verifyStep?.capabilities).toEqual(["repository.read", "process.test"]);
+    expect(verifySteps?.map(({ capabilities }) => capabilities)).toEqual([
+      ["repository.read", "process.test"],
+      ["repository.read", "process.test"],
+    ]);
     expect(fixStep?.capabilities).toEqual(["repository.read", "repository.patch", "process.test"]);
   });
 
@@ -586,11 +610,54 @@ describe("assets", () => {
 
   test("[G9] every starter skill accepts its typed fake-agent report", async () => {
     const reports: Record<string, Record<string, unknown>> = {
-      reproduce: { evidence: "observed", reproduced: true },
-      diagnose: { confidence: 0.9, evidence: "trace", rootCause: "shared guard" },
-      verify: { evidence: "command passed", passed: true, testResults: ["focused check"] },
-      fix: { changedFiles: ["src/a.ts"], summary: "fixed guard", tests: ["focused check"] },
-      "pr-writer": { body: "Observed checks", title: "Fix guard" },
+      reproduce: {
+        evidence: ["observed"],
+        expectedBehavior: "expected",
+        observedBehavior: "observed",
+        outcome: "fix_pending",
+        reproductionSteps: ["run focused check"],
+        schemaVersion: 1,
+        summary: "reproduced",
+      },
+      diagnose: {
+        architectureChecked: true,
+        confidence: 0.9,
+        docsChecked: true,
+        evidence: ["trace"],
+        outcome: "fix_pending",
+        rootCause: "shared guard",
+        schemaVersion: 1,
+        summary: "diagnosed",
+      },
+      verify: {
+        approvedAttemptId: "verify-attempt",
+        checks: ["focused check"],
+        decision: "fix_verified",
+        evidence: ["command passed"],
+        producerAttemptId: "producer-attempt",
+        schemaVersion: 1,
+        summary: "verified",
+      },
+      fix: {
+        changedFiles: ["src/a.ts"],
+        failingTestObserved: true,
+        outcome: "fix_pending",
+        passingTestObserved: true,
+        reproductionException: "",
+        schemaVersion: 1,
+        summary: "fixed guard",
+        tests: ["focused check"],
+        treeDigest: "a".repeat(64),
+      },
+      "pr-writer": {
+        base: "main",
+        body: "Observed checks",
+        head: "factory/fix",
+        issueNumber: 7,
+        linkedIssue: "#7",
+        schemaVersion: 1,
+        title: "Fix guard",
+      },
     };
     const { host } = await boot(new MemoryArtifactByteDriver(), fakeAgentRuntime(reports));
     try {
@@ -899,9 +966,9 @@ describe("assets", () => {
     const [inspection] = JSON.parse(stdout.join("")) as Array<Record<string, unknown>>;
     expect(inspection).toMatchObject({
       capabilities: ["process.test", "repository.read"],
-      digest: "sha256:d88bbe0b9e12989d982e1a98950e742bf03561f8cdb82fc2b1c3d61f43161082",
+      digest: "sha256:6af524150ec2619de698a73fb10f6b4d6c0d3201201ee24dcbb8bd81f3254392",
       id: "verify",
-      inputArtifactKinds: ["patch", "report.md"],
+      inputArtifactKinds: ["patch", "report.md", "result.json", "test-result"],
     });
     expect(inspection?.sourcePath).toBe(join(process.cwd(), "skills", "verify"));
     expect(inspection?.resultSchema).toBeDefined();
@@ -929,7 +996,7 @@ describe("assets", () => {
     await cp(join(process.cwd(), "skills"), join(activationRoot, "skills"), { recursive: true });
     const configuredSource = await readFile(join(process.cwd(), "factory.yaml"), "utf8");
     const unpinnedSource = configuredSource.replace(
-      "revision: sha256:0266a4341e7cb8e3065b55798793298899412b82e1200942773882b35dd1aa48",
+      'revision: "sha256:f0278c3cd29be4e6e92ea46776e4f94e5cb78d57b8b95739d1496084f48b9a6d"',
       "revision: unpinned",
     );
     const { host: definitionsHost } = await boot();
@@ -977,7 +1044,7 @@ describe("assets", () => {
     ).toBe(0);
     const stored = actions.find((action) => action.name === "assets/storeSkillBundleV2@v1");
     expect(stored?.args).toMatchObject({
-      bundle: { digest: "sha256:0266a4341e7cb8e3065b55798793298899412b82e1200942773882b35dd1aa48" },
+      bundle: { digest: "sha256:f0278c3cd29be4e6e92ea46776e4f94e5cb78d57b8b95739d1496084f48b9a6d" },
       source: "skills/reproduce",
     });
     const compile = actions.find((action) => action.name === "definitions/compileDefinition@v1");
@@ -988,8 +1055,8 @@ describe("assets", () => {
     await writeFile(
       activationConfig,
       configuredSource.replace(
-        "revision: sha256:0266a4341e7cb8e3065b55798793298899412b82e1200942773882b35dd1aa48",
-        `revision: sha256:${"0".repeat(64)}`,
+        'revision: "sha256:f0278c3cd29be4e6e92ea46776e4f94e5cb78d57b8b95739d1496084f48b9a6d"',
+        `revision: "sha256:${"0".repeat(64)}"`,
       ),
     );
     const actionCount = actions.length;

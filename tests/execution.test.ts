@@ -842,6 +842,10 @@ describe("leaf-05 execution", () => {
     const verifier = plan?.agentProfiles["verification-agent"];
     expect(triage?.model).not.toBe(verifier?.model);
     expect(triage?.command).not.toEqual(verifier?.command);
-    expect(plan?.steps.find(({ id }) => id === "verify")?.agentProfile).toBe("verification-agent");
+    expect(
+      plan?.steps
+        .filter(({ id }) => id === "verify-diagnosis" || id === "verify-patch")
+        .map(({ agentProfile }) => agentProfile),
+    ).toEqual(["verification-agent", "verification-agent"]);
   });
 });

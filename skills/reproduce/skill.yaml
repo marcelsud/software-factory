@@ -7,10 +7,14 @@ inputArtifacts: [metadata]
 resultSchema:
   type: object
   properties:
-    reproduced: { type: boolean }
-    evidence: { type: string }
-    reproductionArtifact: { type: string }
-  required: [reproduced, evidence]
+    schemaVersion: { type: number }
+    outcome: { type: string }
+    summary: { type: string }
+    evidence: { type: string-array }
+    reproductionSteps: { type: string-array }
+    observedBehavior: { type: string }
+    expectedBehavior: { type: string }
+  required: [schemaVersion, outcome, summary, evidence, reproductionSteps, observedBehavior, expectedBehavior]
   additionalProperties: false
 capabilities: [repository.read]
 customizable: false

@@ -11,8 +11,10 @@ import {
   runFinished,
   runFinishedV2,
   runFinishedV3,
+  runFinishedV4,
   runV2,
   runV3,
+  runV4,
 } from "../../contracts/index.ts";
 import type { RunsDatabase } from "../../storage/runs-database.ts";
 
@@ -112,6 +114,12 @@ const calls = {
       "pins the active strict plan and trusted composition digests before workflow execution",
     ],
   },
+  startRunV4: {
+    input: startRunInputV3,
+    output: runV4,
+    errors: ["module_unavailable", "run_exists", "invalid_revision_pin", "admission_failed"],
+    guarantees: ["pins the additive triage plan and trusted composition digests"],
+  },
   getRun: {
     input: v.object({ runId: v.string() }),
     output: run.nullable(),
@@ -129,6 +137,12 @@ const calls = {
     output: runV3.nullable(),
     errors: ["module_unavailable"],
     guarantees: ["returns strict orchestration phase and terminal outcome"],
+  },
+  getRunV4: {
+    input: v.object({ runId: v.string() }),
+    output: runV4.nullable(),
+    errors: ["module_unavailable"],
+    guarantees: ["returns the additive triage outcome without widening predecessor contracts"],
   },
   getRunAudit: {
     input: v.object({ runId: v.string() }),
@@ -157,6 +171,12 @@ const calls = {
       "applies correlated pause, resume, gate, retry, and terminal commands idempotently",
     ],
   },
+  applyOperatorCommandV3: {
+    input: operatorCommandV2,
+    output: runV4,
+    errors: ["module_unavailable", "run_not_found", "command_not_allowed"],
+    guarantees: ["applies correlated commands idempotently and returns the additive outcome"],
+  },
   signalRun: {
     input: v.object({
       correlationToken: v.string(),
@@ -170,6 +190,19 @@ const calls = {
     errors: ["module_unavailable", "run_not_found", "signal_not_allowed"],
     guarantees: ["only the current declared gate correlation advances and identity is idempotent"],
   },
+  signalRunV2: {
+    input: v.object({
+      correlationToken: v.string(),
+      gateId: v.string(),
+      identity: v.string(),
+      occurredAt: v.string(),
+      runId: v.string(),
+      signal: v.string(),
+    }),
+    output: runV4,
+    errors: ["module_unavailable", "run_not_found", "signal_not_allowed"],
+    guarantees: ["advances only the current additive gate correlation idempotently"],
+  },
   driveRun: {
     input: v.object({
       now: v.string(),
@@ -180,12 +213,23 @@ const calls = {
     errors: ["module_unavailable", "run_not_found", "invalid_revision_pin"],
     guarantees: ["advances only the pinned declarative state machine"],
   },
+  driveRunV2: {
+    input: v.object({
+      now: v.string(),
+      runId: v.string(),
+      wakeKind: v.string().optional(),
+    }),
+    output: workflowDriveResult,
+    errors: ["module_unavailable", "run_not_found", "invalid_revision_pin"],
+    guarantees: ["advances only the pinned additive declarative state machine"],
+  },
 } as const;
 
 const events = {
   runStateChangedV1: { name: "runStateChanged", payload: run, version: 1 },
   runStateChangedV2: { name: "runStateChanged", payload: runV2, version: 2 },
   runStateChangedV3: { name: "runStateChanged", payload: runV3, version: 3 },
+  runStateChangedV4: { name: "runStateChanged", payload: runV4, version: 4 },
   stepRequestedV1: { name: "stepRequested", payload: stepRequest, version: 1 },
   stepRequestedV2: { name: "stepRequested", payload: stepRequestV2, version: 2 },
   effectRequestedV1: { name: "effectRequested", payload: effectIntent, version: 1 },
@@ -194,6 +238,7 @@ const events = {
   runFinishedV1: { name: "runFinished", payload: runFinished, version: 1 },
   runFinishedV2: { name: "runFinished", payload: runFinishedV2, version: 2 },
   runFinishedV3: { name: "runFinished", payload: runFinishedV3, version: 3 },
+  runFinishedV4: { name: "runFinished", payload: runFinishedV4, version: 4 },
 } as const;
 
 export const runs = defineChimpbaseModuleInterface<RunsDatabase, typeof calls, typeof events>({

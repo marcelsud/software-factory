@@ -16,6 +16,7 @@ export interface DefinitionsDatabase {
   "definition_revisions": Record<string, unknown>;
   "execution_plans": Record<string, unknown>;
   "execution_plans_v2": Record<string, unknown>;
+  "execution_plans_v3": Record<string, unknown>;
   "flow_revisions": Record<string, unknown>;
 }
 
