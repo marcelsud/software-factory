@@ -63,8 +63,7 @@ function buildEffectPolicy(
         .filter(
           (step) =>
             step.kind === "effect" &&
-            (permission.flows !== undefined ||
-              step.effectCapability === permission.capability ||
+            (step.effectCapability === permission.capability ||
               step.capabilities.includes(permission.capability)),
         )
         .map((step) => step.id)

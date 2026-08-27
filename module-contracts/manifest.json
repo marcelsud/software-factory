@@ -11768,6 +11768,398 @@
           "version": 2
         },
         {
+          "id": "runs/effectRequested@v3",
+          "name": "effectRequested",
+          "payloadSchema": {
+            "properties": {
+              "capability": {
+                "type": "string"
+              },
+              "correlationToken": {
+                "type": "string"
+              },
+              "dryRun": {
+                "type": "boolean"
+              },
+              "expectedExternalRevision": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "idempotencyKey": {
+                "type": "string"
+              },
+              "operation": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "add-label"
+                      },
+                      "payload": {
+                        "properties": {
+                          "issueNumber": {
+                            "type": "integer"
+                          },
+                          "label": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "issueNumber",
+                          "label"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "payload"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "remove-label"
+                      },
+                      "payload": {
+                        "properties": {
+                          "issueNumber": {
+                            "type": "integer"
+                          },
+                          "label": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "issueNumber",
+                          "label"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "payload"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "create-comment"
+                      },
+                      "payload": {
+                        "properties": {
+                          "artifactDigests": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "issueNumber": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "artifactDigests",
+                          "issueNumber"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "payload"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "update-comment"
+                      },
+                      "payload": {
+                        "properties": {
+                          "artifactDigests": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "commentId": {
+                            "type": "string"
+                          },
+                          "issueNumber": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "artifactDigests",
+                          "issueNumber",
+                          "commentId"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "payload"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "create-branch"
+                      },
+                      "payload": {
+                        "properties": {
+                          "baseRevision": {
+                            "type": "string"
+                          },
+                          "branch": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "baseRevision",
+                          "branch"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "payload"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "delete-branch"
+                      },
+                      "payload": {
+                        "properties": {
+                          "branch": {
+                            "type": "string"
+                          },
+                          "headRevision": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "branch",
+                          "headRevision"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "payload"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "push-verified-commit"
+                      },
+                      "payload": {
+                        "properties": {
+                          "baseRevision": {
+                            "type": "string"
+                          },
+                          "branch": {
+                            "type": "string"
+                          },
+                          "commitMessage": {
+                            "type": "string"
+                          },
+                          "treeDigest": {
+                            "type": "string"
+                          },
+                          "verified": {
+                            "const": true
+                          }
+                        },
+                        "required": [
+                          "baseRevision",
+                          "branch",
+                          "commitMessage",
+                          "treeDigest",
+                          "verified"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "payload"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "create-pull-request"
+                      },
+                      "payload": {
+                        "properties": {
+                          "artifactDigests": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "base": {
+                            "type": "string"
+                          },
+                          "head": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "artifactDigests",
+                          "base",
+                          "head",
+                          "title"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "payload"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "update-pull-request"
+                      },
+                      "payload": {
+                        "properties": {
+                          "artifactDigests": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "pullRequestNumber": {
+                            "type": "integer"
+                          },
+                          "title": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "artifactDigests",
+                          "pullRequestNumber"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "payload"
+                    ],
+                    "type": "object"
+                  }
+                ]
+              },
+              "payloadDigest": {
+                "type": "string"
+              },
+              "provenance": {
+                "properties": {
+                  "agentProfileId": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "definitionDigest": {
+                    "type": "string"
+                  },
+                  "flowId": {
+                    "type": "string"
+                  },
+                  "requestedBy": {
+                    "enum": [
+                      "operator",
+                      "runs"
+                    ]
+                  },
+                  "runId": {
+                    "type": "string"
+                  },
+                  "stepId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "agentProfileId",
+                  "definitionDigest",
+                  "flowId",
+                  "requestedBy",
+                  "runId",
+                  "stepId"
+                ],
+                "type": "object"
+              },
+              "requestedAt": {
+                "type": "string"
+              },
+              "target": {
+                "properties": {
+                  "repository": {
+                    "type": "string"
+                  },
+                  "subject": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "repository",
+                  "subject"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "capability",
+              "correlationToken",
+              "dryRun",
+              "expectedExternalRevision",
+              "idempotencyKey",
+              "operation",
+              "payloadDigest",
+              "provenance",
+              "requestedAt",
+              "target"
+            ],
+            "type": "object"
+          },
+          "version": 3
+        },
+        {
           "id": "runs/runFinished@v1",
           "name": "runFinished",
           "payloadSchema": {
@@ -23516,6 +23908,399 @@
       },
       "provider": "runs",
       "version": 2
+    },
+    {
+      "kind": "event",
+      "name": "effectRequested",
+      "payloadSchema": {
+        "properties": {
+          "capability": {
+            "type": "string"
+          },
+          "correlationToken": {
+            "type": "string"
+          },
+          "dryRun": {
+            "type": "boolean"
+          },
+          "expectedExternalRevision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "idempotencyKey": {
+            "type": "string"
+          },
+          "operation": {
+            "anyOf": [
+              {
+                "properties": {
+                  "kind": {
+                    "const": "add-label"
+                  },
+                  "payload": {
+                    "properties": {
+                      "issueNumber": {
+                        "type": "integer"
+                      },
+                      "label": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "issueNumber",
+                      "label"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "payload"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "kind": {
+                    "const": "remove-label"
+                  },
+                  "payload": {
+                    "properties": {
+                      "issueNumber": {
+                        "type": "integer"
+                      },
+                      "label": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "issueNumber",
+                      "label"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "payload"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "kind": {
+                    "const": "create-comment"
+                  },
+                  "payload": {
+                    "properties": {
+                      "artifactDigests": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "issueNumber": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "artifactDigests",
+                      "issueNumber"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "payload"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "kind": {
+                    "const": "update-comment"
+                  },
+                  "payload": {
+                    "properties": {
+                      "artifactDigests": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "commentId": {
+                        "type": "string"
+                      },
+                      "issueNumber": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "artifactDigests",
+                      "issueNumber",
+                      "commentId"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "payload"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "kind": {
+                    "const": "create-branch"
+                  },
+                  "payload": {
+                    "properties": {
+                      "baseRevision": {
+                        "type": "string"
+                      },
+                      "branch": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "baseRevision",
+                      "branch"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "payload"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "kind": {
+                    "const": "delete-branch"
+                  },
+                  "payload": {
+                    "properties": {
+                      "branch": {
+                        "type": "string"
+                      },
+                      "headRevision": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "branch",
+                      "headRevision"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "payload"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "kind": {
+                    "const": "push-verified-commit"
+                  },
+                  "payload": {
+                    "properties": {
+                      "baseRevision": {
+                        "type": "string"
+                      },
+                      "branch": {
+                        "type": "string"
+                      },
+                      "commitMessage": {
+                        "type": "string"
+                      },
+                      "treeDigest": {
+                        "type": "string"
+                      },
+                      "verified": {
+                        "const": true
+                      }
+                    },
+                    "required": [
+                      "baseRevision",
+                      "branch",
+                      "commitMessage",
+                      "treeDigest",
+                      "verified"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "payload"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "kind": {
+                    "const": "create-pull-request"
+                  },
+                  "payload": {
+                    "properties": {
+                      "artifactDigests": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "base": {
+                        "type": "string"
+                      },
+                      "head": {
+                        "type": "string"
+                      },
+                      "title": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "artifactDigests",
+                      "base",
+                      "head",
+                      "title"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "payload"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "kind": {
+                    "const": "update-pull-request"
+                  },
+                  "payload": {
+                    "properties": {
+                      "artifactDigests": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "pullRequestNumber": {
+                        "type": "integer"
+                      },
+                      "title": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "artifactDigests",
+                      "pullRequestNumber"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "payload"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "payloadDigest": {
+            "type": "string"
+          },
+          "provenance": {
+            "properties": {
+              "agentProfileId": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "definitionDigest": {
+                "type": "string"
+              },
+              "flowId": {
+                "type": "string"
+              },
+              "requestedBy": {
+                "enum": [
+                  "operator",
+                  "runs"
+                ]
+              },
+              "runId": {
+                "type": "string"
+              },
+              "stepId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "agentProfileId",
+              "definitionDigest",
+              "flowId",
+              "requestedBy",
+              "runId",
+              "stepId"
+            ],
+            "type": "object"
+          },
+          "requestedAt": {
+            "type": "string"
+          },
+          "target": {
+            "properties": {
+              "repository": {
+                "type": "string"
+              },
+              "subject": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "repository",
+              "subject"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "capability",
+          "correlationToken",
+          "dryRun",
+          "expectedExternalRevision",
+          "idempotencyKey",
+          "operation",
+          "payloadDigest",
+          "provenance",
+          "requestedAt",
+          "target"
+        ],
+        "type": "object"
+      },
+      "provider": "runs",
+      "version": 3
     },
     {
       "kind": "event",

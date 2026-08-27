@@ -96,6 +96,11 @@ export class VerifiedGitPublisher implements GitPublisher {
     return gitResult(commit, "applied");
   }
 
+  async observeRevision(input: GitBranchMutation | GitPublication): Promise<string | null> {
+    const cwd = this.#owned(input.repository, input.branch);
+    return await this.#remoteRevision(cwd, input.branch);
+  }
+
   async probe(input: GitBranchMutation | GitPublication): Promise<EffectResultV3 | null> {
     if ("kind" in input) {
       const cwd = this.#owned(input.repository, input.branch);

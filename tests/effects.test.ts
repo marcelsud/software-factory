@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 
+import { chimpbaseModuleResourceName, defineChimpbaseApp } from "chimpbase/core";
+import { action } from "chimpbase/runtime";
 import { createChimpbase } from "chimpbase/runtime/bun";
 
 import { createSoftwareFactoryApp } from "../chimpbase.app.ts";
@@ -21,6 +23,7 @@ import {
   effectIntent,
   effectIntentV2,
   effectIntentV3,
+  effectOutcome,
   effectReceipt,
   effectReceiptV2,
   effectResultV3,
@@ -34,28 +37,48 @@ const factorySource = await readFile(new URL("../factory.yaml", import.meta.url)
 const policy = compileEffectPolicy(factorySource);
 const now = "2026-08-27T12:00:00.000Z";
 
+const injectLegacyEffectForTest = action({
+  name: "test.injectLegacyEffect",
+  args: effectOutcome,
+  result: effectOutcome,
+  async handler(ctx, input) {
+    await ctx.enqueue(chimpbaseModuleResourceName("effects", "queue", "effect-workers"), {
+      idempotencyKey: input.idempotencyKey,
+      outcome: input,
+    });
+    return input;
+  },
+});
+
 type Host = Awaited<ReturnType<typeof createChimpbase>>;
 async function boot(
   input: {
     effectPolicy?: typeof policy;
     pinnedPolicy?: boolean;
     gitPublisher?: FakeGitPublisher;
+    syncSubscriptions?: boolean;
     transport?: GitHubWriteTransport;
   } = {},
 ) {
   const transport = input.transport ?? new FakeGitHubWriteTransport();
   const gitPublisher = input.gitPublisher ?? new FakeGitPublisher();
+  const softwareFactoryApp = createSoftwareFactoryApp({
+    ...(input.pinnedPolicy === true ? {} : { effectPolicy: input.effectPolicy ?? policy }),
+    gitPublisher,
+    githubWriteTransport: transport,
+    moduleManifestDigest: "manifest:g10-engine",
+    now: () => new Date(now),
+    readTransport: unavailableGitHubReadTransport,
+    workflowVersionDigest: "workflow-digest:g10-engine",
+  });
   const host = await createChimpbase({
-    app: createSoftwareFactoryApp({
-      ...(input.pinnedPolicy === true ? {} : { effectPolicy: input.effectPolicy ?? policy }),
-      gitPublisher,
-      githubWriteTransport: transport,
-      now: () => new Date(now),
-      readTransport: unavailableGitHubReadTransport,
+    app: defineChimpbaseApp({
+      ...softwareFactoryApp,
+      registrations: [...softwareFactoryApp.registrations, injectLegacyEffectForTest],
     }),
     projectDir: process.cwd(),
     storage: { engine: "memory" },
-    subscriptions: { dispatch: "async" },
+    subscriptions: { dispatch: input.syncSubscriptions === true ? "sync" : "async" },
   });
   return { gitPublisher, host, transport };
 }
@@ -271,7 +294,9 @@ describe("leaf-07 effects", () => {
         ...intent("g4"),
         credentials: { token: "secret-token" },
       };
-      await request(host, injected as EffectIntentV3);
+      const queued = await host.executeAction("effects/requestEffectV3@v1", injected);
+      expect(JSON.stringify(queued.emittedEvents)).not.toContain("secret-token");
+      expect((await request(host, intent("g4"))).status).toBe("queued");
       await finish(host, injected.idempotencyKey);
       expect(JSON.stringify(transport.calls)).not.toContain("secret-token");
       await expect(
@@ -371,12 +396,15 @@ describe("leaf-07 effects", () => {
       });
       await request(host, issue);
       expect((await finish(host, issue.idempotencyKey)).outcome).toBe("conflict");
-      const branch = intent("g7-branch", operation("create-branch"), {
-        expectedExternalRevision: "different-base",
+      const branchOperation = operation("create-branch", "g7-branch");
+      gitPublisher.branches.set("factory:factory/g7-branch", "human-head");
+      const branch = intent("g7-branch", branchOperation, {
+        expectedExternalRevision: "base-g7-branch",
       });
       await request(host, branch);
       expect((await finish(host, branch.idempotencyKey)).outcome).toBe("conflict");
       expect(gitPublisher.mutations).toHaveLength(0);
+      expect(gitPublisher.observations).toHaveLength(1);
     } finally {
       await host.close();
     }
@@ -490,6 +518,169 @@ describe("leaf-07 effects", () => {
     } finally {
       await host.close();
     }
+    const legacy = await boot({ syncSubscriptions: true });
+    try {
+      const revision = (
+        await legacy.host.executeAction("definitions/compileDefinition@v1", {
+          source: factorySource,
+          sourceName: "factory.yaml",
+        })
+      ).result as { definitionDigest: string; flowDigests: Record<string, string> };
+      const plan = (
+        await legacy.host.executeAction("definitions/getExecutionPlan@v1", {
+          definitionDigest: revision.definitionDigest,
+          flowId: "issue-triage",
+        })
+      ).result as {
+        agentProfileDigests: Record<string, string>;
+        flowDigest: string;
+        skillRevisions: Record<string, string>;
+      };
+      const legacyIntent = {
+        capability: "issue.comment",
+        correlationToken: "correlation:g10-legacy",
+        expectedExternalRevision: null,
+        idempotencyKey: "effect:g10-legacy",
+        payloadDigest: "payload:g10-legacy",
+        provenance: "run:g10-legacy/step:publish",
+        requestedAt: now,
+        runId: "run:g10-legacy",
+        target: "factory",
+      };
+      await legacy.host.executeAction("runs/startRunV2@v1", {
+        agentProfileDigests: plan.agentProfileDigests,
+        correlation: {
+          correlationToken: legacyIntent.correlationToken,
+          effectKey: legacyIntent.idempotencyKey,
+          stepId: "publish",
+        },
+        definitionDigest: revision.definitionDigest,
+        factoryEventId: "event:g10-legacy",
+        flowDigest: plan.flowDigest,
+        flowId: "issue-triage",
+        moduleManifestDigest: "manifest:g10-legacy",
+        runId: legacyIntent.runId,
+        skillDigests: plan.skillRevisions,
+        startedAt: now,
+        workflowId: "workflow:g10-legacy",
+        workflowVersion: 1,
+        workflowVersionDigest: "workflow-digest:g10-legacy",
+      });
+      await legacy.host.executeAction("effects/requestEffectV2@v1", legacyIntent);
+      await legacy.host.executeAction("test.injectLegacyEffect", {
+        externalRevision: null,
+        finishedAt: now,
+        idempotencyKey: legacyIntent.idempotencyKey,
+        outcome: "ambiguous",
+      });
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        try {
+          await legacy.host.processNextQueueJob();
+        } catch (error) {
+          if (!(error instanceof Error) || !error.message.includes("effect_adapter_unavailable"))
+            throw error;
+        }
+        const projection = (
+          await legacy.host.executeAction("runs/getRunV2@v1", {
+            runId: legacyIntent.runId,
+          })
+        ).result as { status: string };
+        if (projection.status === "waiting") break;
+      }
+      expect(
+        (
+          await legacy.host.executeAction("runs/getRunV2@v1", {
+            runId: legacyIntent.runId,
+          })
+        ).result,
+      ).toMatchObject({
+        currentEffectKey: legacyIntent.idempotencyKey,
+        status: "waiting",
+      });
+    } finally {
+      await legacy.host.close();
+    }
+
+    const publisher = new FakeGitPublisher();
+    const strict = await boot({ gitPublisher: publisher, pinnedPolicy: true });
+    try {
+      const source = `${factorySource.replaceAll(
+        "flows: [issue-triage]",
+        "flows: [issue-triage, effect-only]",
+      )}
+  - id: effect-only
+    initialState: publish
+    triggers:
+      - { source: manual-triage, predicates: [] }
+    concurrency: { key: repository, limit: 1 }
+    artifactHandoffs: []
+    steps:
+      - id: publish
+        kind: effect
+        capabilities: [repository.write]
+        effectCapability: repository.write
+        effectTarget: factory
+        effectPayloadDigest: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+        retry: { maxAttempts: 1, backoffMs: 0 }
+        results:
+          - { outcome: applied, requiredData: [] }
+          - { outcome: rejected, requiredData: [] }
+    gates: []
+    states:
+      - { id: publish, step: publish }
+      - { id: done, terminal: success, outcome: completed }
+      - { id: rejected, terminal: failure, outcome: failed }
+    transitions:
+      - { from: publish, to: done, on: applied }
+      - { from: publish, to: rejected, on: rejected }
+`;
+      const revision = (
+        await strict.host.executeAction("definitions/compileDefinition@v1", {
+          source,
+          sourceName: "factory.yaml",
+        })
+      ).result as { definitionDigest: string };
+      await strict.host.executeAction("definitions/activateDefinition@v1", {
+        definitionDigest: revision.definitionDigest,
+      });
+      await strict.host.executeAction("runs/startRunV3@v1", {
+        definitionDigest: revision.definitionDigest,
+        factoryEventId: "event:g10-engine",
+        flowId: "effect-only",
+        moduleManifestDigest: "manifest:g10-engine",
+        repository: "factory",
+        repositorySha: "base:g10-engine",
+        runId: "run:g10-engine",
+        startedAt: now,
+        subject: "issue:26",
+        workflowId: "workflow:g10-engine",
+        workflowVersionDigest: "workflow-digest:g10-engine",
+      });
+      for (let attempt = 0; attempt < 50; attempt += 1) {
+        try {
+          await strict.host.processNextQueueJob();
+        } catch (error) {
+          if (!(error instanceof Error) || !error.message.includes("effect_adapter_unavailable"))
+            throw error;
+        }
+        const projection = (
+          await strict.host.executeAction("runs/getRunV3@v1", {
+            runId: "run:g10-engine",
+          })
+        ).result as { status: string };
+        if (projection.status === "succeeded") break;
+      }
+      expect(publisher.publications).toHaveLength(1);
+      expect(
+        (
+          await strict.host.executeAction("runs/getRunV3@v1", {
+            runId: "run:g10-engine",
+          })
+        ).result,
+      ).toMatchObject({ status: "succeeded" });
+    } finally {
+      await strict.host.close();
+    }
   });
 
   test("[G11] Replaying the same intent after success returns the existing receipt and does not duplicate labels, comments, branches, commits, or PRs", async () => {
@@ -541,6 +732,34 @@ describe("leaf-07 effects", () => {
     } finally {
       await host.close();
     }
+    const urls: string[] = [];
+    const marker = effectMarker("effect:g12-pages");
+    const paged = new FetchGitHubWriteTransport({
+      fetch: async (url) => {
+        urls.push(String(url));
+        const page = new URL(String(url)).searchParams.get("page");
+        const comments =
+          page === "1"
+            ? Array.from({ length: 100 }, (_, index) => ({
+                body: `human ${index}`,
+                id: index,
+                updated_at: now,
+              }))
+            : [{ body: marker, id: 101, updated_at: now }];
+        return new Response(JSON.stringify(comments), { status: 200 });
+      },
+      repositories: { factory: "example/software-factory" },
+      tokenProvider: {
+        async getToken() {
+          return "write-token";
+        },
+      },
+    });
+    const pagedIntent = intent("g12-pages", operation("create-comment"));
+    expect((await paged.probe({ intent: pagedIntent, marker }))?.outcome).toBe("already_applied");
+    expect(urls).toHaveLength(2);
+    expect(urls[0]).toContain(`since=${encodeURIComponent(now)}`);
+    expect(urls[1]).toContain("page=2");
   });
 
   test("[G13] A stale expected issue/branch revision reports a conflict and cannot silently overwrite external work", async () => {
@@ -613,6 +832,28 @@ describe("leaf-07 effects", () => {
       expect(transport.calls).toHaveLength(0);
     } finally {
       await host.close();
+    }
+    const narrowedPolicy = compileEffectPolicy(
+      factorySource.replace(
+        "capabilities: [repository.write, issue.comment, issue.label, pull-request.write]",
+        "capabilities: [repository.write, issue.comment, pull-request.write]",
+      ),
+    );
+    const narrowed = await boot({ effectPolicy: narrowedPolicy });
+    try {
+      const base = intent("g15-step-scope", operation("add-label"));
+      await expect(
+        request(narrowed.host, {
+          ...base,
+          provenance: {
+            ...base.provenance,
+            definitionDigest: narrowedPolicy.definitionDigest,
+          },
+        }),
+      ).rejects.toThrow("effect_forbidden");
+      expect((narrowed.transport as FakeGitHubWriteTransport).calls).toHaveLength(0);
+    } finally {
+      await narrowed.host.close();
     }
   });
 
@@ -716,6 +957,28 @@ describe("leaf-07 effects", () => {
       (await real.apply({ intent: value, marker: effectMarker(value.idempotencyKey) })).outcome,
     ).toBe("applied");
     expect(calls).toBe(2);
+    let pullProbeUrl = "";
+    const pullMarker = effectMarker("effect:g18-pr");
+    const pullTransport = new FetchGitHubWriteTransport({
+      fetch: async (url) => {
+        pullProbeUrl = String(url);
+        return new Response(JSON.stringify([{ body: pullMarker, id: 18, updated_at: now }]), {
+          status: 200,
+        });
+      },
+      repositories: { factory: "example/software-factory" },
+      tokenProvider: {
+        async getToken() {
+          return "separate-write-token";
+        },
+      },
+    });
+    const pullIntent = intent("g18-pr", operation("create-pull-request", "g18-pr"));
+    expect((await pullTransport.probe({ intent: pullIntent, marker: pullMarker }))?.outcome).toBe(
+      "already_applied",
+    );
+    expect(pullProbeUrl).toContain("per_page=100");
+    expect(pullProbeUrl).toContain("head=example%3Afactory%2Fg18-pr");
     for (const [category, outcome] of [
       ["conflict", "conflict"],
       ["permission", "rejected"],

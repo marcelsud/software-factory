@@ -207,6 +207,7 @@ export const RESOURCE_OWNERS = {
   "event:EffectQueued.v1": "effects",
   "event:EffectRequested.v1": "runs",
   "event:EffectRequested.v2": "runs",
+  "event:EffectRequested.v3": "runs",
   "event:FactoryEventAccepted.v1": "intake",
   "event:FactoryEventAccepted.v2": "intake",
   "event:RunFinished.v1": "runs",

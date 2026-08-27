@@ -433,6 +433,8 @@ describe("foundation", () => {
     expect(plan.effectPermissions.map((permission) => permission.capability)).toEqual([
       "repository.write",
       "issue.comment",
+      "issue.label",
+      "pull-request.write",
     ]);
     expect(plan.transitions).toContainEqual(
       expect.objectContaining({ from: "approve", mode: "signal", on: "operator.approve" }),
@@ -573,7 +575,7 @@ describe("foundation", () => {
       ),
       replaceRequired(
         factorySource,
-        "capabilities: [repository.write, issue.comment]",
+        "capabilities: [repository.write, issue.comment, issue.label, pull-request.write]",
         "capabilities: [repository.read]",
       ),
       wrongAgentOwner,

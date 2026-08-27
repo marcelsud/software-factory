@@ -147,14 +147,10 @@ export class FetchGitHubWriteTransport implements GitHubWriteTransport {
       return null;
     }
     if (operation.kind === "create-comment") {
-      const comments = await this.#request(
-        "GET",
-        this.#path(input, `/issues/${operation.payload.issueNumber}/comments?per_page=100`),
+      return await this.#probeMarkerPages(
+        input,
+        `/issues/${operation.payload.issueNumber}/comments?per_page=100&since=${encodeURIComponent(input.intent.requestedAt)}`,
       );
-      const match = array(comments)
-        .map(record)
-        .find((comment) => text(comment.body).includes(input.marker));
-      return match === undefined ? null : resultFromResponse(match, "already_applied");
     }
     if (operation.kind === "update-comment") {
       const comment = await this.#request(
@@ -166,14 +162,11 @@ export class FetchGitHubWriteTransport implements GitHubWriteTransport {
         : null;
     }
     if (operation.kind === "create-pull-request") {
-      const pulls = await this.#request(
-        "GET",
-        this.#path(input, `/pulls?state=all&head=${encodeURIComponent(operation.payload.head)}`),
+      const [owner] = this.#repository(input);
+      return await this.#probeMarkerPages(
+        input,
+        `/pulls?state=all&per_page=100&head=${encodeURIComponent(`${owner}:${operation.payload.head}`)}`,
       );
-      const match = array(pulls)
-        .map(record)
-        .find((pull) => text(pull.body).includes(input.marker));
-      return match === undefined ? null : resultFromResponse(match, "already_applied");
     }
     if (operation.kind === "update-pull-request") {
       const pull = await this.#request(
@@ -187,13 +180,28 @@ export class FetchGitHubWriteTransport implements GitHubWriteTransport {
     return null;
   }
 
-  #path(input: GitHubWriteInput, suffix: string): string {
+  #repository(input: GitHubWriteInput): readonly [string, string] {
     const configured =
       this.#repositories[input.intent.target.repository] ?? input.intent.target.repository;
     const parts = configured.split("/");
     if (parts.length !== 2 || parts[0] === "" || parts[1] === "")
       throw new GitHubWriteError("Unknown GitHub repository", "validation");
-    return `/repos/${encodeURIComponent(parts[0] ?? "")}/${encodeURIComponent(parts[1] ?? "")}${suffix}`;
+    return [parts[0] ?? "", parts[1] ?? ""];
+  }
+
+  #path(input: GitHubWriteInput, suffix: string): string {
+    const [owner, name] = this.#repository(input);
+    return `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}${suffix}`;
+  }
+
+  async #probeMarkerPages(input: GitHubWriteInput, path: string): Promise<EffectResultV3 | null> {
+    for (let page = 1; ; page += 1) {
+      const response = await this.#request("GET", `${path}&page=${page}`);
+      const entries = array(response).map(record);
+      const match = entries.find((entry) => text(entry.body).includes(input.marker));
+      if (match !== undefined) return resultFromResponse(match, "already_applied");
+      if (entries.length < 100) return null;
+    }
   }
 
   async #request(method: string, path: string, body?: unknown): Promise<DataRecord> {

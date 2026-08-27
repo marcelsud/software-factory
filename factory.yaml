@@ -163,7 +163,7 @@ flows:
           - { outcome: unable_to_fix, requiredData: [] }
       - id: publish
         kind: effect
-        capabilities: [repository.write, issue.comment]
+        capabilities: [repository.write, issue.comment, issue.label, pull-request.write]
         effectCapability: repository.write
         effectTarget: factory
         effectPayloadDigest: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee

@@ -133,6 +133,7 @@ export interface GitBranchMutation {
 export interface GitPublisher {
   createBranch?(input: GitBranchMutation): Promise<EffectResultV3>;
   deleteBranch?(input: GitBranchMutation): Promise<EffectResultV3>;
+  observeRevision?(input: GitBranchMutation | GitPublication): Promise<string | null>;
   probe?(input: GitBranchMutation | GitPublication): Promise<EffectResultV3 | null>;
   publish(publication: GitPublication): Promise<{ readonly revision: string }>;
   pushVerifiedCommit?(publication: GitPublication): Promise<EffectResultV3>;

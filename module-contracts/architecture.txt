@@ -97,6 +97,7 @@ runs v1
   call: runs/startRunV3@v1
   event: runs/effectRequested@v1
   event: runs/effectRequested@v2
+  event: runs/effectRequested@v3
   event: runs/runFinished@v1
   event: runs/runFinished@v2
   event: runs/runFinished@v3

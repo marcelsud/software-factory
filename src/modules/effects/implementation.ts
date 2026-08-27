@@ -121,6 +121,22 @@ async function loadReceiptV3(db: Kysely<EffectsDatabase>, idempotencyKey: string
   return row === undefined ? null : receiptV3FromRow(row);
 }
 
+function strictOutcomeMatches(
+  row: EffectReceiptV3Row,
+  finishedAt: string,
+  result: EffectResultV3,
+): boolean {
+  return (
+    row.status === "finished" &&
+    row.finished_at === finishedAt &&
+    row.outcome === result.outcome &&
+    row.external_id === result.externalId &&
+    row.external_revision === result.externalRevision &&
+    row.external_url === result.externalUrl &&
+    row.failure_category === result.failureCategory
+  );
+}
+
 async function requestDurably(
   ctx: ChimpbaseModuleContext<EffectsDatabase>,
   input: EffectIntentV2,
@@ -261,6 +277,33 @@ export const recordEffectOutcome = action({
     return finished;
   },
 });
+const strictClaim = v.object({
+  claimedAt: v.string(),
+  idempotencyKey: v.string(),
+  staleBefore: v.string(),
+});
+
+export const claimEffectExecutionV3 = action({
+  name: "effects.claimEffectExecutionV3",
+  args: strictClaim,
+  result: v.boolean(),
+  async handler(ctx, input): Promise<boolean> {
+    const result = await ctx.db
+      .kysely<EffectsDatabase>()
+      .updateTable("effect_receipts_v3")
+      .set({ claimed_at: input.claimedAt })
+      .where("idempotency_key", "=", input.idempotencyKey)
+      .where("status", "=", "queued")
+      .where((expression) =>
+        expression.or([
+          expression("claimed_at", "is", null),
+          expression("claimed_at", "<", input.staleBefore),
+        ]),
+      )
+      .executeTakeFirst();
+    return result.numUpdatedRows === 1n;
+  },
+});
 
 const strictOutcome = v.object({
   finishedAt: v.string(),
@@ -281,14 +324,8 @@ export const recordEffectOutcomeV3 = action({
       .executeTakeFirst();
     if (row === undefined) throw new Error("receipt_not_found");
     if (row.status === "finished") {
-      const existing = receiptV3FromRow(row);
-      if (
-        existing.outcome === input.result.outcome &&
-        existing.finishedAt === input.finishedAt &&
-        existing.externalRevision === input.result.externalRevision &&
-        existing.externalId === input.result.externalId
-      )
-        return effectFinishedV3.parse(existing);
+      if (strictOutcomeMatches(row, input.finishedAt, input.result))
+        return effectFinishedV3.parse(receiptV3FromRow(row));
       throw new Error("effect_already_finished");
     }
     const updated: EffectReceiptV3Row = {
@@ -301,12 +338,26 @@ export const recordEffectOutcomeV3 = action({
       outcome: input.result.outcome,
       status: "finished",
     };
-    await db
+    const result = await db
       .updateTable("effect_receipts_v3")
       .set(updated)
       .where("idempotency_key", "=", input.idempotencyKey)
       .where("status", "=", "queued")
-      .execute();
+      .where("claimed_at", "is not", null)
+      .executeTakeFirst();
+    if (result.numUpdatedRows === 0n) {
+      const committed = await db
+        .selectFrom("effect_receipts_v3")
+        .selectAll()
+        .where("idempotency_key", "=", input.idempotencyKey)
+        .executeTakeFirst();
+      if (
+        committed !== undefined &&
+        strictOutcomeMatches(committed, input.finishedAt, input.result)
+      )
+        return effectFinishedV3.parse(receiptV3FromRow(committed));
+      throw new Error("effect_already_finished");
+    }
     const finished = effectFinishedV3.parse(receiptV3FromRow(updated));
     ctx.publish(effects.events.effectFinishedV3, finished);
     return finished;
@@ -455,8 +506,9 @@ export function createEffectsImplementation(dependencies: EffectsImplementationD
     body: string | undefined,
   ): Promise<string | null> => {
     if (isGitOperation(intent)) {
-      const input = gitInput(intent);
-      return "kind" in input ? input.expectedRevision : input.baseRevision;
+      if (dependencies.gitPublisher?.observeRevision === undefined)
+        throw new Error("effect_adapter_unavailable: git revision observation");
+      return await dependencies.gitPublisher.observeRevision(gitInput(intent));
     }
     if (dependencies.githubWriteTransport === undefined)
       throw new GitHubWriteError("GitHub write transport is unavailable", "unavailable");
@@ -487,6 +539,13 @@ export function createEffectsImplementation(dependencies: EffectsImplementationD
     const receipt = await loadReceiptV3(db, idempotencyKey);
     if (receipt === null) throw new Error("receipt_not_found");
     if (receipt.status === "finished") return receipt;
+    const claimedAt = now();
+    const claimed = await ctx.action(claimEffectExecutionV3, {
+      claimedAt: claimedAt.toISOString(),
+      idempotencyKey,
+      staleBefore: new Date(claimedAt.getTime() - 30_000).toISOString(),
+    });
+    if (!claimed) return (await loadReceiptV3(db, idempotencyKey)) ?? receipt;
     const row = await db
       .selectFrom("effect_intents_v3")
       .selectAll()
@@ -537,6 +596,18 @@ export function createEffectsImplementation(dependencies: EffectsImplementationD
       const result = await apply(intent, body);
       await finish(ctx, idempotencyKey, result);
     } catch (error) {
+      if (
+        (error instanceof GitHubWriteError && error.category === "unavailable") ||
+        (error instanceof Error && error.message.includes("effect_adapter_unavailable"))
+      ) {
+        await db
+          .updateTable("effect_receipts_v3")
+          .set({ claimed_at: null })
+          .where("idempotency_key", "=", idempotencyKey)
+          .where("claimed_at", "=", claimedAt.toISOString())
+          .execute();
+        throw error;
+      }
       if (
         isGitOperation(intent) ||
         (error instanceof GitHubWriteError && error.category === "ambiguous_network")
@@ -611,7 +682,12 @@ export function createEffectsImplementation(dependencies: EffectsImplementationD
   return defineChimpbaseModuleImplementation({
     interface: implementationInterface,
     migrations: effectsMigrations,
-    registrations: [recordEffectOutcome, recordEffectOutcomeV3, effectWorker],
+    registrations: [
+      claimEffectExecutionV3,
+      recordEffectOutcome,
+      recordEffectOutcomeV3,
+      effectWorker,
+    ],
     resources: {
       collections: [
         "effect-intents",
@@ -648,7 +724,8 @@ export function createEffectsImplementation(dependencies: EffectsImplementationD
           input,
         );
       },
-      async requestEffectV3(ctx, input) {
+      async requestEffectV3(ctx, rawInput) {
+        const input = effectIntentV3.parse(rawInput);
         let policy = dependencies.effectPolicy;
         if (policy === undefined) {
           const revision = await ctx.call(definitions.calls.resolveRevision, {
@@ -707,6 +784,7 @@ export function createEffectsImplementation(dependencies: EffectsImplementationD
           effect_id: `effect:${input.idempotencyKey}`,
           external_id: null,
           external_revision: null,
+          claimed_at: null,
           external_url: null,
           failure_category: null,
           finished_at: null,
@@ -733,10 +811,14 @@ export function createEffectsImplementation(dependencies: EffectsImplementationD
             })
             .execute();
         }
-        await ctx.enqueue("effect-workers", {
-          idempotencyKey: input.idempotencyKey,
-          protocolVersion: 3,
-        });
+        const adapterConfigured = isGitOperation(input)
+          ? dependencies.gitPublisher !== undefined
+          : dependencies.githubWriteTransport !== undefined;
+        if (authorization.dryRun || adapterConfigured)
+          await ctx.enqueue("effect-workers", {
+            idempotencyKey: input.idempotencyKey,
+            protocolVersion: 3,
+          });
         ctx.publish(effects.events.effectQueuedV2, input);
         return receiptV3FromRow(receiptRow);
       },

@@ -4,6 +4,7 @@ import { v } from "chimpbase/runtime";
 import {
   effectIntent,
   effectIntentV2,
+  effectIntentV3,
   operatorCommand,
   operatorCommandV2,
   run,
@@ -189,6 +190,7 @@ const events = {
   stepRequestedV2: { name: "stepRequested", payload: stepRequestV2, version: 2 },
   effectRequestedV1: { name: "effectRequested", payload: effectIntent, version: 1 },
   effectRequestedV2: { name: "effectRequested", payload: effectIntentV2, version: 2 },
+  effectRequestedV3: { name: "effectRequested", payload: effectIntentV3, version: 3 },
   runFinishedV1: { name: "runFinished", payload: runFinished, version: 1 },
   runFinishedV2: { name: "runFinished", payload: runFinishedV2, version: 2 },
   runFinishedV3: { name: "runFinished", payload: runFinishedV3, version: 3 },

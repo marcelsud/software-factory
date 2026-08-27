@@ -231,6 +231,7 @@ function fakeInfrastructureResult(
 export class FakeGitPublisher implements GitPublisher {
   readonly branches = new Map<string, string>();
   readonly mutations: GitBranchMutation[] = [];
+  readonly observations: Array<GitBranchMutation | GitPublication> = [];
   readonly publications: GitPublication[] = [];
 
   async createBranch(input: GitBranchMutation): Promise<EffectResultV3> {
@@ -272,13 +273,28 @@ export class FakeGitPublisher implements GitPublisher {
     return fakeGitResult(revision, "applied");
   }
 
+  async observeRevision(input: GitBranchMutation | GitPublication): Promise<string | null> {
+    this.observations.push(input);
+    return this.branches.get(`${input.repository}:${input.branch}`) ?? null;
+  }
+
   async probe(input: GitBranchMutation | GitPublication): Promise<EffectResultV3 | null> {
     const revision = this.branches.get(`${input.repository}:${input.branch}`);
-    if ("kind" in input && input.kind === "delete")
-      return revision === undefined
-        ? fakeGitResult(input.expectedRevision, "already_applied")
+    if ("kind" in input) {
+      if (input.kind === "delete")
+        return revision === undefined
+          ? fakeGitResult(input.expectedRevision, "already_applied")
+          : null;
+      return revision === input.expectedRevision
+        ? fakeGitResult(revision, "already_applied")
         : null;
-    return revision === undefined ? null : fakeGitResult(revision, "already_applied");
+    }
+    const applied = this.publications.find(
+      (publication) => publicationRevision(publication) === publicationRevision(input),
+    );
+    return applied === undefined
+      ? null
+      : fakeGitResult(publicationRevision(applied), "already_applied");
   }
 }
 

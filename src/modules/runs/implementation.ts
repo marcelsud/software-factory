@@ -14,6 +14,7 @@ import {
   CAPABILITY_PRESETS_V2,
   type EffectFinishedV2,
   type EffectFinishedV3,
+  type EffectOperationV3,
   type ExecutionPlanV2,
   type FactoryEvent,
   isDataRecord,
@@ -29,8 +30,10 @@ import {
   runV2,
   runV3,
 } from "../../contracts/index.ts";
+import { effectPayloadDigest } from "../../effects/policy.ts";
 import {
   type RunEngineStateRow,
+  type RunExecutionPinRow,
   type RunRow,
   type RunsDatabase,
   runsMigrations,
@@ -856,7 +859,8 @@ async function consumeEffectFinished(
   if (loaded.engine === null) {
     const failed = transitionOutcome === "rejected";
     const ambiguous =
-      "failureCategory" in outcome && outcome.failureCategory === "ambiguous_network";
+      outcome.outcome === "ambiguous" ||
+      ("failureCategory" in outcome && outcome.failureCategory === "ambiguous_network");
     const updated = await appendAudit(
       db,
       loaded.row,
@@ -1057,6 +1061,35 @@ function createSubscriptions(dependencies: RunsImplementationDependencies) {
     effectFinishedStrict,
     acceptedEvent,
   ] as const;
+}
+
+function strictEffectOperation(
+  step: ExecutionPlanV2["steps"][number],
+  row: RunRow,
+  engine: RunEngineStateRow & RunExecutionPinRow,
+  artifacts: readonly string[],
+): EffectOperationV3 {
+  const branch = `factory/${row.run_id.replace(/[^A-Za-z0-9._-]/g, "-").slice(0, 80)}`;
+  if (step.effectCapability === "repository.write") {
+    const treeDigest = artifacts[0] ?? step.effectPayloadDigest;
+    if (treeDigest === undefined) throw new Error("invalid_revision_pin: effect tree is missing");
+    return {
+      kind: "push-verified-commit",
+      payload: {
+        baseRevision: engine.repository_sha,
+        branch,
+        commitMessage: `Factory run ${row.run_id}, step ${step.id}`,
+        treeDigest,
+        verified: true,
+      },
+    };
+  }
+  const issueNumber = Number(/^issue:(\d+)$/.exec(engine.subject)?.[1]);
+  if (!Number.isSafeInteger(issueNumber) || issueNumber < 1)
+    throw new Error("invalid_revision_pin: effect issue subject is not numeric");
+  if (step.effectCapability === "issue.comment")
+    return { kind: "create-comment", payload: { artifactDigests: [...artifacts], issueNumber } };
+  throw new Error(`invalid_revision_pin: unsupported effect capability ${step.effectCapability}`);
 }
 
 export function createRunsImplementation(dependencies: RunsImplementationDependencies = {}) {
@@ -2310,19 +2343,41 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
           .set({ attempt_count: number, engine_phase: "running" })
           .where("run_id", "=", row.run_id)
           .execute();
-        const intent = {
+        const operation = strictEffectOperation(step, row, engine, artifacts);
+        const payloadDigest = effectPayloadDigest(operation);
+        const strictIntent = {
           capability: step.effectCapability ?? "",
           correlationToken: token,
+          dryRun: false,
           expectedExternalRevision: null,
           idempotencyKey,
-          payloadDigest: artifacts[0] ?? step.effectPayloadDigest ?? "",
-          provenance: `${row.run_id}/step:${step.id}`,
+          operation,
+          payloadDigest,
+          provenance: {
+            agentProfileId: null,
+            definitionDigest: row.definition_digest,
+            flowId: row.flow_id,
+            requestedBy: "runs" as const,
+            runId: row.run_id,
+            stepId: step.id,
+          },
           requestedAt: input.now,
+          target: { repository: step.effectTarget ?? "", subject: engine.subject },
+        };
+        const legacyIntent = {
+          capability: strictIntent.capability,
+          correlationToken: strictIntent.correlationToken,
+          expectedExternalRevision: strictIntent.expectedExternalRevision,
+          idempotencyKey: strictIntent.idempotencyKey,
+          payloadDigest: strictIntent.payloadDigest,
+          provenance: `${row.run_id}/step:${step.id}`,
+          requestedAt: strictIntent.requestedAt,
           runId: row.run_id,
           target: step.effectTarget ?? "",
         };
         try {
-          await ctx.call(effects.calls.requestEffectV2, intent);
+          await ctx.call(effects.calls.requestEffectV2, legacyIntent);
+          await ctx.call(effects.calls.requestEffectV3, strictIntent);
         } catch (error) {
           row = await appendAudit(db, row, "infrastructure.failed", input.now, {
             message: error instanceof Error ? error.message : String(error),
@@ -2337,16 +2392,17 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
           return { delayMs: retry.delayMs, kind: "sleep" as const };
         }
         ctx.publish(runs.events.effectRequestedV1, {
-          capability: intent.capability,
-          correlationToken: intent.correlationToken,
-          expectedExternalRevision: intent.expectedExternalRevision,
-          idempotencyKey: intent.idempotencyKey,
-          payloadDigest: intent.payloadDigest,
-          provenance: intent.provenance,
-          runId: intent.runId,
-          target: intent.target,
+          capability: legacyIntent.capability,
+          correlationToken: legacyIntent.correlationToken,
+          expectedExternalRevision: legacyIntent.expectedExternalRevision,
+          idempotencyKey: legacyIntent.idempotencyKey,
+          payloadDigest: legacyIntent.payloadDigest,
+          provenance: legacyIntent.provenance,
+          runId: legacyIntent.runId,
+          target: legacyIntent.target,
         });
-        ctx.publish(runs.events.effectRequestedV2, intent);
+        ctx.publish(runs.events.effectRequestedV2, legacyIntent);
+        ctx.publish(runs.events.effectRequestedV3, strictIntent);
         await publishProjection(ctx, row, engine);
         return { kind: "wait" as const, signal: "resume" };
       },
