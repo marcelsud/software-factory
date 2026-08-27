@@ -1,7 +1,7 @@
 import { defineChimpbaseModuleInterface } from "chimpbase/core";
 import { v } from "chimpbase/runtime";
 
-import { definitionRevision, executionPlan } from "../../contracts/index.ts";
+import { definitionRevision, executionPlan, executionPlanV2 } from "../../contracts/index.ts";
 import type { DefinitionsDatabase } from "../../storage/definitions-database.ts";
 
 const calls = {
@@ -22,6 +22,24 @@ const calls = {
     output: executionPlan.nullable(),
     errors: [],
     guarantees: ["returns the plan pinned to the requested definition and flow digests"],
+  },
+  getExecutionPlanV2: {
+    input: v.object({ definitionDigest: v.string(), flowId: v.string() }),
+    output: executionPlanV2.nullable(),
+    errors: [],
+    guarantees: ["returns the strict orchestration plan pinned to the requested revisions"],
+  },
+  activateDefinition: {
+    input: v.object({ definitionDigest: v.string() }),
+    output: definitionRevision,
+    errors: ["definition_not_found"],
+    guarantees: ["atomically replaces the singleton active-definition pointer"],
+  },
+  getActiveDefinition: {
+    input: v.object({}),
+    output: definitionRevision.nullable(),
+    errors: [],
+    guarantees: ["returns the persisted active definition pointer"],
   },
 } as const;
 

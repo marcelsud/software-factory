@@ -6,9 +6,11 @@ export interface AssetsDatabase {
 }
 
 export interface DefinitionsDatabase {
+  "active_definition": Record<string, unknown>;
   "agent_profile_revisions": Record<string, unknown>;
   "definition_revisions": Record<string, unknown>;
   "execution_plans": Record<string, unknown>;
+  "execution_plans_v2": Record<string, unknown>;
   "flow_revisions": Record<string, unknown>;
 }
 
@@ -44,7 +46,9 @@ export interface OperationsDatabase {
 
 export interface RunsDatabase {
   "operator_commands": Record<string, unknown>;
+  "run_admissions": Record<string, unknown>;
   "run_audit": Record<string, unknown>;
+  "run_engine_state": Record<string, unknown>;
   "run_gates": Record<string, unknown>;
   "run_identities": Record<string, unknown>;
   "runs": Record<string, unknown>;

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createHash } from "node:crypto";
 import { mkdir, readFile, realpath } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -6,7 +7,10 @@ import { parseArgs } from "node:util";
 
 import { syncChimpbaseModuleArtifacts } from "chimpbase/tooling/modules";
 
-import moduleApp, { createSoftwareFactoryApp } from "../chimpbase.app.ts";
+import moduleApp, {
+  createSoftwareFactoryApp,
+  FACTORY_RUNS_V2_WORKFLOW_DIGEST,
+} from "../chimpbase.app.ts";
 import { GitHubEventNormalizer } from "./adapters/github-event-normalizer.ts";
 import {
   FetchGitHubReadTransport,
@@ -81,13 +85,16 @@ const defaultDependencies: Required<CliDependencies> = {
       "Bun" in globalThis
         ? await import("chimpbase/runtime/bun")
         : await import("chimpbase/runtime/node");
+    const manifest = await readFile(new URL("../module-contracts/manifest.json", import.meta.url));
     return await runtime.createChimpbase({
       app: createSoftwareFactoryApp({
         clock,
+        moduleManifestDigest: createHash("sha256").update(manifest).digest("hex"),
         readTransport,
         repositoryEvents,
         signal,
         sourceRepositories,
+        workflowVersionDigest: FACTORY_RUNS_V2_WORKFLOW_DIGEST,
       }),
       projectDir: process.cwd(),
       storage: { engine: "sqlite", path },
@@ -221,6 +228,7 @@ async function pollCommand(
     composition.sourceRepositories,
     composition.repositoryEvents,
   );
+  await activateCheckedDefinition(host, values.config, dependencies);
   try {
     const accepted = await pollOnce(host, repositories, new Date().toISOString());
     io.stdout(`polled ${repositories.length} repositories; accepted ${accepted}\n`);
@@ -252,6 +260,7 @@ async function daemonCommand(
     composition.sourceRepositories,
     composition.repositoryEvents,
   );
+  await activateCheckedDefinition(host, values.config, dependencies);
   const intervalMs = positiveInteger(
     process.env.FACTORY_POLL_INTERVAL_MS ?? "30000",
     "FACTORY_POLL_INTERVAL_MS",
@@ -318,6 +327,7 @@ async function triggerCommand(
     composition.sourceRepositories,
     composition.repositoryEvents,
   );
+  await activateCheckedDefinition(host, values.config, dependencies);
   let accepted = 0;
   try {
     for (const event of events) {
@@ -361,6 +371,23 @@ async function loadDefinition(
 ): Promise<FactoryDefinition> {
   const source = await dependencies.readText(config);
   return compileFactoryDefinition(source, { sourceName: config }).definition;
+}
+
+async function activateCheckedDefinition(
+  host: CliHost,
+  config: string,
+  dependencies: CliDependencies,
+): Promise<void> {
+  const source = await dependencies.readText(config);
+  const revision = (
+    await host.executeAction("definitions/compileDefinition@v1", {
+      source,
+      sourceName: config,
+    })
+  ).result as { readonly definitionDigest: string };
+  await host.executeAction("definitions/activateDefinition@v1", {
+    definitionDigest: revision.definitionDigest,
+  });
 }
 
 function githubRepositories(definition: FactoryDefinition, selected?: string) {

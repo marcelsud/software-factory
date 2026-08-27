@@ -87,8 +87,32 @@ export interface WorkflowSignalRow {
   signal_kind: string;
 }
 
+export interface RunEngineStateRow {
+  artifact_outputs_json: string;
+  attempt_count: number;
+  engine_phase: string;
+  last_outcome: string | null;
+  outcome: string;
+  pending_json: string | null;
+  repository: string;
+  retry_delay_ms: number | null;
+  run_id: string;
+  subject: string;
+  terminal_published: number;
+}
+
+export interface RunAdmissionRow {
+  limit_value: number;
+  requested_at: string;
+  run_id: string;
+  scope_key: string;
+  status: string;
+}
+
 export interface RunsDatabase {
   operator_commands: OperatorCommandRow;
+  run_admissions: RunAdmissionRow;
+  run_engine_state: RunEngineStateRow;
   run_identities: RunIdentityRow;
   run_audit: RunAuditRow;
   run_gates: RunGateRow;
@@ -175,6 +199,35 @@ export const runsMigrations = {
         );
       `,
     },
+    {
+      name: "003_engine_state_and_admission",
+      sql: `
+        CREATE TABLE IF NOT EXISTS run_engine_state (
+          run_id TEXT PRIMARY KEY,
+          repository TEXT NOT NULL,
+          subject TEXT NOT NULL,
+          outcome TEXT NOT NULL,
+          engine_phase TEXT NOT NULL,
+          attempt_count INTEGER NOT NULL,
+          retry_delay_ms INTEGER,
+          last_outcome TEXT,
+          artifact_outputs_json TEXT NOT NULL,
+          pending_json TEXT,
+          terminal_published INTEGER NOT NULL DEFAULT 0,
+          FOREIGN KEY (run_id) REFERENCES runs(run_id)
+        );
+        CREATE TABLE IF NOT EXISTS run_admissions (
+          run_id TEXT PRIMARY KEY,
+          scope_key TEXT NOT NULL,
+          limit_value INTEGER NOT NULL,
+          requested_at TEXT NOT NULL,
+          status TEXT NOT NULL,
+          FOREIGN KEY (run_id) REFERENCES runs(run_id)
+        );
+        CREATE INDEX IF NOT EXISTS run_admissions_scope_fairness
+          ON run_admissions(scope_key, status, requested_at, run_id);
+      `,
+    },
   ],
   postgres: [
     {
@@ -251,6 +304,33 @@ export const runsMigrations = {
           recorded_at TEXT NOT NULL,
           payload_json TEXT NOT NULL
         );
+      `,
+    },
+    {
+      name: "003_engine_state_and_admission",
+      sql: `
+        CREATE TABLE IF NOT EXISTS chimpbase_runs.run_engine_state (
+          run_id TEXT PRIMARY KEY REFERENCES chimpbase_runs.runs(run_id),
+          repository TEXT NOT NULL,
+          subject TEXT NOT NULL,
+          outcome TEXT NOT NULL,
+          engine_phase TEXT NOT NULL,
+          attempt_count INTEGER NOT NULL,
+          retry_delay_ms INTEGER,
+          last_outcome TEXT,
+          artifact_outputs_json TEXT NOT NULL,
+          pending_json TEXT,
+          terminal_published INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS chimpbase_runs.run_admissions (
+          run_id TEXT PRIMARY KEY REFERENCES chimpbase_runs.runs(run_id),
+          scope_key TEXT NOT NULL,
+          limit_value INTEGER NOT NULL,
+          requested_at TEXT NOT NULL,
+          status TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS chimpbase_runs.run_admissions_scope_fairness
+          ON chimpbase_runs.run_admissions(scope_key, status, requested_at, run_id);
       `,
     },
   ],
