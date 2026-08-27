@@ -32,21 +32,17 @@ export type GitHubNormalizationInput =
 
 export interface GitHubEventNormalizerOptions {
   readonly botLogins?: readonly string[];
-  readonly provenanceMarkers?: readonly string[];
 }
 
 const DEFAULT_BOTS = ["dependabot[bot]", "github-actions[bot]", "software-factory[bot]"];
-const DEFAULT_PROVENANCE_MARKERS = ["<!-- software-factory:", "software-factory-provenance:"];
 
 export class GitHubEventNormalizer {
   readonly #bots: ReadonlySet<string>;
-  readonly #provenanceMarkers: readonly string[];
 
   constructor(options: GitHubEventNormalizerOptions = {}) {
     this.#bots = new Set(
       [...(options.botLogins ?? []), ...DEFAULT_BOTS].map((login) => login.toLowerCase()),
     );
-    this.#provenanceMarkers = options.provenanceMarkers ?? DEFAULT_PROVENANCE_MARKERS;
   }
 
   normalize(input: GitHubNormalizationInput): FactoryEvent[] {
@@ -57,7 +53,7 @@ export class GitHubEventNormalizer {
 
   #issueEvents(input: Extract<GitHubNormalizationInput, { kind: "issue" }>): FactoryEvent[] {
     const { current, previous } = input;
-    if (current.isPullRequest || this.#ignored(current.author, current.body)) return [];
+    if (current.isPullRequest || this.#ignored(current.author)) return [];
     if (previous === null) {
       return [this.#issueEvent(input.repositoryId, current, "issue.opened", input.observedAt)];
     }
@@ -98,7 +94,7 @@ export class GitHubEventNormalizer {
 
   #commentEvents(input: Extract<GitHubNormalizationInput, { kind: "comment" }>): FactoryEvent[] {
     const { current, previous } = input;
-    if (this.#ignored(current.author, current.body)) return [];
+    if (this.#ignored(current.author)) return [];
     if (previous === null) {
       return [
         this.#commentEvent(input.repositoryId, current, "issue_comment.created", input.observedAt),
@@ -114,7 +110,7 @@ export class GitHubEventNormalizer {
 
   #actionsEvents(input: Extract<GitHubNormalizationInput, { kind: "actions" }>): FactoryEvent[] {
     const payload = record(input.payload);
-    const repository = actionRepository(payload.repository);
+    const repository = actionRepository(payload.repository, input.repositoryId);
     const repositoryId = input.repositoryId ?? repository.fullName;
     const action = string(payload.action);
     const issue = actionIssue(payload.issue, repository);
@@ -122,8 +118,8 @@ export class GitHubEventNormalizer {
     const sender = actionActor(payload.sender);
     const actor = sender.login === "unknown" ? issue.author : sender;
     if (payload.comment !== undefined) {
-      const comment = actionComment(payload.comment, issue, repository, actor);
-      if (comment === null || this.#ignored(comment.author, comment.body)) return [];
+      const comment = actionComment(payload.comment, issue, repository);
+      if (comment === null || this.#ignored(actor) || this.#ignored(comment.author)) return [];
       if (action === "created" || action === "edited") {
         return [
           this.#commentEvent(
@@ -131,12 +127,13 @@ export class GitHubEventNormalizer {
             comment,
             action === "created" ? "issue_comment.created" : "issue_comment.edited",
             input.observedAt,
+            actor.login,
           ),
         ];
       }
       return [];
     }
-    if (this.#ignored(actor, issue.body)) return [];
+    if (this.#ignored(actor) || this.#ignored(issue.author)) return [];
     const eventType = {
       closed: "issue.closed",
       edited: "issue.edited",
@@ -150,15 +147,7 @@ export class GitHubEventNormalizer {
       action === "labeled" || action === "unlabeled"
         ? string(record(payload.label).name)
         : undefined;
-    return [
-      this.#issueEvent(
-        repositoryId,
-        { ...issue, author: actor },
-        eventType,
-        input.observedAt,
-        label,
-      ),
-    ];
+    return [this.#issueEvent(repositoryId, issue, eventType, input.observedAt, label, actor.login)];
   }
 
   #issueEvent(
@@ -167,6 +156,7 @@ export class GitHubEventNormalizer {
     eventType: string,
     observedAt: string,
     label?: string,
+    actor = issue.author.login,
   ): FactoryEvent {
     const occurredAt =
       eventType === "issue.opened"
@@ -178,7 +168,7 @@ export class GitHubEventNormalizer {
     const detail = label === undefined ? "" : `:label:${label}`;
     const sourceRevision = `${issue.updatedAt}:issue:${issue.id}:${eventType}${detail}`;
     return {
-      actor: issue.author.login,
+      actor,
       correlationId: `github:${issue.repository.fullName}:${subject}`,
       deliveryId: semanticDeliveryId(issue.repository.fullName, subject, eventType, sourceRevision),
       eventType,
@@ -204,11 +194,12 @@ export class GitHubEventNormalizer {
     comment: GitHubIssueCommentRecord,
     eventType: string,
     observedAt: string,
+    actor = comment.author.login,
   ): FactoryEvent {
     const subject = `issue:${comment.issueId ?? comment.issueNumber}`;
     const sourceRevision = `${comment.updatedAt}:comment:${comment.id}:${eventType}`;
     return {
-      actor: comment.author.login,
+      actor,
       correlationId: `github:${comment.repository.fullName}:${subject}`,
       deliveryId: semanticDeliveryId(
         comment.repository.fullName,
@@ -230,9 +221,8 @@ export class GitHubEventNormalizer {
     };
   }
 
-  #ignored(actor: GitHubActorRecord, body: string | null): boolean {
-    if (actor.type === "bot" || this.#bots.has(actor.login.toLowerCase())) return true;
-    return body !== null && this.#provenanceMarkers.some((marker) => body.includes(marker));
+  #ignored(actor: GitHubActorRecord): boolean {
+    return actor.type === "bot" || this.#bots.has(actor.login.toLowerCase());
   }
 }
 
@@ -248,13 +238,13 @@ function semanticDeliveryId(
   return `github:${digest}`;
 }
 
-function actionRepository(value: unknown): GitHubRepositoryRecord {
+function actionRepository(value: unknown, configuredRepositoryId?: string): GitHubRepositoryRecord {
   const repository = record(value);
   const fullName = string(repository.full_name) || "unknown/unknown";
   const [owner = "unknown", name = "unknown"] = fullName.split("/");
   return {
     fullName,
-    id: identity(repository.id) ?? fullName,
+    id: configuredRepositoryId ?? fullName,
     name: string(repository.name) || name,
     owner: string(record(repository.owner).login) || owner,
   };
@@ -290,15 +280,13 @@ function actionComment(
   value: unknown,
   issue: GitHubIssueRecord,
   repository: GitHubRepositoryRecord,
-  fallbackActor: GitHubActorRecord,
 ): GitHubIssueCommentRecord | null {
   const comment = record(value);
   const id = identity(comment.id) ?? identity(comment.node_id);
   if (id === null) return null;
   const createdAt = normalizedTimestamp(comment.created_at);
-  const author = actionActor(comment.user);
   return {
-    author: author.login === "unknown" ? fallbackActor : author,
+    author: actionActor(comment.user),
     body: nullableString(comment.body),
     createdAt,
     id,

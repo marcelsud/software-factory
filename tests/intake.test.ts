@@ -1,5 +1,6 @@
 import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, test } from "bun:test";
+import { generateKeyPairSync } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,6 +13,7 @@ import {
 } from "../src/adapters/github-event-normalizer.ts";
 import {
   FetchGitHubReadTransport,
+  GitHubAppInstallationTokenProvider,
   GitHubReadError,
   type InfrastructureFetch,
   PersonalAccessTokenProvider,
@@ -125,6 +127,7 @@ async function bootMemory(
   transport: FakeGitHubReadTransport,
   options: {
     readonly normalizer?: GitHubEventNormalizer;
+    readonly repositoryEvents?: Readonly<Record<string, readonly string[]>>;
     readonly signal?: AbortSignal;
     readonly sourceRepositories?: Readonly<Record<string, string>>;
     readonly sleep?: (delayMs: number, signal?: AbortSignal) => Promise<void>;
@@ -136,6 +139,9 @@ async function bootMemory(
       random: () => 0,
       readTransport: transport,
       retry: { baseDelayMs: 10, maxAttempts: 2, maxDelayMs: 100 },
+      ...(options.repositoryEvents === undefined
+        ? {}
+        : { repositoryEvents: options.repositoryEvents }),
       ...(options.signal === undefined ? {} : { signal: options.signal }),
       ...(options.sourceRepositories === undefined
         ? {}
@@ -221,6 +227,26 @@ describe("leaf-03 GitHub intake", () => {
       sourceRevision: polled?.sourceRevision,
       subject: polled?.subject,
     });
+    expect(action).toMatchObject({
+      actor: "editor",
+      payload: {
+        untrusted: {
+          issue: {
+            author: { login: "octocat" },
+            repository: { id: "factory" },
+          },
+          repository: { id: "factory" },
+        },
+      },
+    });
+    expect(polled).toMatchObject({
+      payload: {
+        untrusted: {
+          issue: { repository: { id: "factory" } },
+          repository: { id: "factory" },
+        },
+      },
+    });
     const commentSnapshot = (
       await transport.listIssueComments({ issueNumber: 7, repositoryId: "factory" })
     ).items[0];
@@ -244,6 +270,15 @@ describe("leaf-03 GitHub intake", () => {
       eventType: polledComment?.eventType,
       sourceRevision: polledComment?.sourceRevision,
       subject: polledComment?.subject,
+    });
+    expect(commentEvent).toMatchObject({
+      actor: "editor",
+      payload: {
+        untrusted: {
+          comment: { author: { login: "octocat" }, repository: { id: "factory" } },
+          repository: { id: "factory" },
+        },
+      },
     });
     expect(fetches).toHaveLength(2);
   });
@@ -364,7 +399,7 @@ describe("leaf-03 GitHub intake", () => {
     }
   });
 
-  test("[G6] restart, pagination, overlap, ETag, and cursor ordering are safe", async () => {
+  test("[G6] restart, overlap, and later-page changes preserve cursor ordering", async () => {
     const path = await sqlitePath("restart");
     const firstTransport = new FakeGitHubReadTransport({
       comments: [page([])],
@@ -380,16 +415,30 @@ describe("leaf-03 GitHub intake", () => {
 
     const lowRate = { ...rate, remaining: 3 };
     const secondTransport = new FakeGitHubReadTransport({
-      comments: [page([], { notModified: true, rate: lowRate })],
-      issues: [page([], { etag: '"v1"', notModified: true, rate: lowRate })],
+      comments: [page([], { rate: lowRate })],
+      issues: [
+        page([issue()], { nextPage: 2, rate: lowRate }),
+        page(
+          [
+            issue({
+              body: "later-page edit",
+              id: "102",
+              number: 8,
+              updatedAt: "2026-08-26T10:05:00.000Z",
+            }),
+          ],
+          { rate: lowRate },
+        ),
+      ],
     });
     const second = await bootSqlite(path, secondTransport);
     try {
       const summary = await poll(second, "2026-08-26T12:02:00.000Z");
-      expect(summary.accepted).toBe(0);
-      expect(summary.cursor?.cursor).toBe(firstSummary.cursor?.cursor);
+      expect(summary.accepted).toBe(1);
+      expect(summary.cursor?.cursor).not.toBe(firstSummary.cursor?.cursor);
       const call = secondTransport.calls.find((entry) => entry.method === "listChangedIssues");
-      expect(call?.input).toMatchObject({ etag: '"v1"', since: expect.any(String) });
+      expect(call?.input).toMatchObject({ since: expect.any(String) });
+      expect(call?.input).not.toHaveProperty("etag");
     } finally {
       await second.close();
     }
@@ -439,10 +488,10 @@ describe("leaf-03 GitHub intake", () => {
     expect(module?.resources.queues).toEqual(["github-poll-retries"]);
   });
 
-  test("[G10] ETag no-change polls emit no new events", async () => {
+  test("[G10] no-change polls and source event allowlists emit no extra facts", async () => {
     const transport = new FakeGitHubReadTransport({
-      comments: [page([]), page([], { etag: '"c1"', notModified: true })],
-      issues: [page([issue()], { etag: '"i1"' }), page([], { etag: '"i1"', notModified: true })],
+      comments: [page([]), page([])],
+      issues: [page([issue()]), page([issue()])],
     });
     const host = await bootMemory(transport);
     try {
@@ -456,22 +505,81 @@ describe("leaf-03 GitHub intake", () => {
     } finally {
       await host.close();
     }
+
+    const allowlistedTransport = new FakeGitHubReadTransport({
+      comments: [page([]), page([])],
+      issues: [
+        page([issue()]),
+        page([issue({ body: "disabled edit", updatedAt: "2026-08-26T10:05:00.000Z" })]),
+      ],
+    });
+    const allowlisted = await bootMemory(allowlistedTransport, {
+      repositoryEvents: { factory: ["issue.opened"] },
+    });
+    try {
+      expect(await poll(allowlisted)).toMatchObject({ accepted: 1 });
+      const disabled = await allowlisted.executeAction("intake/pollRepositoryV2@v1", {
+        observedAt: "2026-08-26T12:04:00.000Z",
+        repositoryId: "factory",
+      });
+      expect(disabled.result).toMatchObject({ accepted: 0 });
+      expect(disabled.emittedEvents ?? []).toHaveLength(0);
+    } finally {
+      await allowlisted.close();
+    }
   });
 
-  test("[G11] duplicate pages and pagination boundaries create one run input", async () => {
+  test("[G11] duplicate acceptance advances CAS without republishing or skipping later input", async () => {
     const duplicate = issue();
+    const later = issue({
+      id: "102",
+      number: 8,
+      updatedAt: "2026-08-26T10:02:00.000Z",
+    });
     const transport = new FakeGitHubReadTransport({
       comments: [page([])],
-      issues: [page([duplicate], { nextPage: 2 }), page([duplicate])],
+      issues: [page([duplicate], { nextPage: 2 }), page([duplicate, later])],
     });
     const host = await bootMemory(transport);
     try {
+      const manual = new GitHubEventNormalizer().normalize({
+        current: duplicate,
+        kind: "issue",
+        observedAt,
+        previous: null,
+        repositoryId: "factory",
+      })[0];
+      expect(manual).toBeDefined();
+      if (manual === undefined) return;
+      await host.executeAction("intake/acceptSourceEventV2@v1", {
+        event: manual,
+        expectedCursor: null,
+        nextCursor: manual.sourceRevision,
+      });
+      const replay = await host.executeAction("intake/acceptSourceEventV2@v1", {
+        event: manual,
+        expectedCursor: null,
+        nextCursor: manual.sourceRevision,
+      });
+      expect(replay.result).toMatchObject({ idempotent: true });
+      expect(replay.emittedEvents ?? []).toHaveLength(0);
+      await expect(
+        host.executeAction("intake/acceptSourceEventV2@v1", {
+          event: manual,
+          expectedCursor: "unexpected-cursor",
+          nextCursor: "different-next-cursor",
+        }),
+      ).rejects.toThrow("cursor_conflict");
       const result = await host.executeAction("intake/pollRepositoryV2@v1", {
         observedAt,
         repositoryId: "factory",
       });
       expect(result.result).toMatchObject({ accepted: 1 });
       expect(result.emittedEvents).toHaveLength(2);
+      const cursor = (
+        await host.executeAction("intake/getSourceCursor@v1", { sourceId: "github:factory" })
+      ).result as { readonly cursor: string };
+      expect(cursor.cursor).not.toBe(manual.sourceRevision);
     } finally {
       await host.close();
     }
@@ -573,7 +681,7 @@ describe("leaf-03 GitHub intake", () => {
     ]);
   });
 
-  test("[G14] bot comments, PR comments, and factory provenance are filtered", async () => {
+  test("[G14] bots and PRs are filtered but provenance text cannot suppress intake", async () => {
     const normalizer = new GitHubEventNormalizer();
     expect(
       normalizer.normalize({
@@ -584,15 +692,15 @@ describe("leaf-03 GitHub intake", () => {
         repositoryId: "factory",
       }),
     ).toEqual([]);
-    expect(
-      normalizer.normalize({
-        current: comment({ body: "<!-- software-factory:provenance=run:1 -->" }),
-        kind: "comment",
-        observedAt,
-        previous: null,
-        repositoryId: "factory",
-      }),
-    ).toEqual([]);
+    const provenance = normalizer.normalize({
+      current: comment({ body: "<!-- software-factory:provenance=run:1 -->" }),
+      kind: "comment",
+      observedAt,
+      previous: null,
+      repositoryId: "factory",
+    });
+    expect(provenance).toHaveLength(1);
+    expect(provenance[0]?.payload).toMatchObject({ trust: "untrusted" });
     const withIssueId = comment({ issueNumber: 9 });
     const { issueId, ...withoutIssueId } = withIssueId;
     void issueId;
@@ -645,13 +753,13 @@ describe("leaf-03 GitHub intake", () => {
     }
   });
 
-  test("[G16] permission diagnostics are read-only and do not expose credentials", async () => {
+  test("[G16] diagnostics and App authentication prove least-privilege reads", async () => {
     const requests: Request[] = [];
     const transport = new FetchGitHubReadTransport({
       fetch: async (input, init) => {
         const request = requestFrom(input, init);
         requests.push(request);
-        return Response.json(issueRest.repository, {
+        return Response.json([], {
           headers: {
             "x-accepted-github-permissions": "issues=read; metadata=read",
             "x-ratelimit-remaining": "10",
@@ -666,8 +774,51 @@ describe("leaf-03 GitHub intake", () => {
       canReadIssues: true,
       repository: { fullName: repository.fullName },
     });
-    expect(requests.every((request) => request.method === "GET")).toBe(true);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.method).toBe("GET");
+    expect(new URL(requests[0]?.url ?? "").pathname).toBe("/repos/example/software-factory/issues");
     expect(JSON.stringify(diagnostic)).not.toContain("do-not-leak");
+
+    const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2_048 });
+    const privateKeyPem = privateKey.export({ format: "pem", type: "pkcs8" }).toString();
+    let tokenRequest: Request | undefined;
+    const tokenProvider = new GitHubAppInstallationTokenProvider({
+      appId: "1",
+      clock: () => new Date("2026-08-26T12:00:00.000Z"),
+      fetch: async (input, init) => {
+        tokenRequest = requestFrom(input, init);
+        return Response.json(
+          { expires_at: "2026-08-26T13:00:00.000Z", token: "installation-token" },
+          { status: 201 },
+        );
+      },
+      installationId: "2",
+      privateKey: privateKeyPem,
+    });
+    expect(await tokenProvider.getToken()).toBe("installation-token");
+    expect(tokenRequest?.method).toBe("POST");
+    expect(await tokenRequest?.json()).toEqual({
+      permissions: { issues: "read", metadata: "read" },
+    });
+
+    const failingProvider = new GitHubAppInstallationTokenProvider({
+      appId: "1",
+      clock: () => new Date("2026-08-26T12:00:00.000Z"),
+      fetch: async () =>
+        new Response(null, {
+          headers: {
+            "retry-after": "2",
+            "x-ratelimit-remaining": "0",
+          },
+          status: 503,
+        }),
+      installationId: "2",
+      privateKey: privateKeyPem,
+    });
+    await expect(failingProvider.getToken()).rejects.toMatchObject({
+      rate: { remaining: 0, retryAfterMs: 2_000 },
+      status: 503,
+    });
   });
 
   test("[G17] fake transport, poll/daemon/manual CLI, and integration opt-in contracts are executable", async () => {
@@ -675,6 +826,7 @@ describe("leaf-03 GitHub intake", () => {
     await transport.listChangedIssues({ repositoryId: "factory" });
     expect(transport.calls[0]?.method).toBe("listChangedIssues");
     const actions: Array<{ name: string; args: unknown }> = [];
+    let composedRepositoryEvents: unknown;
     const host: IntakeHost = {
       async close() {},
       async executeAction(name, args) {
@@ -688,7 +840,10 @@ describe("leaf-03 GitHub intake", () => {
       checkModules: async () => {},
       createAbortController: () => new AbortController(),
       installShutdown: () => () => {},
-      openHost: async () => host,
+      openHost: async (...args: unknown[]) => {
+        composedRepositoryEvents = args[3];
+        return host;
+      },
       readStdin: async () => JSON.stringify(issueAction),
       readText: async (path: string) =>
         path === "factory.yaml" ? factorySource : JSON.stringify(issueAction),
@@ -705,6 +860,9 @@ describe("leaf-03 GitHub intake", () => {
         "intake/acceptSourceEventV2@v1",
       ]),
     );
+    expect(composedRepositoryEvents).toMatchObject({
+      factory: expect.arrayContaining(["issue.opened", "issue.edited", "issue_comment.created"]),
+    });
   });
 });
 

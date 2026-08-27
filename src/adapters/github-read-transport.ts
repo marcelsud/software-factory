@@ -78,9 +78,11 @@ export class GitHubAppInstallationTokenProvider implements GitHubTokenProvider {
     const response = await this.#fetch(
       `${this.#apiBaseUrl}/app/installations/${encodeURIComponent(this.#installationId)}/access_tokens`,
       {
+        body: JSON.stringify({ permissions: { issues: "read", metadata: "read" } }),
         headers: {
           accept: "application/vnd.github+json",
           authorization: `Bearer ${jwt}`,
+          "content-type": "application/json",
           "user-agent": "software-factory",
           "x-github-api-version": "2022-11-28",
         },
@@ -88,7 +90,13 @@ export class GitHubAppInstallationTokenProvider implements GitHubTokenProvider {
         ...(signal === undefined ? {} : { signal }),
       },
     );
-    if (!response.ok) throw new Error(`GitHub App authentication failed (${response.status})`);
+    if (!response.ok) {
+      throw new GitHubReadError(
+        `GitHub App authentication failed (${response.status})`,
+        response.status,
+        rateFromHeaders(response.headers, now),
+      );
+    }
     const body = asRecord(await response.json());
     const token = text(body.token);
     const expiresAt = Date.parse(text(body.expires_at));
@@ -226,24 +234,23 @@ export class FetchGitHubReadTransport implements GitHubReadTransport {
     let response: ReadResponse;
     try {
       response = await this.#get(
-        `/repos/${repository.owner}/${repository.name}`,
-        {},
+        `/repos/${repository.owner}/${repository.name}/issues`,
+        { per_page: "1", state: "all" },
         undefined,
         input.signal,
       );
     } catch (error) {
-      if (!(error instanceof GitHubReadError) || (error.status !== 403 && error.status !== 404)) {
+      if (!(error instanceof GitHubReadError) || ![401, 403, 404, 410].includes(error.status)) {
         throw error;
       }
       return {
         canReadIssues: false,
         grantedPermissions: [],
-        message: `repository issue metadata is not readable (${error.status})`,
+        message: `repository issues are not readable (${error.status})`,
         rate: error.rate,
         repository: null,
       };
     }
-    const body = asRecord(response.body);
     const granted = new Set(
       (response.headers.get("x-oauth-scopes") ?? "")
         .split(",")
@@ -259,9 +266,9 @@ export class FetchGitHubReadTransport implements GitHubReadTransport {
     return {
       canReadIssues: true,
       grantedPermissions: [...granted].sort(),
-      message: "repository and issue metadata are readable",
+      message: "repository issues are readable",
       rate: response.rate,
-      repository: repositoryRecord(body, repository),
+      repository,
     };
   }
 
@@ -393,7 +400,7 @@ function repositoryRecord(
   const name = text(record.name) || nameFromName;
   return {
     fullName: `${owner}/${name}`,
-    id: nullableIdentity(record.id) ?? fallback.id,
+    id: fallback.id,
     name,
     owner,
   };

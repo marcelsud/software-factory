@@ -20,5 +20,5 @@
     "full_name": "example/software-factory",
     "owner": { "login": "example" }
   },
-  "sender": { "login": "octocat", "type": "User" }
+  "sender": { "login": "editor", "type": "User" }
 }

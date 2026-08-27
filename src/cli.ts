@@ -40,6 +40,7 @@ export interface CliDependencies {
     repositories: Readonly<Record<string, string>>,
     signal: AbortSignal,
     sourceRepositories?: Readonly<Record<string, string>>,
+    repositoryEvents?: Readonly<Record<string, readonly string[]>>,
   ) => Promise<CliHost>;
   readonly readStdin?: () => Promise<string>;
   readonly readText: (path: string) => Promise<string>;
@@ -69,7 +70,7 @@ const defaultDependencies: Required<CliDependencies> = {
       process.off("SIGTERM", abort);
     };
   },
-  async openHost(repositories, signal, sourceRepositories = {}) {
+  async openHost(repositories, signal, sourceRepositories = {}, repositoryEvents = {}) {
     const clock = () => new Date();
     const tokenProvider = tokenProviderFromEnvironment();
     const readTransport = new FetchGitHubReadTransport({ clock, repositories, tokenProvider });
@@ -81,7 +82,13 @@ const defaultDependencies: Required<CliDependencies> = {
         ? await import("chimpbase/runtime/bun")
         : await import("chimpbase/runtime/node");
     return await runtime.createChimpbase({
-      app: createSoftwareFactoryApp({ clock, readTransport, signal, sourceRepositories }),
+      app: createSoftwareFactoryApp({
+        clock,
+        readTransport,
+        repositoryEvents,
+        signal,
+        sourceRepositories,
+      }),
       projectDir: process.cwd(),
       storage: { engine: "sqlite", path },
       subscriptions: { dispatch: "async" },
@@ -212,6 +219,7 @@ async function pollCommand(
     composition.repositories,
     controller.signal,
     composition.sourceRepositories,
+    composition.repositoryEvents,
   );
   try {
     const accepted = await pollOnce(host, repositories, new Date().toISOString());
@@ -242,6 +250,7 @@ async function daemonCommand(
     composition.repositories,
     controller.signal,
     composition.sourceRepositories,
+    composition.repositoryEvents,
   );
   const intervalMs = positiveInteger(
     process.env.FACTORY_POLL_INTERVAL_MS ?? "30000",
@@ -290,8 +299,16 @@ async function triggerCommand(
       : await dependencies.readText(values.event);
   const raw: unknown = JSON.parse(source);
   const observedAt = new Date().toISOString();
-  const events = manualEvents(raw, values.repository ?? repositories[0]?.id, observedAt);
-  if (events.length === 0) throw new Error("event did not normalize to an accepted FactoryEvent");
+  const repositoryId = repositories[0]?.id;
+  const allowedEvents =
+    repositoryId === undefined ? undefined : composition.repositoryEvents[repositoryId];
+  const events = manualEvents(raw, repositoryId, observedAt).filter(
+    (event) =>
+      allowedEvents === undefined ||
+      allowedEvents.includes("*") ||
+      allowedEvents.includes(event.eventType),
+  );
+  if (events.length === 0) throw new Error("event did not normalize to an enabled FactoryEvent");
   const controller = (
     dependencies.createAbortController ?? defaultDependencies.createAbortController
   )();
@@ -299,6 +316,7 @@ async function triggerCommand(
     composition.repositories,
     controller.signal,
     composition.sourceRepositories,
+    composition.repositoryEvents,
   );
   let accepted = 0;
   try {
@@ -359,25 +377,31 @@ function githubRepositories(definition: FactoryDefinition, selected?: string) {
         repository.id === selected ||
         `${repository.owner}/${repository.name}` === selected,
     )
-    .map((repository) => ({
-      fullName: `${repository.owner}/${repository.name}`,
-      id: repository.id,
-      sourceIds: definition.sources
-        .filter((source) => source.type === "github" && source.repository === repository.id)
-        .map((source) => source.id),
-    }));
+    .map((repository) => {
+      const sources = definition.sources.filter(
+        (source) => source.type === "github" && source.repository === repository.id,
+      );
+      return {
+        events: [...new Set(sources.flatMap((source) => source.events ?? ["*"]))].sort(),
+        fullName: `${repository.owner}/${repository.name}`,
+        id: repository.id,
+        sourceIds: sources.map((source) => source.id),
+      };
+    });
   if (repositories.length === 0) throw new Error("no configured GitHub repository matched");
   return repositories;
 }
 
 function repositoryComposition(
   repositories: readonly {
+    readonly events: readonly string[];
     readonly fullName: string;
     readonly id: string;
     readonly sourceIds: readonly string[];
   }[],
 ) {
   return {
+    repositoryEvents: Object.fromEntries(repositories.map((entry) => [entry.id, entry.events])),
     repositories: Object.fromEntries(repositories.map((entry) => [entry.id, entry.fullName])),
     sourceRepositories: Object.fromEntries(
       repositories.flatMap((entry) => entry.sourceIds.map((sourceId) => [sourceId, entry.id])),

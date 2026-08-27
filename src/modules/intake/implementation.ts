@@ -35,6 +35,7 @@ export interface IntakeImplementationDependencies {
   readonly overlapMs?: number;
   readonly random?: () => number;
   readonly readTransport: GitHubReadTransport;
+  readonly repositoryEvents?: Readonly<Record<string, readonly string[]>>;
   readonly retry?: {
     readonly baseDelayMs?: number;
     readonly maxAttempts?: number;
@@ -51,6 +52,7 @@ interface ResolvedDependencies {
   readonly overlapMs: number;
   readonly random: () => number;
   readonly readTransport: GitHubReadTransport;
+  readonly repositoryEvents: Readonly<Record<string, readonly string[]>>;
   readonly retry: {
     readonly baseDelayMs: number;
     readonly maxAttempts: number;
@@ -123,6 +125,64 @@ function canonicalJson(value: unknown, ancestors = new Set<object>()): string {
   }
   throw new Error(`invalid_source_event: unsupported payload value ${typeof value}`);
 }
+async function advanceSourceCursor(
+  db: Kysely<IntakeDatabase>,
+  event: FactoryEvent,
+  cursorAdvance?: CursorAdvance,
+  allowAlreadyAdvanced = false,
+): Promise<void> {
+  const cursor = await db
+    .selectFrom("source_cursors")
+    .selectAll()
+    .where("source_id", "=", event.sourceId)
+    .executeTakeFirst();
+  if (cursorAdvance !== undefined) {
+    const committedCursor = cursor?.cursor ?? null;
+    if (allowAlreadyAdvanced && committedCursor === cursorAdvance.nextCursor) return;
+    if (committedCursor !== cursorAdvance.expectedCursor) {
+      throw new Error("cursor_conflict: committed source cursor does not match expected cursor");
+    }
+    if (cursor === undefined) {
+      const inserted = await db
+        .insertInto("source_cursors")
+        .values({
+          cursor: cursorAdvance.nextCursor,
+          source_id: event.sourceId,
+          updated_at: event.observedAt,
+        })
+        .onConflict((conflict) => conflict.column("source_id").doNothing())
+        .executeTakeFirst();
+      if (inserted.numInsertedOrUpdatedRows !== 1n) {
+        throw new Error("cursor_conflict: source cursor changed during acceptance");
+      }
+      return;
+    }
+    const updated = await db
+      .updateTable("source_cursors")
+      .set({ cursor: cursorAdvance.nextCursor, updated_at: event.observedAt })
+      .where("source_id", "=", event.sourceId)
+      .where("cursor", "=", cursorAdvance.expectedCursor ?? "")
+      .executeTakeFirst();
+    if (updated.numUpdatedRows !== 1n) {
+      throw new Error("cursor_conflict: source cursor changed during acceptance");
+    }
+    return;
+  }
+  if (cursor === undefined) {
+    await db
+      .insertInto("source_cursors")
+      .values({
+        cursor: event.sourceRevision,
+        source_id: event.sourceId,
+        updated_at: event.observedAt,
+      })
+      .execute();
+    return;
+  }
+  throw new Error(
+    "invalid_source_event: source cursor already exists; use acceptSourceEventV2 with expectedCursor and nextCursor",
+  );
+}
 
 async function acceptDurably(
   ctx: ChimpbaseModuleContext<IntakeDatabase>,
@@ -142,6 +202,9 @@ async function acceptDurably(
   if (existing !== undefined) {
     if (existing.payload_digest !== payloadDigest) {
       throw new Error("delivery_conflict: source delivery identity has a different payload digest");
+    }
+    if (cursorAdvance !== undefined) {
+      await advanceSourceCursor(db, event, cursorAdvance, true);
     }
     const accepted = await db
       .selectFrom("factory_events")
@@ -194,53 +257,7 @@ async function acceptDurably(
       source_id: event.sourceId,
     })
     .execute();
-  const cursor = await db
-    .selectFrom("source_cursors")
-    .selectAll()
-    .where("source_id", "=", event.sourceId)
-    .executeTakeFirst();
-  if (cursorAdvance !== undefined) {
-    if ((cursor?.cursor ?? null) !== cursorAdvance.expectedCursor) {
-      throw new Error("cursor_conflict: committed source cursor does not match expected cursor");
-    }
-    if (cursor === undefined) {
-      const inserted = await db
-        .insertInto("source_cursors")
-        .values({
-          cursor: cursorAdvance.nextCursor,
-          source_id: event.sourceId,
-          updated_at: event.observedAt,
-        })
-        .onConflict((conflict) => conflict.column("source_id").doNothing())
-        .executeTakeFirst();
-      if (inserted.numInsertedOrUpdatedRows !== 1n) {
-        throw new Error("cursor_conflict: source cursor changed during acceptance");
-      }
-    } else {
-      const updated = await db
-        .updateTable("source_cursors")
-        .set({ cursor: cursorAdvance.nextCursor, updated_at: event.observedAt })
-        .where("source_id", "=", event.sourceId)
-        .where("cursor", "=", cursorAdvance.expectedCursor ?? "")
-        .executeTakeFirst();
-      if (updated.numUpdatedRows !== 1n) {
-        throw new Error("cursor_conflict: source cursor changed during acceptance");
-      }
-    }
-  } else if (cursor === undefined) {
-    await db
-      .insertInto("source_cursors")
-      .values({
-        cursor: event.sourceRevision,
-        source_id: event.sourceId,
-        updated_at: event.observedAt,
-      })
-      .execute();
-  } else {
-    throw new Error(
-      "invalid_source_event: source cursor already exists; use acceptSourceEventV2 with expectedCursor and nextCursor",
-    );
-  }
+  await advanceSourceCursor(db, event, cursorAdvance);
   const accepted = { event, idempotent: false, payloadDigest };
   ctx.publish(intake.events.factoryEventAcceptedV1, event);
   ctx.publish(intake.events.factoryEventAcceptedV2, accepted);
@@ -260,6 +277,7 @@ export function createIntakeImplementation(input: IntakeImplementationDependenci
     overlapMs: input.overlapMs ?? 60_000,
     random: input.random ?? Math.random,
     readTransport: input.readTransport,
+    repositoryEvents: input.repositoryEvents ?? {},
     retry: {
       baseDelayMs: input.retry?.baseDelayMs ?? 250,
       maxAttempts: input.retry?.maxAttempts ?? 3,
@@ -420,7 +438,7 @@ async function pollRepository(
           repositoryId: input.repositoryId,
           signal: dependencies.signal,
         }),
-      state?.issues_etag ?? null,
+      null,
       dependencies,
     );
     comments = await collectPages(
@@ -432,7 +450,7 @@ async function pollRepository(
           repositoryId: input.repositoryId,
           signal: dependencies.signal,
         }),
-      state?.comments_etag ?? null,
+      null,
       dependencies,
     );
   } catch (error) {
@@ -571,7 +589,15 @@ async function pollRepository(
   const sourceId = `github:${input.repositoryId}`;
   let cursor = await ctx.call(intake.calls.getSourceCursor, { sourceId });
   let accepted = 0;
+  const allowedEvents = dependencies.repositoryEvents[input.repositoryId];
   for (const entry of normalized) {
+    if (
+      allowedEvents !== undefined &&
+      !allowedEvents.includes("*") &&
+      !allowedEvents.includes(entry.event.eventType)
+    ) {
+      continue;
+    }
     const nextCursor = monotonicCursor(cursor?.cursor ?? null, entry.position);
     const result = await ctx.call(intake.calls.acceptSourceEventV2, {
       event: entry.event,
