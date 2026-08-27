@@ -654,7 +654,7 @@ function validateDefinition(definition: FactoryDefinition): void {
       permission.capability,
       `$.effectPermissions[${index}].capability`,
     );
-    if (owner !== "effects" && owner !== "git-publisher" && owner !== "github-transport") {
+    if (owner !== "effects" && owner !== "git-publisher") {
       fail(
         `$.effectPermissions[${index}].capability`,
         `capability ${JSON.stringify(permission.capability)} is owned by ${JSON.stringify(owner)} and cannot be used as an effect`,
@@ -711,7 +711,7 @@ function validateDefinition(definition: FactoryDefinition): void {
         const allowedForKind =
           step.kind === "agent"
             ? owner === "execution" || owner === "agent-runtime"
-            : owner === "effects" || owner === "git-publisher" || owner === "github-transport";
+            : owner === "effects" || owner === "git-publisher";
         if (!allowedForKind) {
           fail(
             `${path}.steps[${index}].capabilities[${child}]`,

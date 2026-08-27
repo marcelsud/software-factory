@@ -2609,6 +2609,73 @@
             "type": "object"
           },
           "version": 1
+        },
+        {
+          "errors": [
+            "module_unavailable",
+            "source_not_found",
+            "transport_failure"
+          ],
+          "guarantees": [
+            "never advances a cursor past an uncommitted event",
+            "source positions are monotonic and overlap replays are idempotent"
+          ],
+          "id": "intake/pollRepositoryV2@v1",
+          "inputSchema": {
+            "properties": {
+              "observedAt": {
+                "type": "string"
+              },
+              "repositoryId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "observedAt",
+              "repositoryId"
+            ],
+            "type": "object"
+          },
+          "name": "pollRepositoryV2",
+          "outputSchema": {
+            "properties": {
+              "accepted": {
+                "type": "integer"
+              },
+              "cursor": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "cursor": {
+                        "type": "string"
+                      },
+                      "sourceId": {
+                        "type": "string"
+                      },
+                      "updatedAt": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "cursor",
+                      "sourceId",
+                      "updatedAt"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "accepted",
+              "cursor"
+            ],
+            "type": "object"
+          },
+          "version": 1
         }
       ],
       "dependencies": [
@@ -2743,11 +2810,13 @@
       "migrations": {
         "postgres": [
           "001_ledger",
-          "002_event_ledger"
+          "002_event_ledger",
+          "003_github_polling"
         ],
         "sqlite": [
           "001_ledger",
-          "002_event_ledger"
+          "002_event_ledger",
+          "003_github_polling"
         ]
       },
       "name": "intake",
@@ -2756,13 +2825,22 @@
           "delivery-deduplication",
           "event-sources",
           "factory-events",
+          "github-comment-snapshots",
+          "github-issue-snapshots",
+          "github-poll-state",
           "source-cursors",
           "source-payload-snapshots"
+        ],
+        "queues": [
+          "github-poll-retries"
         ],
         "tables": [
           "delivery_deduplication",
           "event_sources",
           "factory_events",
+          "github_comment_snapshots",
+          "github_issue_snapshots",
+          "github_poll_state",
           "source_cursors",
           "source_payload_snapshots"
         ]
@@ -6803,6 +6881,64 @@
       },
       "kind": "action",
       "name": "intake/pollRepository@v1",
+      "outputSchema": {
+        "properties": {
+          "accepted": {
+            "type": "integer"
+          },
+          "cursor": {
+            "anyOf": [
+              {
+                "properties": {
+                  "cursor": {
+                    "type": "string"
+                  },
+                  "sourceId": {
+                    "type": "string"
+                  },
+                  "updatedAt": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "cursor",
+                  "sourceId",
+                  "updatedAt"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "accepted",
+          "cursor"
+        ],
+        "type": "object"
+      },
+      "provider": "intake"
+    },
+    {
+      "inputSchema": {
+        "properties": {
+          "observedAt": {
+            "type": "string"
+          },
+          "repositoryId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "observedAt",
+          "repositoryId"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "intake/pollRepositoryV2@v1",
       "outputSchema": {
         "properties": {
           "accepted": {

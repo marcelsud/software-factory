@@ -5,27 +5,108 @@ import type {
   AgentRuntimeRequest,
   AgentRuntimeResult,
   ArtifactByteDriver,
-  GitHubTransport,
-  GitHubTransportRequest,
-  GitHubTransportResponse,
+  GitHubIssueCommentRecord,
+  GitHubIssueRecord,
+  GitHubListInput,
+  GitHubPage,
+  GitHubRateLimitRecord,
+  GitHubReadPermissionDiagnostic,
+  GitHubReadTransport,
   GitPublication,
   GitPublisher,
 } from "../adapters/seams.ts";
 
-export class FakeGitHubTransport implements GitHubTransport {
-  readonly requests: GitHubTransportRequest[] = [];
-  readonly #responses: GitHubTransportResponse[];
+export interface FakeGitHubReadTransportScript {
+  readonly comments?: ReadonlyArray<Error | GitHubPage<GitHubIssueCommentRecord>>;
+  readonly diagnostics?: ReadonlyArray<Error | GitHubReadPermissionDiagnostic>;
+  readonly issues?: ReadonlyArray<Error | GitHubPage<GitHubIssueRecord>>;
+  readonly issueReads?: ReadonlyArray<
+    Error | { readonly issue: GitHubIssueRecord; readonly rate: GitHubRateLimitRecord }
+  >;
+  readonly rates?: ReadonlyArray<Error | GitHubRateLimitRecord>;
+}
 
-  constructor(responses: readonly GitHubTransportResponse[] = []) {
-    this.#responses = [...responses];
+export class FakeGitHubReadTransport implements GitHubReadTransport {
+  readonly calls: Array<{ readonly input: unknown; readonly method: string }> = [];
+  readonly #comments: Array<Error | GitHubPage<GitHubIssueCommentRecord>>;
+  readonly #diagnostics: Array<Error | GitHubReadPermissionDiagnostic>;
+  readonly #issues: Array<Error | GitHubPage<GitHubIssueRecord>>;
+  readonly #issueReads: Array<
+    Error | { readonly issue: GitHubIssueRecord; readonly rate: GitHubRateLimitRecord }
+  >;
+  readonly #rates: Array<Error | GitHubRateLimitRecord>;
+
+  constructor(script: FakeGitHubReadTransportScript = {}) {
+    this.#comments = [...(script.comments ?? [])];
+    this.#diagnostics = [...(script.diagnostics ?? [])];
+    this.#issues = [...(script.issues ?? [])];
+    this.#issueReads = [...(script.issueReads ?? [])];
+    this.#rates = [...(script.rates ?? [])];
   }
 
-  async request(request: GitHubTransportRequest): Promise<GitHubTransportResponse> {
-    this.requests.push(request);
-    const response = this.#responses.shift();
-    if (response === undefined) throw new Error("fake GitHub response not configured");
-    return response;
+  async listChangedIssues(input: GitHubListInput): Promise<GitHubPage<GitHubIssueRecord>> {
+    this.calls.push({ input, method: "listChangedIssues" });
+    return take(this.#issues, emptyPage<GitHubIssueRecord>(), "issue page");
   }
+
+  async listIssueComments(
+    input: GitHubListInput & { readonly issueNumber?: number },
+  ): Promise<GitHubPage<GitHubIssueCommentRecord>> {
+    this.calls.push({ input, method: "listIssueComments" });
+    return take(this.#comments, emptyPage<GitHubIssueCommentRecord>(), "comment page");
+  }
+
+  async getIssue(input: {
+    readonly issueNumber: number;
+    readonly repositoryId: string;
+    readonly signal?: AbortSignal;
+  }): Promise<{ readonly issue: GitHubIssueRecord; readonly rate: GitHubRateLimitRecord }> {
+    this.calls.push({ input, method: "getIssue" });
+    return take(this.#issueReads, undefined, "issue read");
+  }
+
+  async getRateLimit(
+    input: { readonly signal?: AbortSignal } = {},
+  ): Promise<GitHubRateLimitRecord> {
+    this.calls.push({ input, method: "getRateLimit" });
+    return take(this.#rates, unlimitedRate(), "rate limit");
+  }
+
+  async diagnoseReadPermission(input: {
+    readonly repositoryId: string;
+    readonly signal?: AbortSignal;
+  }): Promise<GitHubReadPermissionDiagnostic> {
+    this.calls.push({ input, method: "diagnoseReadPermission" });
+    return take(
+      this.#diagnostics,
+      {
+        canReadIssues: true,
+        grantedPermissions: ["issues=read"],
+        message: "fake repository is readable",
+        rate: unlimitedRate(),
+        repository: null,
+      },
+      "permission diagnostic",
+    );
+  }
+}
+
+function take<T>(queue: Array<Error | T>, fallback: T | undefined, description: string): T {
+  const value = queue.shift() ?? fallback;
+  if (value === undefined) throw new Error(`fake GitHub ${description} not configured`);
+  if (value instanceof Error) throw value;
+  return value;
+}
+
+function emptyPage<T>(): GitHubPage<T> {
+  return {
+    items: [],
+    page: { etag: null, nextPage: null, notModified: false, rate: unlimitedRate() },
+  };
+}
+
+function unlimitedRate(): GitHubRateLimitRecord {
+  return { limit: 5_000, remaining: 5_000, resetAt: null, retryAfterMs: null };
 }
 
 export class FakeAgentRuntime implements AgentRuntime {

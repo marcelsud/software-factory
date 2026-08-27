@@ -10,7 +10,15 @@ sources:
   - id: github-issues
     type: github
     repository: factory
-    events: [issues.opened, issues.edited]
+    events:
+      - issue.opened
+      - issue.edited
+      - issue.reopened
+      - issue.closed
+      - issue.label_added
+      - issue.label_removed
+      - issue_comment.created
+      - issue_comment.edited
   - id: manual-triage
     type: manual
     repository: factory

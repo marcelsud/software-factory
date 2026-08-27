@@ -35,11 +35,43 @@ export interface SourcePayloadSnapshotRow {
   payload_json: string;
   source_id: string;
 }
+export interface GitHubIssueSnapshotRow {
+  issue_id: string;
+  issue_number: number;
+  position: string;
+  repository_id: string;
+  snapshot_json: string;
+  updated_at: string;
+}
+
+export interface GitHubCommentSnapshotRow {
+  comment_id: string;
+  issue_number: number;
+  position: string;
+  repository_id: string;
+  snapshot_json: string;
+  updated_at: string;
+}
+
+export interface GitHubPollStateRow {
+  comments_etag: string | null;
+  issues_etag: string | null;
+  rate_limit: number | null;
+  rate_remaining: number | null;
+  rate_retry_after_ms: number | null;
+  rate_reset_at: string | null;
+  repository_id: string;
+  source_position: string | null;
+  updated_at: string;
+}
 
 export interface IntakeDatabase {
   delivery_deduplication: DeliveryDeduplicationRow;
   event_sources: EventSourceRow;
   factory_events: FactoryEventRow;
+  github_comment_snapshots: GitHubCommentSnapshotRow;
+  github_issue_snapshots: GitHubIssueSnapshotRow;
+  github_poll_state: GitHubPollStateRow;
   source_cursors: SourceCursorRow;
   source_payload_snapshots: SourcePayloadSnapshotRow;
 }
@@ -95,6 +127,44 @@ export const intakeMigrations = {
         );
       `,
     },
+    {
+      name: "003_github_polling",
+      sql: `
+        CREATE TABLE IF NOT EXISTS github_issue_snapshots (
+          repository_id TEXT NOT NULL,
+          issue_id TEXT NOT NULL,
+          issue_number INTEGER NOT NULL,
+          updated_at TEXT NOT NULL,
+          position TEXT NOT NULL,
+          snapshot_json TEXT NOT NULL,
+          PRIMARY KEY (repository_id, issue_id)
+        );
+        CREATE INDEX IF NOT EXISTS github_issue_snapshots_position
+          ON github_issue_snapshots(repository_id, updated_at, issue_id);
+        CREATE TABLE IF NOT EXISTS github_comment_snapshots (
+          repository_id TEXT NOT NULL,
+          comment_id TEXT NOT NULL,
+          issue_number INTEGER NOT NULL,
+          updated_at TEXT NOT NULL,
+          position TEXT NOT NULL,
+          snapshot_json TEXT NOT NULL,
+          PRIMARY KEY (repository_id, comment_id)
+        );
+        CREATE INDEX IF NOT EXISTS github_comment_snapshots_position
+          ON github_comment_snapshots(repository_id, updated_at, comment_id);
+        CREATE TABLE IF NOT EXISTS github_poll_state (
+          repository_id TEXT PRIMARY KEY,
+          source_position TEXT,
+          issues_etag TEXT,
+          comments_etag TEXT,
+          rate_limit INTEGER,
+          rate_remaining INTEGER,
+          rate_retry_after_ms INTEGER,
+          rate_reset_at TEXT,
+          updated_at TEXT NOT NULL
+        );
+      `,
+    },
   ],
   postgres: [
     {
@@ -142,6 +212,40 @@ export const intakeMigrations = {
           payload_json TEXT NOT NULL,
           PRIMARY KEY (source_id, delivery_id),
           FOREIGN KEY (source_id, delivery_id) REFERENCES chimpbase_intake.delivery_deduplication(source_id, delivery_id)
+        );
+      `,
+    },
+    {
+      name: "003_github_polling",
+      sql: `
+        CREATE TABLE IF NOT EXISTS chimpbase_intake.github_issue_snapshots (
+          repository_id TEXT NOT NULL,
+          issue_id TEXT NOT NULL,
+          issue_number INTEGER NOT NULL,
+          updated_at TEXT NOT NULL,
+          position TEXT NOT NULL,
+          snapshot_json TEXT NOT NULL,
+          PRIMARY KEY (repository_id, issue_id)
+        );
+        CREATE TABLE IF NOT EXISTS chimpbase_intake.github_comment_snapshots (
+          repository_id TEXT NOT NULL,
+          comment_id TEXT NOT NULL,
+          issue_number INTEGER NOT NULL,
+          updated_at TEXT NOT NULL,
+          position TEXT NOT NULL,
+          snapshot_json TEXT NOT NULL,
+          PRIMARY KEY (repository_id, comment_id)
+        );
+        CREATE TABLE IF NOT EXISTS chimpbase_intake.github_poll_state (
+          repository_id TEXT PRIMARY KEY,
+          source_position TEXT,
+          issues_etag TEXT,
+          comments_etag TEXT,
+          rate_limit INTEGER,
+          rate_remaining INTEGER,
+          rate_reset_at TEXT,
+          rate_retry_after_ms INTEGER,
+          updated_at TEXT NOT NULL
         );
       `,
     },
