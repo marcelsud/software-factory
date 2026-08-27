@@ -1,10 +1,11 @@
 const SECRET_PATTERNS = [
   /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/gu,
+  /<hidden_reasoning\b[^>]*>[\s\S]*?<\/hidden_reasoning>/giu,
   /\bgithub_pat_[A-Za-z0-9_]{20,}\b/gu,
   /\bgh[pousr]_[A-Za-z0-9_]{20,}\b/gu,
   /\bAKIA[A-Z0-9]{16}\b/gu,
   /\bBearer\s+[A-Za-z0-9._~+/-]+=*\b/giu,
-  /\b(?:api[_-]?key|password|secret|token)\s*[:=]\s*["']?[^\s"']{8,}["']?/giu,
+  /\b(?:[A-Za-z0-9]+[_-])*(?:api[_-]?key|password|secret|token)\s*[:=]\s*["']?[^\s"']{8,}["']?/giu,
 ] as const;
 
 export function containsSecret(value: string): boolean {

@@ -2,6 +2,8 @@
 
 This repository does not ship a GitHub Actions workflow, `action.yml`, composite action, JavaScript action bundle, marketplace package, or hosted backend selector. A future adapter is only a process wrapper: it must produce the documented run-once invocation envelope and call `factory run-once`. It must not change module contracts, workflow versions, flow selection, retries, gates, effects, or recovery semantics.
 
+The adapter preserves the definition, state machine, recovery, and replay rules in [local factory operation and recovery](local-operation.md) and the process contract in [run-once operation](run-once.md).
+
 ## Job sequence
 
 1. Check out the exact repository revision that contains `factory.yaml`, pinned skills, and the factory executable. Do not execute configuration from the event payload.
