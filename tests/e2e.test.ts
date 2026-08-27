@@ -930,8 +930,10 @@ test("[G3] The triage flow runs isolated reproduce, diagnose, verify, and fix at
   ]);
   expect(new Set(requests.map(({ attemptId }) => attemptId)).size).toBe(requests.length);
   expect(
-    requests.every((request) =>
-      request.skills.every((skill) => skill.digest.startsWith("sha256:")),
+    requests.every(
+      (request) =>
+        request.skills.length > 0 &&
+        request.skills.every((skill) => skill.digest.startsWith("sha256:")),
     ),
   ).toBe(true);
   const plan = compileFactoryDefinition(factorySource).plansV3["issue-triage"];
@@ -1072,12 +1074,21 @@ test("[G8] Runs/show and pause/resume/retry/cancel/audit commands reflect the sa
 test("[G9] Captured-event replay with fake GitHub and agent adapters is deterministic and performs no live writes.", () => {
   expect(replayResult.code, replayResult.output).toBe(0);
   const output = JSON.parse(replayResult.output) as {
+    adapters: Record<string, string>;
     effectIntents: unknown[];
+    fakeWrites: number;
     infrastructure: string;
     liveWrites: number;
     transitions: unknown[];
   };
   expect(output.infrastructure).toBe("fake");
+  expect(output.adapters).toEqual({
+    agent: "fake",
+    git: "fake",
+    githubRead: "fake",
+    githubWrite: "fake",
+  });
+  expect(output.fakeWrites).toBeGreaterThan(0);
   expect(output.liveWrites).toBe(0);
   expect(output.transitions.length).toBeGreaterThan(0);
   expect(output.effectIntents).toHaveLength(4);
@@ -1091,9 +1102,25 @@ test("[G10] Run-once uses the daemon engine contract and proves future Actions r
       .filter(({ kind }) => kind === "run.state")
       .map(({ payload }) => ({ stateId: payload.stateId, status: payload.status })),
   );
-  expect(createSoftwareFactoryApp().modules.map((module) => module.interface)).toEqual(
-    createSoftwareFactoryApp().modules.map((module) => module.interface),
-  );
+  const app = createSoftwareFactoryApp();
+  expect(app.modules.map((module) => module.interface.name)).toEqual([
+    "assets",
+    "definitions",
+    "effects",
+    "execution",
+    "intake",
+    "runs",
+    "operations",
+  ]);
+  expect(
+    app.modules
+      .flatMap((module) => module.registrations)
+      .filter((registration) => registration.kind === "workflow")
+      .map(({ definition }) => ({ name: definition.name, version: definition.version })),
+  ).toEqual([
+    { name: "factory-runs", version: 1 },
+    { name: "factory-runs-v2", version: 2 },
+  ]);
   expect(await actionFiles()).toEqual([]);
 });
 

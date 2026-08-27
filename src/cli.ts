@@ -625,19 +625,23 @@ async function replayCommand(
     if (details === null && sources.size > 0)
       throw new Error(`transition_drift: replayed run ${bundle.runId} was not created`);
     const observedEvents = (details?.timeline ?? []).map((event) => replayEvent.parse(event));
-    const fakeWrites =
-      writeTransport.calls.length +
-      gitPublisher.mutations.length +
-      gitPublisher.publications.length;
     const adapters: Readonly<Record<string, "fake" | "live">> = {
-      agent: "fake",
-      git: "fake",
-      githubRead: "fake",
-      githubWrite: "fake",
+      agent: agentRuntime instanceof FakeAgentRuntime ? "fake" : "live",
+      git: gitPublisher instanceof FakeGitPublisher ? "fake" : "live",
+      githubRead: readTransport instanceof FakeGitHubReadTransport ? "fake" : "live",
+      githubWrite: writeTransport instanceof FakeGitHubWriteTransport ? "fake" : "live",
     };
-    const liveWrites = Object.values(adapters).some((adapter) => adapter !== "fake")
-      ? fakeWrites
-      : 0;
+    const githubWrites = writeTransport.calls.filter(({ method }) => method === "apply").length;
+    const gitWrites = gitPublisher.mutations.length + gitPublisher.publications.length;
+    const fakeWrites =
+      (adapters.githubWrite === "fake" ? githubWrites : 0) +
+      (adapters.git === "fake" ? gitWrites : 0);
+    const liveWrites =
+      (adapters.githubWrite === "live" ? githubWrites : 0) +
+      (adapters.git === "live" ? gitWrites : 0);
+    const infrastructure = Object.values(adapters).every((adapter) => adapter === "fake")
+      ? "fake"
+      : "live";
     const result = verifyReplayObservation(bundle, trusted, observedEvents, {
       fake: fakeWrites,
       live: liveWrites,
@@ -645,7 +649,8 @@ async function replayCommand(
     const output = {
       replayId: ids.next(),
       ...result,
-      infrastructure: "fake",
+      adapters,
+      infrastructure,
       storage: "memory",
     };
     io.stdout(
