@@ -36,17 +36,22 @@ afterEach(async () => {
 
 type Host = Awaited<ReturnType<typeof createChimpbase>>;
 
-async function boot(probe = new FakeOperationsProbe(), includePollLagProbe = true): Promise<Host> {
+async function boot(
+  probe = new FakeOperationsProbe(),
+  includePollLagProbe = true,
+  includeWorkerProbe = true,
+  checkedAt = now,
+): Promise<Host> {
   const app = createSoftwareFactoryApp({
     credentialsPresent: probe.credentialsPresent,
     moduleManifestDigest: "manifest:operations",
-    now: () => new Date(now),
+    now: () => new Date(checkedAt),
     ...(includePollLagProbe ? { pollLagMs: probe.pollLagMs } : {}),
     readTransport: unavailableGitHubReadTransport,
     repositoryReachability: probe.repositoryReachability,
     staleLocks: probe.staleLocks,
     storageReady: probe.storageReady,
-    workerReady: probe.workerReady,
+    ...(includeWorkerProbe ? { workerReady: probe.workerReady } : {}),
     workflowReady: probe.workflowReady,
     workflowVersionDigest: "workflow:operations",
   });
@@ -502,6 +507,17 @@ describe("leaf-08 operations", () => {
     ).toBe(true);
     expect(lateDetails.run.sourceEvent?.deliveryId).toBe("delivery:22");
     expect(lateDetails.timeline[0]?.kind).toBe("source.accepted");
+    await host.executeAction("runs/testPublish1@v1", {
+      agentProfileDigest: "agent:22",
+      attemptId: "attempt:22",
+      correlationToken: "correlation:22",
+      inputArtifactDigests: [],
+      runId: "run:22",
+      skillDigests: {},
+      stepId: "reproduce",
+    });
+    await host.drain({ maxDurationMs: 5_000 });
+    expect((await show(host, "run:22")).run.sourceEvent?.deliveryId).toBe("delivery:22");
   });
 
   test("[G2] Projection rebuild from facts is deterministic/idempotent", async () => {
@@ -513,6 +529,37 @@ describe("leaf-08 operations", () => {
     const two = (await host.executeAction("operations/rebuildProjections@v1", {})).result;
     expect(second).toBe(first);
     expect(two).toEqual(one);
+    await host.executeAction(
+      "runs/testPublish0@v1",
+      runState("skill-target", {
+        agentProfileDigests: { triage: "agent:stable" },
+        runId: "skill-target",
+        skillDigests: { base: "base:old", intermediate: "intermediate:old" },
+        startedAt: "2026-08-27T13:00:00.000Z",
+      }),
+    );
+    await host.executeAction(
+      "runs/testPublish0@v1",
+      runState("skill-intermediate", {
+        runId: "skill-intermediate",
+        agentProfileDigests: { triage: "agent:stable" },
+        skillDigests: { intermediate: "intermediate:new" },
+        startedAt: "2026-08-27T13:01:00.000Z",
+      }),
+    );
+    await host.executeAction(
+      "runs/testPublish0@v1",
+      runState("skill-newest", {
+        agentProfileDigests: { triage: "agent:stable" },
+        runId: "skill-newest",
+        skillDigests: { base: "base:new" },
+        startedAt: "2026-08-27T13:02:00.000Z",
+      }),
+    );
+    await host.drain({ maxDurationMs: 5_000 });
+    const incremental = canonicalJson(await show(host, "skill-target"));
+    await host.executeAction("operations/rebuildProjections@v1", {});
+    expect(canonicalJson(await show(host, "skill-target"))).toBe(incremental);
   });
 
   test("[G3] Operations never query other module tables", async () => {
@@ -677,6 +724,19 @@ describe("leaf-08 operations", () => {
       status: "degraded",
       worker: "unavailable",
       workflow: "unavailable",
+    });
+    const staleWorkerHost = await boot(
+      new FakeOperationsProbe(),
+      false,
+      false,
+      "2099-01-01T00:00:00.000Z",
+    );
+    await publishRun(staleWorkerHost, "24");
+    const staleWorkerHealth = (await staleWorkerHost.executeAction("operations/getHealthV2@v1", {}))
+      .result as { status: string; worker: string };
+    expect(staleWorkerHealth).toMatchObject({
+      status: "degraded",
+      worker: "unavailable",
     });
     expect(effectsPage.items[0]?.status).toBe("queued");
   });

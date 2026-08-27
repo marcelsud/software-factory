@@ -8,7 +8,7 @@ export interface OperationRunProjectionRow {
   finished_at: string | null;
   projection_json: string;
   run_id: string;
-  source_key: string;
+  source_key: string | null;
   started_at: string;
   status: string;
   updated_at: string;
@@ -90,7 +90,7 @@ export const operationsMigrations = {
           started_at TEXT NOT NULL,
           updated_at TEXT NOT NULL,
           finished_at TEXT,
-          source_key TEXT NOT NULL,
+          source_key TEXT,
           projection_json TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS operations_runs_order
@@ -164,7 +164,7 @@ export const operationsMigrations = {
           started_at TEXT NOT NULL,
           updated_at TEXT NOT NULL,
           finished_at TEXT,
-          source_key TEXT NOT NULL,
+          source_key TEXT,
           projection_json TEXT NOT NULL
         );
 
@@ -200,12 +200,12 @@ export const operationsMigrations = {
           command_json TEXT NOT NULL,
           result_json TEXT
         );
-
         CREATE TABLE IF NOT EXISTS chimpbase_operations.health_projection (
           id TEXT PRIMARY KEY,
           last_sequence BIGINT NOT NULL,
           updated_at TEXT NOT NULL
         );
+
       `,
     },
   ],

@@ -192,6 +192,7 @@ async function recordFact(
     .select(({ fn }) => fn.max<number>("sequence").as("sequence"))
     .executeTakeFirst();
   const sequence = (last?.sequence ?? 0) + 1;
+  const processedAt = new Date().toISOString();
   await db
     .insertInto("event_projections")
     .values({
@@ -238,9 +239,9 @@ async function recordFact(
   }
   await db
     .insertInto("health_projection")
-    .values({ id: "projection-worker", last_sequence: sequence, updated_at: occurredAt })
+    .values({ id: "projection-worker", last_sequence: sequence, updated_at: processedAt })
     .onConflict((conflict) =>
-      conflict.column("id").doUpdateSet({ last_sequence: sequence, updated_at: occurredAt }),
+      conflict.column("id").doUpdateSet({ last_sequence: sequence, updated_at: processedAt }),
     )
     .execute();
   return true;
@@ -336,6 +337,8 @@ async function rebuild(database: Kysely<OperationsDatabase>, onlyRunId?: string)
                 String((JSON.parse(latestState.payload_json) as SafeObject).factoryEventId),
               ),
             )
+            .where("kind", "=", "source.accepted")
+            .orderBy("sequence", "asc")
             .executeTakeFirst();
     const unique = new Map<string, OperationEventProjectionRow>();
     for (const fact of [
@@ -374,7 +377,6 @@ async function rebuild(database: Kysely<OperationsDatabase>, onlyRunId?: string)
       currentSkills[String(payload.id)] = String(payload.digest);
     } else if (fact.kind === "run.state") {
       currentAgentProfiles = payload.agentProfileDigests as Record<string, string>;
-      Object.assign(currentSkills, payload.skillDigests as Record<string, string>);
     } else if (fact.kind === "source.accepted" && fact.source_key !== null) {
       sources.set(fact.source_key, fact);
     }
@@ -952,13 +954,18 @@ export function createOperationsImplementation(
               .executeTakeFirst();
             const heartbeat = await db
               .selectFrom("health_projection")
-              .select("last_sequence")
+              .select(["last_sequence", "updated_at"])
               .where("id", "=", "projection-worker")
               .executeTakeFirst();
+            const heartbeatAt =
+              heartbeat === undefined ? Number.NaN : Date.parse(heartbeat.updated_at);
             workerReady =
               newest?.sequence === null ||
               newest?.sequence === undefined ||
-              (heartbeat !== undefined && heartbeat.last_sequence >= newest.sequence);
+              (heartbeat !== undefined &&
+                heartbeat.last_sequence >= newest.sequence &&
+                Number.isFinite(heartbeatAt) &&
+                checkedAt.getTime() - heartbeatAt <= 60_000);
           } catch {
             workerReady = false;
           }
