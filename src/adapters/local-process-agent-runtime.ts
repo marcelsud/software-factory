@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { type ChildProcess, type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { lstat, mkdir, open, readdir, readFile, realpath, rm, stat } from "node:fs/promises";
@@ -15,8 +16,15 @@ import type { AgentRuntime } from "./seams.ts";
 const EMPTY_DIGEST = createHash("sha256").update("").digest("hex");
 const SECRET_MARKER =
   /(?:-----BEGIN [A-Z ]*PRIVATE KEY-----|github_pat_|gh[opsu]_[A-Za-z0-9]|AWS_SECRET_ACCESS_KEY|Bearer\s+[A-Za-z0-9._-]{16})/u;
-const FORBIDDEN_ENV =
-  /(?:TOKEN|SECRET|PASSWORD|CREDENTIAL|PRIVATE_KEY|GITHUB|GH_|SSH_|GIT_|LD_|DYLD_|NODE_OPTIONS|BUN_OPTIONS)/iu;
+const SAFE_ENVIRONMENT_NAMES: Readonly<Record<string, true>> = {
+  FACTORY_MODEL_HINT: true,
+  LANG: true,
+  LC_ALL: true,
+  NO_COLOR: true,
+  TERM: true,
+  TZ: true,
+};
+const ATTEMPT_SIGNAL = new AsyncLocalStorage<AbortSignal>();
 
 type FailureCategory = AgentFailure["category"];
 type DebugRetention = "always" | "never" | "on-failure";
@@ -43,11 +51,13 @@ interface Workspace {
 }
 
 interface ProcessCapture {
+  readonly cpuMs: number;
   readonly cancelled: boolean;
   readonly exitCode: number | null;
   readonly signal: NodeJS.Signals | null;
   readonly stderr: Buffer;
   readonly stderrTruncated: boolean;
+  readonly maxRssBytes: number;
   readonly stdout: Buffer;
   readonly stdoutOverflow: boolean;
   readonly timedOut: boolean;
@@ -60,6 +70,8 @@ interface CommandResult {
 }
 
 export class LocalProcessAgentRuntime implements AgentRuntime {
+  readonly #attemptControllers = new Map<string, AbortController>();
+  lastLaunchCommand: string[] = [];
   readonly #active = new Map<string, ActiveProcess>();
   readonly #bwrapPath: string;
   readonly #debugRetention: DebugRetention;
@@ -82,6 +94,7 @@ export class LocalProcessAgentRuntime implements AgentRuntime {
   }
 
   async cancel(attemptId: string): Promise<void> {
+    this.#attemptControllers.get(attemptId)?.abort("cancel");
     const active = this.#active.get(attemptId);
     if (active === undefined) return;
     active.cancelled = true;
@@ -97,43 +110,72 @@ export class LocalProcessAgentRuntime implements AgentRuntime {
     } catch (error) {
       return failureResult(rawRequest, "adapter", message(error), this.#now());
     }
-    const started = this.#now();
-    if (signal.aborted) return failureResult(request, "cancel", "attempt cancelled", started);
+    const inputFrame = Buffer.from(`${JSON.stringify(request)}\n`);
+    const inputLimit = Math.min(
+      request.agentProfile.limits.maxInputBytes,
+      request.budget.maxInputBytes,
+    );
+    if (inputFrame.length > inputLimit)
+      return failureResult(
+        request,
+        "adapter",
+        "encoded request exceeds maxInputBytes",
+        this.#now(),
+      );
 
+    const started = this.#now();
+    const controller = new AbortController();
+    ATTEMPT_SIGNAL.enterWith(controller.signal);
+    this.#attemptControllers.set(request.attemptId, controller);
+    const forwardAbort = () => controller.abort("cancel");
+    signal.addEventListener("abort", forwardAbort, { once: true });
+    const attemptTimer = setTimeout(
+      () => controller.abort("timeout"),
+      Math.min(request.agentProfile.limits.timeoutMs, request.budget.maxDurationMs),
+    );
+    attemptTimer.unref();
     let workspace: Workspace | undefined;
     let result: AgentResult;
     try {
+      if (signal.aborted) controller.abort("cancel");
       await this.#manager.ensureRecovered();
+      throwIfAborted(controller.signal);
       workspace = await this.#manager.create(request);
+      throwIfAborted(controller.signal);
       await this.#manager.materialize(workspace);
-      const capture = await this.#invoke(workspace, signal);
+      throwIfAborted(controller.signal);
+      const capture = await this.#invoke(workspace, controller.signal);
       result = await this.#interpret(workspace, capture, started);
-    } catch (error) {
-      result = failureResult(
-        request,
-        error instanceof SandboxError ? error.category : "adapter",
-        message(error),
-        started,
-        this.#now(),
-      );
-    }
-
-    if (
-      workspace !== undefined &&
-      (this.#debugRetention === "never" ||
-        (this.#debugRetention === "on-failure" && result.status === "succeeded"))
-    ) {
-      try {
-        await this.#manager.cleanup(workspace.path);
-      } catch (error) {
-        if (result.outcome !== undefined)
-          result = failureResult(
-            request,
-            "adapter",
-            `workspace cleanup failed: ${message(error)}`,
-            started,
-          );
+      if (
+        this.#debugRetention === "never" ||
+        (this.#debugRetention === "on-failure" && result.status === "succeeded")
+      ) {
+        try {
+          await this.#manager.cleanup(workspace.path);
+        } catch (error) {
+          if (result.outcome !== undefined)
+            result = failureResult(
+              request,
+              "adapter",
+              `workspace cleanup failed: ${message(error)}`,
+              started,
+            );
+        }
       }
+    } catch (error) {
+      const category =
+        controller.signal.reason === "timeout"
+          ? "timeout"
+          : controller.signal.aborted
+            ? "cancel"
+            : error instanceof SandboxError
+              ? error.category
+              : "adapter";
+      result = failureResult(request, category, message(error), started, this.#now());
+    } finally {
+      clearTimeout(attemptTimer);
+      signal.removeEventListener("abort", forwardAbort);
+      this.#attemptControllers.delete(request.attemptId);
     }
     return result;
   }
@@ -212,13 +254,23 @@ export class LocalProcessAgentRuntime implements AgentRuntime {
       "FACTORY_TASK",
       "/workspace/.factory/task/request.json",
       "--",
+      "/usr/bin/prlimit",
+      `--as=${request.agentProfile.limits.memoryBytes}`,
+      `--cpu=${request.agentProfile.limits.cpuSeconds}`,
+      `--fsize=${request.agentProfile.limits.maxFileBytes}`,
+      `--nproc=${request.agentProfile.limits.maxPids}`,
+      "--",
       ...request.agentProfile.command,
     );
+    const usagePath = `${workspace.path}.usage`;
 
-    const child = spawn(this.#bwrapPath, args, {
+    const launchArgs = ["-f", "cpu=%U,%S rss=%M", "-o", usagePath, this.#bwrapPath, ...args];
+    this.lastLaunchCommand = ["/usr/bin/time", ...launchArgs];
+    const child = spawn("/usr/bin/time", launchArgs, {
       cwd: workspace.path,
       detached: true,
       env: {},
+      signal,
       stdio: ["pipe", "pipe", "pipe"],
     });
     let terminating: Promise<void> | undefined;
@@ -230,14 +282,19 @@ export class LocalProcessAgentRuntime implements AgentRuntime {
     const active: ActiveProcess = { cancelled: false, child, terminate };
     this.#active.set(request.attemptId, active);
     const onAbort = () => {
-      active.cancelled = true;
+      if (signal.reason === "timeout") timedOut = true;
+      else active.cancelled = true;
       void terminate();
     };
     signal.addEventListener("abort", onAbort, { once: true });
+    const durationLimit = Math.min(
+      request.agentProfile.limits.timeoutMs,
+      request.budget.maxDurationMs,
+    );
     const timer = setTimeout(() => {
       timedOut = true;
       void terminate();
-    }, request.agentProfile.limits.timeoutMs);
+    }, durationLimit);
     timer.unref();
 
     const stdoutChunks: Buffer[] = [];
@@ -246,9 +303,13 @@ export class LocalProcessAgentRuntime implements AgentRuntime {
     let stderrBytes = 0;
     let stdoutOverflow = false;
     let stderrTruncated = false;
+    const outputLimit = Math.min(
+      request.agentProfile.limits.maxOutputBytes,
+      request.budget.maxOutputBytes,
+    );
     child.stdout.on("data", (chunk: Buffer) => {
       stdoutBytes += chunk.length;
-      if (stdoutBytes > request.agentProfile.limits.maxOutputBytes) {
+      if (stdoutBytes > outputLimit) {
         stdoutOverflow = true;
         void terminate();
         return;
@@ -266,7 +327,6 @@ export class LocalProcessAgentRuntime implements AgentRuntime {
       stderrBytes += kept.length;
       if (kept.length !== chunk.length) stderrTruncated = true;
     });
-
     const {
       promise: processExit,
       reject,
@@ -280,7 +340,15 @@ export class LocalProcessAgentRuntime implements AgentRuntime {
     child.stdin.end(`${JSON.stringify(request)}\n`);
     try {
       const exit = await processExit;
+      let usage: { cpuMs: number; maxRssBytes: number };
+      try {
+        usage = await measuredUsage(usagePath);
+      } catch (error) {
+        if (!stdoutOverflow) throw error;
+        usage = { cpuMs: 0, maxRssBytes: 0 };
+      }
       return {
+        ...usage,
         cancelled: active.cancelled,
         exitCode: exit.code,
         signal: exit.signal,
@@ -369,10 +437,15 @@ export class LocalProcessAgentRuntime implements AgentRuntime {
     } catch (error) {
       return failureResult(request, "result-invalid", message(error), started, finished, logs);
     }
+    const trustedResult = { ...parsed };
+    delete trustedResult.commit;
+    if (trustedResult.outcome !== undefined)
+      trustedResult.outcome = { ...trustedResult.outcome, outputArtifactDigests: [] };
     const result = {
-      ...parsed,
+      ...trustedResult,
       ...exported,
       logs,
+      resources: { cpuMs: capture.cpuMs, maxRssBytes: capture.maxRssBytes },
       timing: {
         durationMs: Math.max(0, finished.getTime() - started.getTime()),
         finishedAt: finished.toISOString(),
@@ -417,6 +490,7 @@ class WorkspaceManager {
   }
   async create(request: AgentRequest): Promise<Workspace> {
     await this.ensureRecovered();
+    await this.#validateTree(request.repository.sha, request.agentProfile.limits);
     const workspacePath = this.#contained(
       `attempt-${sha256(Buffer.from(request.attemptId)).slice(0, 32)}`,
     );
@@ -431,7 +505,6 @@ class WorkspaceManager {
     ]);
     await git(workspacePath, ["read-tree", request.repository.sha]);
     const workspace = { path: workspacePath, request };
-    await this.#validateTree(request.repository.sha);
     await this.#archiveInto(request.repository.sha, workspacePath);
     await this.#rejectLinks(workspacePath);
     return workspace;
@@ -488,19 +561,51 @@ class WorkspaceManager {
     const head = (await git(workspace.path, ["rev-parse", "HEAD"])).stdout.toString("utf8").trim();
     if (head !== workspace.request.repository.sha)
       throw new Error("agent attempted to create or change a commit");
-    const baseline = await this.#baseline(workspace.request.repository.sha);
+    const baseline = await this.#baseline(
+      workspace.request.repository.sha,
+      workspace.request.agentProfile.limits.maxWorkspaceBytes,
+      workspace.request.agentProfile.limits.maxWorkspaceFiles,
+      workspace.request.agentProfile.limits.maxFileBytes,
+    );
     const files = await listRegularFiles(workspace.path);
+    if (files.length > workspace.request.agentProfile.limits.maxWorkspaceFiles)
+      throw new Error("workspace file count exceeded");
+    let workspaceBytes = 0;
+    const currentPaths = new Set<string>();
     const current = new Map<string, Buffer>();
+    const changedPaths = new Set<string>();
     for (const path of files) {
       if (path === ".git" || path.startsWith(".factory/")) continue;
-      current.set(path, await readFile(join(workspace.path, path)));
+      const metadata = await stat(join(workspace.path, path));
+      workspaceBytes += metadata.size;
+      if (metadata.size > workspace.request.agentProfile.limits.maxFileBytes)
+        throw new Error(`workspace file exceeded maxFileBytes: ${path}`);
+      if (workspaceBytes > workspace.request.agentProfile.limits.maxWorkspaceBytes)
+        throw new Error("workspace bytes exceeded");
+      currentPaths.add(path);
+      const bytes = await readFile(join(workspace.path, path));
+      if (baseline.get(path) !== sha256(bytes)) {
+        changedPaths.add(path);
+        current.set(path, bytes);
+      }
     }
-    const changedPaths = new Set<string>();
-    for (const [path, bytes] of current) {
-      const original = baseline.get(path);
-      if (original === undefined || !bytes.equals(original)) changedPaths.add(path);
+    for (const path of baseline.keys()) if (!currentPaths.has(path)) changedPaths.add(path);
+    const trackedChanges = await git(workspace.path, [
+      "diff",
+      "--name-only",
+      "-z",
+      "--no-ext-diff",
+      "--no-textconv",
+      workspace.request.repository.sha,
+      "--",
+    ]);
+    for (const path of trackedChanges.stdout.toString("utf8").split("\0")) {
+      if (path !== "") changedPaths.add(safeRelativePath(path));
     }
-    for (const path of baseline.keys()) if (!current.has(path)) changedPaths.add(path);
+    for (const path of changedPaths) {
+      if (!current.has(path) && currentPaths.has(path))
+        current.set(path, await readFile(join(workspace.path, path)));
+    }
     const sorted = [...changedPaths].sort();
     if (workspace.request.agentProfile.capabilityPreset === "read-only" && sorted.length > 0)
       throw new Error("read-only agent modified the repository");
@@ -513,11 +618,17 @@ class WorkspaceManager {
     }
     const changedFiles = sorted.map((path) => {
       const bytes = current.get(path) ?? Buffer.alloc(0);
-      return { digest: sha256(bytes), path, size: bytes.length };
+      return {
+        contentBase64: bytes.toString("base64"),
+        digest: sha256(bytes),
+        path,
+        size: bytes.length,
+      };
     });
     if (sorted.length === 0) return { changedFiles };
 
     const patchChunks: Buffer[] = [];
+    let patchBytes = 0;
     const tracked = sorted.filter((path) => baseline.has(path));
     if (tracked.length > 0) {
       const diff = await command(
@@ -533,9 +644,15 @@ class WorkspaceManager {
           "--",
           ...tracked,
         ],
-        { acceptedCodes: [0, 1] },
+        {
+          acceptedCodes: [0, 1],
+          maxStdoutBytes: workspace.request.agentProfile.limits.maxPatchBytes + 1,
+        },
       );
       patchChunks.push(diff.stdout);
+      patchBytes += diff.stdout.length;
+      if (patchBytes > workspace.request.agentProfile.limits.maxPatchBytes)
+        throw new Error("exported patch exceeded maxPatchBytes");
     }
     for (const path of sorted.filter((candidate) => !baseline.has(candidate))) {
       const diff = await command(
@@ -551,9 +668,15 @@ class WorkspaceManager {
           "/dev/null",
           path,
         ],
-        { acceptedCodes: [0, 1] },
+        {
+          acceptedCodes: [0, 1],
+          maxStdoutBytes: workspace.request.agentProfile.limits.maxPatchBytes - patchBytes + 1,
+        },
       );
       patchChunks.push(diff.stdout);
+      patchBytes += diff.stdout.length;
+      if (patchBytes > workspace.request.agentProfile.limits.maxPatchBytes)
+        throw new Error("exported patch exceeded maxPatchBytes");
     }
     const patch = Buffer.concat(patchChunks);
     if (patch.length > workspace.request.agentProfile.limits.maxPatchBytes)
@@ -574,30 +697,54 @@ class WorkspaceManager {
     await rm(contained, { force: true, recursive: true });
   }
 
-  async #validateTree(sha: string): Promise<void> {
-    const listing = (await git(this.#repositoryRoot, ["ls-tree", "-r", "-z", "--full-tree", sha]))
-      .stdout;
+  async #validateTree(sha: string, limits: AgentRequest["agentProfile"]["limits"]): Promise<void> {
+    const listing = (
+      await git(this.#repositoryRoot, ["ls-tree", "-r", "-l", "-z", "--full-tree", sha])
+    ).stdout;
+    let totalBytes = 0;
+    let totalFiles = 0;
     for (const entry of listing.toString("utf8").split("\0")) {
       if (entry === "") continue;
-      const match = /^(\d+)\s+(\S+)\s+[0-9a-f]+\t(.+)$/u.exec(entry);
+      const match = /^(\d+)\s+(\S+)\s+[0-9a-f]+\s+(\d+|-)\t(.+)$/u.exec(entry);
       if (match === null) throw new Error("invalid git tree entry");
       const mode = match[1];
       const type = match[2];
-      const path = match[3];
+      const declaredSize = match[3] === "-" ? null : Number(match[3]);
+      const path = match[4];
       if (mode === undefined || type === undefined || path === undefined)
         throw new Error("invalid git tree entry captures");
       safeRelativePath(path);
       if (mode === "120000" || mode === "160000" || type === "commit")
         throw new Error(`repository contains a symlink or submodule: ${path}`);
+      if (type === "blob") {
+        if (declaredSize === null || !Number.isSafeInteger(declaredSize))
+          throw new Error(`repository blob has invalid size: ${path}`);
+        totalFiles += 1;
+        totalBytes += declaredSize;
+        if (
+          declaredSize > limits.maxFileBytes ||
+          totalFiles > limits.maxWorkspaceFiles ||
+          totalBytes > limits.maxWorkspaceBytes
+        )
+          throw new Error("repository size or file count exceeded");
+      }
+      if (path === ".git" || path.startsWith(".git/"))
+        throw new Error("repository collides with reserved git metadata");
       if (path === ".factory" || path.startsWith(".factory/"))
         throw new Error("repository collides with the reserved factory directory");
       if (path === ".gitmodules") throw new Error("repository submodule metadata is not allowed");
-      if (path === ".gitattributes") {
+      if (path === ".gitattributes" || path.endsWith("/.gitattributes")) {
         const attributes = (
-          await git(this.#repositoryRoot, ["show", `${sha}:.gitattributes`])
+          await git(this.#repositoryRoot, ["show", `${sha}:${path}`])
         ).stdout.toString("utf8");
-        if (/(?:^|\s)(?:filter|diff|merge|working-tree-encoding)=/mu.test(attributes))
-          throw new Error("repository executable git attributes are not allowed");
+        if (
+          /(?:^|\s)(?:filter|diff|merge|working-tree-encoding)=|(?:^|\s)export-ignore(?:\s|$)/mu.test(
+            attributes,
+          )
+        )
+          throw new Error(
+            "repository executable or archive-altering git attributes are not allowed",
+          );
       }
     }
   }
@@ -605,6 +752,7 @@ class WorkspaceManager {
   async #archiveInto(sha: string, destination: string): Promise<void> {
     const gitProcess = spawn("git", ["-C", this.#repositoryRoot, "archive", "--format=tar", sha], {
       env: safeGitEnvironment(),
+      signal: ATTEMPT_SIGNAL.getStore(),
       stdio: ["ignore", "pipe", "pipe"],
     });
     const tarProcess = spawn(
@@ -612,6 +760,7 @@ class WorkspaceManager {
       ["--extract", "--no-same-owner", "--no-same-permissions", "--directory", destination],
       {
         env: {},
+        signal: ATTEMPT_SIGNAL.getStore(),
         stdio: ["pipe", "ignore", "pipe"],
       },
     );
@@ -665,22 +814,48 @@ class WorkspaceManager {
     return bytes.length;
   }
 
-  async #baseline(sha: string): Promise<Map<string, Buffer>> {
-    const listing = (await git(this.#repositoryRoot, ["ls-tree", "-r", "-z", "--full-tree", sha]))
-      .stdout;
-    const baseline = new Map<string, Buffer>();
+  async #baseline(
+    sha: string,
+    maxBytes: number,
+    maxFiles: number,
+    maxFileBytes: number,
+  ): Promise<Map<string, string>> {
+    const listing = (
+      await git(this.#repositoryRoot, ["ls-tree", "-r", "-l", "-z", "--full-tree", sha])
+    ).stdout;
+    const baseline = new Map<string, string>();
+    let totalBytes = 0;
+    let totalFiles = 0;
     for (const entry of listing.toString("utf8").split("\0")) {
       if (entry === "") continue;
-      const match = /^(\d+)\s+(\S+)\s+([0-9a-f]+)\t(.+)$/u.exec(entry);
+      const match = /^(\d+)\s+(\S+)\s+([0-9a-f]+)\s+(\d+)\t(.+)$/u.exec(entry);
       if (match === null) continue;
       const mode = match[1];
       const type = match[2];
       const oid = match[3];
-      const path = match[4];
-      if (mode === undefined || type === undefined || oid === undefined || path === undefined)
+      const declaredSize = Number(match[4]);
+      const path = match[5];
+      if (
+        mode === undefined ||
+        type === undefined ||
+        oid === undefined ||
+        path === undefined ||
+        !Number.isSafeInteger(declaredSize)
+      )
         throw new Error("invalid git tree entry captures");
       if (type !== "blob" || mode === "120000") continue;
-      baseline.set(path, (await git(this.#repositoryRoot, ["cat-file", "blob", oid])).stdout);
+      totalFiles += 1;
+      totalBytes += declaredSize;
+      if (declaredSize > maxFileBytes || totalFiles > maxFiles || totalBytes > maxBytes)
+        throw new Error("repository size or file count exceeded");
+      const bytes = (
+        await command("git", ["-C", this.#repositoryRoot, "cat-file", "blob", oid], {
+          acceptedCodes: [0],
+          env: safeGitEnvironment(),
+          maxStdoutBytes: declaredSize + 1,
+        })
+      ).stdout;
+      baseline.set(path, sha256(bytes));
     }
     return baseline;
   }
@@ -725,9 +900,10 @@ function validateRequestPaths(request: AgentRequest): void {
 
 function validateEnvironment(environment: Record<string, string>): void {
   for (const [name, value] of Object.entries(environment)) {
-    if (!/^[A-Z_][A-Z0-9_]*$/u.test(name) || FORBIDDEN_ENV.test(name))
+    if (!Object.hasOwn(SAFE_ENVIRONMENT_NAMES, name))
       throw new Error(`environment name is not allowed: ${name}`);
-    if (value.includes("\0")) throw new Error(`environment value contains NUL: ${name}`);
+    if (value.includes("\0") || SECRET_MARKER.test(value))
+      throw new Error(`environment value is not allowed: ${name}`);
   }
 }
 
@@ -749,6 +925,10 @@ function safeRelativePath(value: string): string {
   return value;
 }
 
+function throwIfAborted(signal: AbortSignal): void {
+  if (signal.aborted) throw new Error(String(signal.reason ?? "attempt aborted"));
+}
+
 function contained(root: string, requested: string): string {
   const target = resolve(root, requested);
   const rel = relative(resolve(root), target);
@@ -761,6 +941,21 @@ function declaredOutput(path: string, declarations: readonly string[]): boolean 
   return declarations.some((declared) =>
     declared.endsWith("/") ? path.startsWith(declared) : path === declared,
   );
+}
+
+async function measuredUsage(path: string): Promise<{ cpuMs: number; maxRssBytes: number }> {
+  try {
+    const value = await readFile(path, "utf8");
+    const match = /^cpu=([0-9.]+),([0-9.]+) rss=(\d+)$/mu.exec(value.trim());
+    if (match?.[1] === undefined || match[2] === undefined || match[3] === undefined)
+      throw new Error("trusted time output is invalid");
+    return {
+      cpuMs: Math.max(0, Math.trunc((Number(match[1]) + Number(match[2])) * 1000)),
+      maxRssBytes: Math.max(0, Number(match[3]) * 1024),
+    };
+  } finally {
+    await rm(path, { force: true });
+  }
 }
 
 function decodeBase64(value: string): Buffer {
@@ -784,9 +979,13 @@ function message(error: unknown): string {
 
 function safeGitEnvironment(): NodeJS.ProcessEnv {
   return {
-    GIT_CONFIG_COUNT: "1",
+    GIT_CONFIG_COUNT: "3",
     GIT_CONFIG_KEY_0: "core.hooksPath",
+    GIT_CONFIG_KEY_1: "core.fsmonitor",
+    GIT_CONFIG_KEY_2: "core.attributesFile",
     GIT_CONFIG_VALUE_0: "/dev/null",
+    GIT_CONFIG_VALUE_1: "false",
+    GIT_CONFIG_VALUE_2: "/dev/null",
     HOME: "/nonexistent",
     PATH: process.env.PATH ?? "/usr/bin:/bin",
   };
@@ -802,15 +1001,20 @@ async function git(cwd: string, args: readonly string[]): Promise<CommandResult>
 async function command(
   executable: string,
   args: readonly string[],
-  options: { readonly acceptedCodes: readonly number[]; readonly env?: NodeJS.ProcessEnv },
+  options: {
+    readonly acceptedCodes: readonly number[];
+    readonly env?: NodeJS.ProcessEnv;
+    readonly maxStdoutBytes?: number;
+  },
 ): Promise<CommandResult> {
   const child = spawn(executable, args, {
     env: options.env ?? safeGitEnvironment(),
+    signal: ATTEMPT_SIGNAL.getStore(),
     stdio: ["ignore", "pipe", "pipe"],
   });
   const [code, stdout, stderr] = await Promise.all([
     exitCode(child),
-    collect(child.stdout, 16 * 1024 * 1024),
+    collect(child.stdout, options.maxStdoutBytes ?? 16 * 1024 * 1024),
     collect(child.stderr, 256 * 1024),
   ]);
   if (!options.acceptedCodes.includes(code))

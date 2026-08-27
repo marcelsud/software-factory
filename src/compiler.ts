@@ -37,6 +37,7 @@ export interface CompileOptions {
 export interface RepositoryDefinition {
   readonly defaultBranch: string;
   readonly id: string;
+  readonly localPath?: string;
   readonly name: string;
   readonly owner: string;
 }
@@ -435,10 +436,13 @@ function parseDefinition(value: unknown, skillRoots: readonly string[]): Factory
 
 function parseRepository(value: unknown, index: number): RepositoryDefinition {
   const path = `$.repositories[${index}]`;
-  const record = objectAt(value, path, ["id", "owner", "name", "defaultBranch"]);
+  const record = objectAt(value, path, ["id", "owner", "name", "defaultBranch", "localPath"]);
   return Object.freeze({
     defaultBranch: stringAt(record.defaultBranch, `${path}.defaultBranch`),
     id: idAt(record.id, `${path}.id`),
+    ...(record.localPath === undefined
+      ? {}
+      : { localPath: stringAt(record.localPath, `${path}.localPath`) }),
     name: stringAt(record.name, `${path}.name`),
     owner: stringAt(record.owner, `${path}.owner`),
   });
@@ -563,6 +567,14 @@ function parseAgentProfile(value: unknown, index: number): AgentProfileDefinitio
       `${path}.command`,
       "agent profile command cannot be empty",
       "declare the trusted executable and its fixed arguments",
+      "invalid_agent_profile",
+    );
+  }
+  if (command[0]?.startsWith("/") !== true) {
+    fail(
+      `${path}.command[0]`,
+      "agent profile executable must be an absolute trusted path",
+      "resolve the executable through trusted composition before compiling the definition",
       "invalid_agent_profile",
     );
   }

@@ -40,6 +40,7 @@ const implementationInterface = execution as unknown as ChimpbaseModuleInterface
 
 export interface ExecutionImplementationDependencies {
   readonly agentRuntime?: AgentRuntime;
+  readonly deferAttempts?: boolean;
   readonly now?: () => Date;
 }
 
@@ -121,13 +122,18 @@ async function attemptFromRowV3(
     .select("status")
     .where("attempt_id", "=", row.attempt_id)
     .executeTakeFirstOrThrow();
+  const requestRecord = await db
+    .selectFrom("attempt_requests")
+    .select("protocol_version")
+    .where("attempt_id", "=", row.attempt_id)
+    .executeTakeFirst();
   return stepAttemptV3.parse({
     agentProfileDigest: row.agent_profile_digest,
     attemptId: row.attempt_id,
     correlationToken: row.correlation_token,
     ...(row.finished_at === null ? {} : { finishedAt: row.finished_at }),
     outcome: row.outcome,
-    ...(resultRow === undefined
+    ...(resultRow === undefined || requestRecord?.protocol_version !== 2
       ? {}
       : { result: parseAgentResult(JSON.parse(resultRow.result_json)) }),
     runId: row.run_id,
@@ -347,6 +353,7 @@ export function createExecutionImplementation(
   dependencies: ExecutionImplementationDependencies = {},
 ) {
   const now = dependencies.now ?? (() => new Date());
+  const activeControllers = new Map<string, AbortController>();
   const agentRuntime = dependencies.agentRuntime ?? unavailableAgentRuntime;
   const attemptWorker = worker(
     "agent-workers",
@@ -394,6 +401,12 @@ export function createExecutionImplementation(
       try {
         if (requestRecord === undefined) throw new Error("invalid_pin: attempt request is missing");
         request = parseAgentRequest(JSON.parse(requestRecord.request_json));
+        const cancellation = await db
+          .selectFrom("attempt_cancellations")
+          .select("cancelled_at")
+          .where("attempt_id", "=", payload.attemptId)
+          .executeTakeFirst();
+        if (cancellation !== undefined) throw new Error("attempt_cancelled");
         const readyAt = now().toISOString();
         await db
           .updateTable("workspaces")
@@ -405,7 +418,7 @@ export function createExecutionImplementation(
           .set({ ready_at: readyAt })
           .where("attempt_id", "=", payload.attemptId)
           .execute();
-        if (dependencies.agentRuntime === undefined) return;
+        if (dependencies.deferAttempts === true) return;
         const artifactsWithBytes = [];
         for (const materialization of request.inputArtifacts) {
           if (materialization.contentBase64 !== undefined || materialization.kind !== "artifact") {
@@ -416,6 +429,8 @@ export function createExecutionImplementation(
             digest: materialization.digest,
           });
           if (envelope === null) throw new Error(`artifact_not_found: ${materialization.digest}`);
+          if (envelope.artifact.runId !== request.runId)
+            throw new Error(`artifact_run_mismatch: ${materialization.digest}`);
           artifactsWithBytes.push({
             ...materialization,
             contentBase64: envelope.contentBase64,
@@ -423,7 +438,14 @@ export function createExecutionImplementation(
           });
         }
         request = { ...request, inputArtifacts: artifactsWithBytes };
-        const returned = await agentRuntime.run(request, new AbortController().signal);
+        const controller = new AbortController();
+        activeControllers.set(request.attemptId, controller);
+        let returned: AgentResult;
+        try {
+          returned = await agentRuntime.run(request, controller.signal);
+        } finally {
+          activeControllers.delete(request.attemptId);
+        }
         result = parseAgentResult(returned);
         if (result.attemptId !== row.attempt_id)
           throw new Error("agent result attempt id does not match its lease");
@@ -433,19 +455,54 @@ export function createExecutionImplementation(
           request.budget.maxOutputBytes,
         );
         if (encoded > bound) throw new Error("agent result exceeded the committed result bound");
+        const outputArtifactDigests: string[] = [];
+        for (const file of result.changedFiles) {
+          if (file.contentBase64 === undefined)
+            throw new Error(`adapter output bytes missing for ${file.path}`);
+          const digest = `sha256:${file.digest.replace(/^sha256:/u, "")}`;
+          await ctx.call(assets.calls.putArtifact, {
+            artifact: {
+              classification: "private",
+              digest,
+              mediaType: "application/octet-stream",
+              name: file.path,
+              runId: request.runId,
+              size: file.size,
+            },
+            contentBase64: file.contentBase64,
+          });
+          outputArtifactDigests.push(digest);
+        }
+        result = {
+          ...result,
+          changedFiles: result.changedFiles.map(({ digest, path, size }) => ({
+            digest,
+            path,
+            size,
+          })),
+          ...(result.outcome === undefined
+            ? {}
+            : {
+                outcome: {
+                  ...result.outcome,
+                  outputArtifactDigests,
+                },
+              }),
+        };
       } catch (error) {
         const fallbackRequest =
           requestRecord === undefined
             ? ({ attemptId: row.attempt_id, startedAt: row.started_at } as AgentRequest)
             : parseAgentRequest(JSON.parse(requestRecord.request_json));
+        const errorMessage = error instanceof Error ? error.message : String(error);
         result = infrastructureResult(
           fallbackRequest,
-          /result|schema|validation|bound|required|must be/iu.test(
-            error instanceof Error ? error.message : String(error),
-          )
-            ? "result-invalid"
-            : "adapter",
-          error instanceof Error ? error.message : String(error),
+          errorMessage === "attempt_cancelled"
+            ? "cancel"
+            : /result|schema|validation|bound|required|must be/iu.test(errorMessage)
+              ? "result-invalid"
+              : "adapter",
+          errorMessage,
           now(),
         );
       }
@@ -465,6 +522,7 @@ export function createExecutionImplementation(
       collections: ["step-attempts", "workspaces"],
       queues: ["agent-workers"],
       tables: [
+        "attempt_cancellations",
         "attempt_requests",
         "attempt_result_metadata",
         "attempt_results",
@@ -474,6 +532,31 @@ export function createExecutionImplementation(
       ],
     },
     calls: {
+      async cancelAttempt(ctx, input) {
+        await (ctx.db.kysely() as unknown as Kysely<ExecutionDatabase>)
+          .insertInto("attempt_cancellations")
+          .values({ attempt_id: input.attemptId, cancelled_at: input.cancelledAt })
+          .onConflict((conflict) => conflict.column("attempt_id").doNothing())
+          .execute();
+        activeControllers.get(input.attemptId)?.abort();
+        await agentRuntime.cancel(input.attemptId);
+        return true;
+      },
+      async getAttemptProtocol(ctx, input) {
+        const db = ctx.db.kysely() as unknown as Kysely<ExecutionDatabase>;
+        const attempt = await db
+          .selectFrom("step_attempts")
+          .select("attempt_id")
+          .where("attempt_id", "=", input.attemptId)
+          .executeTakeFirst();
+        if (attempt === undefined) return null;
+        const request = await db
+          .selectFrom("attempt_requests")
+          .select("protocol_version")
+          .where("attempt_id", "=", input.attemptId)
+          .executeTakeFirst();
+        return request?.protocol_version === 2 ? "v2" : "v1";
+      },
       async requestAttempt(ctx, input) {
         const db = ctx.db.kysely() as unknown as Kysely<ExecutionDatabase>;
         const requestJson = canonicalJson(input);
@@ -488,10 +571,19 @@ export function createExecutionImplementation(
             .selectAll()
             .where("attempt_id", "=", input.attemptId)
             .executeTakeFirst();
-          if (
-            existingRequest?.protocol_version !== 1 ||
-            existingRequest.request_json !== requestJson
-          )
+          const pinMismatch =
+            existingRequest === undefined
+              ? existing.correlation_token !== input.correlationToken ||
+                existing.run_id !== input.runId ||
+                existing.step_id !== input.stepId ||
+                existing.agent_profile_digest !== input.agentProfile.digest ||
+                existing.started_at !== input.startedAt ||
+                existing.input_artifact_digests_json !==
+                  canonicalJson(input.inputArtifactDigests) ||
+                existing.skill_digests_json !== canonicalJson(input.skillDigests)
+              : existingRequest.protocol_version !== 1 ||
+                existingRequest.request_json !== requestJson;
+          if (pinMismatch)
             throw new Error("attempt_exists: immutable attempt identity has different pins");
           return attemptV1FromV2(await attemptFromRow(db, existing));
         }
@@ -665,7 +757,7 @@ function canonicalJson(value: unknown): string {
 
 function infrastructureResult(
   request: Pick<AgentRequest, "attemptId" | "startedAt">,
-  category: "adapter" | "result-invalid",
+  category: "adapter" | "cancel" | "result-invalid",
   message: string,
   finished: Date,
 ): AgentResult {

@@ -108,6 +108,88 @@
             "module_unavailable"
           ],
           "guarantees": [
+            "returns only the exact immutable pinned skill bundle"
+          ],
+          "id": "assets/getSkillBundle@v1",
+          "inputSchema": {
+            "properties": {
+              "digest": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "digest"
+            ],
+            "type": "object"
+          },
+          "name": "getSkillBundle",
+          "outputSchema": {
+            "anyOf": [
+              {
+                "properties": {
+                  "digest": {
+                    "type": "string"
+                  },
+                  "files": {
+                    "items": {
+                      "properties": {
+                        "contentBase64": {
+                          "type": "string"
+                        },
+                        "digest": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "enum": [
+                            "artifact",
+                            "skill",
+                            "task"
+                          ]
+                        },
+                        "path": {
+                          "type": "string"
+                        },
+                        "size": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "digest",
+                        "kind",
+                        "path",
+                        "size"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "instructions": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "digest",
+                  "files",
+                  "id",
+                  "instructions"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "version": 1
+        },
+        {
+          "errors": [
+            "module_unavailable"
+          ],
+          "guarantees": [
             "returns immutable artifact metadata ordered by digest"
           ],
           "id": "assets/listRunArtifacts@v1",
@@ -320,6 +402,137 @@
         {
           "errors": [
             "module_unavailable",
+            "digest_mismatch",
+            "skill_conflict"
+          ],
+          "guarantees": [
+            "stores immutable canonical skill instructions and files by digest"
+          ],
+          "id": "assets/putSkillBundle@v1",
+          "inputSchema": {
+            "properties": {
+              "bundle": {
+                "properties": {
+                  "digest": {
+                    "type": "string"
+                  },
+                  "files": {
+                    "items": {
+                      "properties": {
+                        "contentBase64": {
+                          "type": "string"
+                        },
+                        "digest": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "enum": [
+                            "artifact",
+                            "skill",
+                            "task"
+                          ]
+                        },
+                        "path": {
+                          "type": "string"
+                        },
+                        "size": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "digest",
+                        "kind",
+                        "path",
+                        "size"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "instructions": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "digest",
+                  "files",
+                  "id",
+                  "instructions"
+                ],
+                "type": "object"
+              },
+              "reference": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "bundle",
+              "reference"
+            ],
+            "type": "object"
+          },
+          "name": "putSkillBundle",
+          "outputSchema": {
+            "properties": {
+              "digest": {
+                "type": "string"
+              },
+              "files": {
+                "items": {
+                  "properties": {
+                    "contentBase64": {
+                      "type": "string"
+                    },
+                    "digest": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "enum": [
+                        "artifact",
+                        "skill",
+                        "task"
+                      ]
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "size": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "digest",
+                    "kind",
+                    "path",
+                    "size"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "id": {
+                "type": "string"
+              },
+              "instructions": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "digest",
+              "files",
+              "id",
+              "instructions"
+            ],
+            "type": "object"
+          },
+          "version": 1
+        },
+        {
+          "errors": [
+            "module_unavailable",
             "skill_not_found",
             "skill_root_escape"
           ],
@@ -426,17 +639,22 @@
       "migrations": {
         "postgres": [
           "001_ledger",
-          "002_artifact_metadata"
+          "002_artifact_metadata",
+          "003_skill_bundles",
+          "004_artifact_blobs"
         ],
         "sqlite": [
           "001_ledger",
-          "002_artifact_metadata"
+          "002_artifact_metadata",
+          "003_skill_bundles",
+          "004_artifact_blobs"
         ]
       },
       "name": "assets",
       "resources": {
         "collections": [
           "artifacts",
+          "skill-bundles",
           "skill-revisions"
         ],
         "kvPrefixes": [
@@ -444,7 +662,9 @@
           "artifact-materializations"
         ],
         "tables": [
+          "artifact_blobs",
           "artifacts",
+          "skill_bundles",
           "skill_revisions"
         ]
       },
@@ -2252,6 +2472,35 @@
             "module_unavailable"
           ],
           "guarantees": [
+            "cancellation is idempotent and terminates the active runtime attempt"
+          ],
+          "id": "execution/cancelAttempt@v1",
+          "inputSchema": {
+            "properties": {
+              "attemptId": {
+                "type": "string"
+              },
+              "cancelledAt": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "attemptId",
+              "cancelledAt"
+            ],
+            "type": "object"
+          },
+          "name": "cancelAttempt",
+          "outputSchema": {
+            "type": "boolean"
+          },
+          "version": 1
+        },
+        {
+          "errors": [
+            "module_unavailable"
+          ],
+          "guarantees": [
             "returns committed attempt state"
           ],
           "id": "execution/getAttempt@v1",
@@ -2337,6 +2586,41 @@
                   "stepId"
                 ],
                 "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "version": 1
+        },
+        {
+          "errors": [
+            "module_unavailable"
+          ],
+          "guarantees": [
+            "returns the persisted request protocol; pre-migration attempts are v1"
+          ],
+          "id": "execution/getAttemptProtocol@v1",
+          "inputSchema": {
+            "properties": {
+              "attemptId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "attemptId"
+            ],
+            "type": "object"
+          },
+          "name": "getAttemptProtocol",
+          "outputSchema": {
+            "anyOf": [
+              {
+                "enum": [
+                  "v1",
+                  "v2"
+                ]
               },
               {
                 "type": "null"
@@ -2502,6 +2786,9 @@
                       "changedFiles": {
                         "items": {
                           "properties": {
+                            "contentBase64": {
+                              "type": "string"
+                            },
                             "digest": {
                               "type": "string"
                             },
@@ -2968,6 +3255,12 @@
                   },
                   "limits": {
                     "properties": {
+                      "cpuSeconds": {
+                        "type": "integer"
+                      },
+                      "maxFileBytes": {
+                        "type": "integer"
+                      },
                       "maxInputBytes": {
                         "type": "integer"
                       },
@@ -2980,15 +3273,33 @@
                       "maxPatchBytes": {
                         "type": "integer"
                       },
+                      "maxPids": {
+                        "type": "integer"
+                      },
+                      "maxWorkspaceBytes": {
+                        "type": "integer"
+                      },
+                      "maxWorkspaceFiles": {
+                        "type": "integer"
+                      },
+                      "memoryBytes": {
+                        "type": "integer"
+                      },
                       "timeoutMs": {
                         "type": "integer"
                       }
                     },
                     "required": [
+                      "cpuSeconds",
+                      "maxFileBytes",
                       "maxInputBytes",
                       "maxLogBytes",
                       "maxOutputBytes",
                       "maxPatchBytes",
+                      "maxPids",
+                      "maxWorkspaceBytes",
+                      "maxWorkspaceFiles",
+                      "memoryBytes",
                       "timeoutMs"
                     ],
                     "type": "object"
@@ -3220,6 +3531,9 @@
                   "changedFiles": {
                     "items": {
                       "properties": {
+                        "contentBase64": {
+                          "type": "string"
+                        },
                         "digest": {
                           "type": "string"
                         },
@@ -3558,6 +3872,9 @@
                   "changedFiles": {
                     "items": {
                       "properties": {
+                        "contentBase64": {
+                          "type": "string"
+                        },
                         "digest": {
                           "type": "string"
                         },
@@ -3907,6 +4224,12 @@
                   },
                   "limits": {
                     "properties": {
+                      "cpuSeconds": {
+                        "type": "integer"
+                      },
+                      "maxFileBytes": {
+                        "type": "integer"
+                      },
                       "maxInputBytes": {
                         "type": "integer"
                       },
@@ -3919,15 +4242,33 @@
                       "maxPatchBytes": {
                         "type": "integer"
                       },
+                      "maxPids": {
+                        "type": "integer"
+                      },
+                      "maxWorkspaceBytes": {
+                        "type": "integer"
+                      },
+                      "maxWorkspaceFiles": {
+                        "type": "integer"
+                      },
+                      "memoryBytes": {
+                        "type": "integer"
+                      },
                       "timeoutMs": {
                         "type": "integer"
                       }
                     },
                     "required": [
+                      "cpuSeconds",
+                      "maxFileBytes",
                       "maxInputBytes",
                       "maxLogBytes",
                       "maxOutputBytes",
                       "maxPatchBytes",
+                      "maxPids",
+                      "maxWorkspaceBytes",
+                      "maxWorkspaceFiles",
+                      "memoryBytes",
                       "timeoutMs"
                     ],
                     "type": "object"
@@ -4154,6 +4495,7 @@
           "agent-workers"
         ],
         "tables": [
+          "attempt_cancellations",
           "attempt_requests",
           "attempt_result_metadata",
           "attempt_results",
@@ -7506,6 +7848,82 @@
     {
       "inputSchema": {
         "properties": {
+          "digest": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "digest"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "assets/getSkillBundle@v1",
+      "outputSchema": {
+        "anyOf": [
+          {
+            "properties": {
+              "digest": {
+                "type": "string"
+              },
+              "files": {
+                "items": {
+                  "properties": {
+                    "contentBase64": {
+                      "type": "string"
+                    },
+                    "digest": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "enum": [
+                        "artifact",
+                        "skill",
+                        "task"
+                      ]
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "size": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "digest",
+                    "kind",
+                    "path",
+                    "size"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "id": {
+                "type": "string"
+              },
+              "instructions": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "digest",
+              "files",
+              "id",
+              "instructions"
+            ],
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "provider": "assets"
+    },
+    {
+      "inputSchema": {
+        "properties": {
           "runId": {
             "type": "string"
           }
@@ -7690,6 +8108,129 @@
           "name",
           "runId",
           "size"
+        ],
+        "type": "object"
+      },
+      "provider": "assets"
+    },
+    {
+      "inputSchema": {
+        "properties": {
+          "bundle": {
+            "properties": {
+              "digest": {
+                "type": "string"
+              },
+              "files": {
+                "items": {
+                  "properties": {
+                    "contentBase64": {
+                      "type": "string"
+                    },
+                    "digest": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "enum": [
+                        "artifact",
+                        "skill",
+                        "task"
+                      ]
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "size": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "digest",
+                    "kind",
+                    "path",
+                    "size"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "id": {
+                "type": "string"
+              },
+              "instructions": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "digest",
+              "files",
+              "id",
+              "instructions"
+            ],
+            "type": "object"
+          },
+          "reference": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "bundle",
+          "reference"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "assets/putSkillBundle@v1",
+      "outputSchema": {
+        "properties": {
+          "digest": {
+            "type": "string"
+          },
+          "files": {
+            "items": {
+              "properties": {
+                "contentBase64": {
+                  "type": "string"
+                },
+                "digest": {
+                  "type": "string"
+                },
+                "kind": {
+                  "enum": [
+                    "artifact",
+                    "skill",
+                    "task"
+                  ]
+                },
+                "path": {
+                  "type": "string"
+                },
+                "size": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "digest",
+                "kind",
+                "path",
+                "size"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "id": {
+            "type": "string"
+          },
+          "instructions": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "digest",
+          "files",
+          "id",
+          "instructions"
         ],
         "type": "object"
       },
@@ -9443,6 +9984,29 @@
         "properties": {
           "attemptId": {
             "type": "string"
+          },
+          "cancelledAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "attemptId",
+          "cancelledAt"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "execution/cancelAttempt@v1",
+      "outputSchema": {
+        "type": "boolean"
+      },
+      "provider": "execution"
+    },
+    {
+      "inputSchema": {
+        "properties": {
+          "attemptId": {
+            "type": "string"
           }
         },
         "required": [
@@ -9522,6 +10086,35 @@
               "stepId"
             ],
             "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "provider": "execution"
+    },
+    {
+      "inputSchema": {
+        "properties": {
+          "attemptId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "attemptId"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "execution/getAttemptProtocol@v1",
+      "outputSchema": {
+        "anyOf": [
+          {
+            "enum": [
+              "v1",
+              "v2"
+            ]
           },
           {
             "type": "null"
@@ -9675,6 +10268,9 @@
                   "changedFiles": {
                     "items": {
                       "properties": {
+                        "contentBase64": {
+                          "type": "string"
+                        },
                         "digest": {
                           "type": "string"
                         },
@@ -10124,6 +10720,12 @@
               },
               "limits": {
                 "properties": {
+                  "cpuSeconds": {
+                    "type": "integer"
+                  },
+                  "maxFileBytes": {
+                    "type": "integer"
+                  },
                   "maxInputBytes": {
                     "type": "integer"
                   },
@@ -10136,15 +10738,33 @@
                   "maxPatchBytes": {
                     "type": "integer"
                   },
+                  "maxPids": {
+                    "type": "integer"
+                  },
+                  "maxWorkspaceBytes": {
+                    "type": "integer"
+                  },
+                  "maxWorkspaceFiles": {
+                    "type": "integer"
+                  },
+                  "memoryBytes": {
+                    "type": "integer"
+                  },
                   "timeoutMs": {
                     "type": "integer"
                   }
                 },
                 "required": [
+                  "cpuSeconds",
+                  "maxFileBytes",
                   "maxInputBytes",
                   "maxLogBytes",
                   "maxOutputBytes",
                   "maxPatchBytes",
+                  "maxPids",
+                  "maxWorkspaceBytes",
+                  "maxWorkspaceFiles",
+                  "memoryBytes",
                   "timeoutMs"
                 ],
                 "type": "object"
@@ -10377,6 +10997,9 @@
               "changedFiles": {
                 "items": {
                   "properties": {
+                    "contentBase64": {
+                      "type": "string"
+                    },
                     "digest": {
                       "type": "string"
                     },
@@ -10711,6 +11334,9 @@
               "changedFiles": {
                 "items": {
                   "properties": {
+                    "contentBase64": {
+                      "type": "string"
+                    },
                     "digest": {
                       "type": "string"
                     },
@@ -11062,6 +11688,12 @@
               },
               "limits": {
                 "properties": {
+                  "cpuSeconds": {
+                    "type": "integer"
+                  },
+                  "maxFileBytes": {
+                    "type": "integer"
+                  },
                   "maxInputBytes": {
                     "type": "integer"
                   },
@@ -11074,15 +11706,33 @@
                   "maxPatchBytes": {
                     "type": "integer"
                   },
+                  "maxPids": {
+                    "type": "integer"
+                  },
+                  "maxWorkspaceBytes": {
+                    "type": "integer"
+                  },
+                  "maxWorkspaceFiles": {
+                    "type": "integer"
+                  },
+                  "memoryBytes": {
+                    "type": "integer"
+                  },
                   "timeoutMs": {
                     "type": "integer"
                   }
                 },
                 "required": [
+                  "cpuSeconds",
+                  "maxFileBytes",
                   "maxInputBytes",
                   "maxLogBytes",
                   "maxOutputBytes",
                   "maxPatchBytes",
+                  "maxPids",
+                  "maxWorkspaceBytes",
+                  "maxWorkspaceFiles",
+                  "memoryBytes",
                   "timeoutMs"
                 ],
                 "type": "object"

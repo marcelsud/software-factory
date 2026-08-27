@@ -30,6 +30,7 @@ import {
   type RunsDatabase,
   runsMigrations,
 } from "../../storage/runs-database.ts";
+import { assets } from "../assets/interface.ts";
 import { definitions } from "../definitions/interface.ts";
 import { effects } from "../effects/interface.ts";
 import { execution } from "../execution/interface.ts";
@@ -127,6 +128,7 @@ const genericRunWorkflow = workflow<Infer<typeof workflowInput>, GenericWorkflow
 export interface RunsImplementationDependencies {
   readonly moduleManifestDigest?: string;
   readonly workflowVersionDigest?: string;
+  readonly repositoryPins?: Readonly<Record<string, string>>;
 }
 
 type StartRunV2Input = Infer<typeof runs.calls.startRunV2.input>;
@@ -337,7 +339,8 @@ async function loadRows(db: Kysely<RunsDatabase>, runId: string) {
   return {
     engine: {
       ...engine,
-      repository_sha: pins?.repository_sha ?? row.definition_digest,
+      execution_protocol: pins?.execution_protocol ?? "v1",
+      repository_sha: pins?.repository_sha ?? "",
       task_payload_json: pins?.task_payload_json ?? "null",
     },
     row,
@@ -813,8 +816,12 @@ function createSubscriptions(dependencies: RunsImplementationDependencies) {
   const attemptFinishedStrict = defineChimpbaseModuleSubscription(
     execution.events.attemptFinishedV2,
     "record-attempt-outcome-v2",
-    async (ctx, finished) =>
-      await consumeAttemptFinished(ctx, {
+    async (ctx, finished) => {
+      const protocol = await ctx.call(execution.calls.getAttemptProtocol, {
+        attemptId: finished.attemptId,
+      });
+      if (protocol !== "v2") return false;
+      return await consumeAttemptFinished(ctx, {
         agentProfileDigest: finished.agentProfileDigest,
         attemptId: finished.attemptId,
         correlationToken: finished.correlationToken,
@@ -825,14 +832,17 @@ function createSubscriptions(dependencies: RunsImplementationDependencies) {
         runId: finished.runId,
         startedAt: finished.startedAt,
         stepId: finished.stepId,
-      }),
+      });
+    },
   );
   const attemptFinishedLegacy = defineChimpbaseModuleSubscription(
     execution.events.attemptFinishedV1,
     "record-attempt-outcome-v1",
     async (ctx, outcome) => {
-      const loaded = await loadRows(runsDb(ctx), outcome.runId);
-      if (loaded?.engine !== null) return false;
+      const protocol = await ctx.call(execution.calls.getAttemptProtocol, {
+        attemptId: outcome.attemptId,
+      });
+      if (protocol !== "v1") return false;
       return await consumeAttemptFinished(ctx, outcome);
     },
   );
@@ -933,13 +943,14 @@ function createSubscriptions(dependencies: RunsImplementationDependencies) {
           accepted.event.deliveryId,
         );
         const runId = digestIdentity("run", active.definitionDigest, plan.flowDigest, identity);
+        const repositorySha = dependencies.repositoryPins?.[accepted.event.repository];
         await ctx.call(runs.calls.startRunV3, {
           definitionDigest: active.definitionDigest,
           factoryEventId: `${identity}:${flowId}`,
           flowId,
           moduleManifestDigest: dependencies.moduleManifestDigest,
           repository: accepted.event.repository,
-          repositorySha: accepted.event.sourceRevision,
+          ...(repositorySha === undefined ? {} : { repositorySha }),
           runId,
           startedAt: accepted.event.observedAt,
           subject: accepted.event.subject,
@@ -1185,7 +1196,7 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
             existing.row.workflow_version_digest !== input.workflowVersionDigest ||
             existing.engine.repository !== input.repository ||
             existing.engine.subject !== input.subject ||
-            existing.engine.repository_sha !== (input.repositorySha ?? input.definitionDigest) ||
+            existing.engine.repository_sha !== (input.repositorySha ?? "") ||
             existing.engine.task_payload_json !== JSON.stringify(input.taskPayload ?? null)
           )
             throw new Error("run_exists: immutable run identity has different pins");
@@ -1252,7 +1263,8 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
         await db
           .insertInto("run_execution_pins")
           .values({
-            repository_sha: input.repositorySha ?? input.definitionDigest,
+            execution_protocol: input.repositorySha === undefined ? "v1" : "v2",
+            repository_sha: input.repositorySha ?? "",
             run_id: input.runId,
             task_payload_json: JSON.stringify(input.taskPayload ?? null),
           })
@@ -1516,6 +1528,11 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
               run_id: input.runId,
             })
             .execute();
+          if (loaded.row.current_attempt_id !== null)
+            await ctx.call(execution.calls.cancelAttempt, {
+              attemptId: loaded.row.current_attempt_id,
+              cancelledAt: input.issuedAt,
+            });
           await finishEngineRun(
             ctx,
             loaded.row,
@@ -1831,6 +1848,13 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
           if (pending.kind === "attempt" && isDataRecord(pending.outcome)) {
             const step = plan.steps.find((candidate) => candidate.id === state.step);
             if (step === undefined || pending.outcome.outcome === "failed") {
+              if (
+                isDataRecord(pending.outcome.failure) &&
+                pending.outcome.failure.retriable === false
+              ) {
+                await finishEngineRun(ctx, row, engine, state.id, "failed", input.now);
+                return { kind: "complete" as const };
+              }
               const retry = await scheduleRetry(db, row, engine, plan, input.now);
               if (retry === null) {
                 await finishEngineRun(ctx, row, engine, state.id, "failed", input.now);
@@ -1859,6 +1883,7 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
             }
             row = next.row;
             engine = {
+              execution_protocol: engine.execution_protocol,
               ...next.engine,
               repository_sha: engine.repository_sha,
               task_payload_json: engine.task_payload_json,
@@ -2064,56 +2089,85 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
               status: "running",
             },
           );
+          engine = { ...engine, attempt_count: number, engine_phase: "running" };
+          await db
+            .updateTable("run_engine_state")
+            .set({ attempt_count: number, engine_phase: "running" })
+            .where("run_id", "=", row.run_id)
+            .execute();
           try {
-            const capabilityPreset = capabilityPresetFor(step.capabilities);
-            const strictProfile = {
-              capabilities: [...CAPABILITY_PRESETS[capabilityPreset]],
-              capabilityPreset,
-              command: profile.command,
-              digest: profile.digest,
-              environment: {},
-              instructions: profile.instructions,
-              limits: {
-                maxInputBytes: 8 * 1024 * 1024,
-                maxLogBytes: Math.min(profile.limits.maxOutputBytes, 1024 * 1024),
-                maxOutputBytes: profile.limits.maxOutputBytes,
-                maxPatchBytes: 16 * 1024 * 1024,
-                timeoutMs: profile.limits.timeoutMs,
-              },
-              model: profile.model,
-              skills: profile.skills,
-            };
-            await ctx.call(execution.calls.requestAttemptV2, {
-              agentProfile: strictProfile,
-              attemptId,
-              budget: {
-                maxDurationMs: profile.limits.timeoutMs,
-                maxInputBytes: strictProfile.limits.maxInputBytes,
-                maxOutputBytes: profile.limits.maxOutputBytes,
-              },
-              correlationToken: token,
-              declaredOutputPaths: [],
-              inputArtifacts: artifacts.map((digest) => ({
-                digest,
-                kind: "artifact" as const,
-                path: `${digest}.bin`,
-                size: 0,
-              })),
-              repository: { id: engine.repository, sha: engine.repository_sha },
-              runId: row.run_id,
-              skills: profile.skills.map((id) => ({
-                digest: plan.skillRevisions[id] ?? "",
-                files: [],
-                id,
-                instructions: "",
-              })),
-              startedAt: input.now,
-              stepId: step.id,
-              task: {
-                mediaType: "application/json",
-                payload: JSON.parse(engine.task_payload_json) as unknown,
-              },
-            });
+            if (engine.execution_protocol === "v1") {
+              await ctx.call(execution.calls.requestAttempt, {
+                agentProfile: profile,
+                attemptId,
+                correlationToken: token,
+                inputArtifactDigests: artifacts,
+                runId: row.run_id,
+                skillDigests: plan.skillRevisions,
+                startedAt: input.now,
+                stepId: step.id,
+              });
+            } else {
+              const capabilityPreset = capabilityPresetFor(step.capabilities);
+              const selectedSkills = step.skill === undefined ? [] : [step.skill];
+              const selectedBundle =
+                step.skill === undefined
+                  ? null
+                  : await ctx.call(assets.calls.getSkillBundle, {
+                      digest: plan.skillRevisions[step.skill] ?? "",
+                    });
+              if (step.skill !== undefined && selectedBundle === null)
+                throw new Error(`invalid_revision_pin: skill bundle is missing for ${step.skill}`);
+              const strictProfile = {
+                capabilities: [...CAPABILITY_PRESETS[capabilityPreset]],
+                capabilityPreset,
+                command: profile.command,
+                digest: profile.digest,
+                environment: {},
+                instructions: profile.instructions,
+                limits: {
+                  cpuSeconds: Math.max(1, Math.ceil(profile.limits.timeoutMs / 1000)),
+                  maxFileBytes: 16 * 1024 * 1024,
+                  maxInputBytes: 8 * 1024 * 1024,
+                  maxLogBytes: Math.min(profile.limits.maxOutputBytes, 1024 * 1024),
+                  maxOutputBytes: profile.limits.maxOutputBytes,
+                  maxPatchBytes: 16 * 1024 * 1024,
+                  maxPids: 64,
+                  maxWorkspaceBytes: 512 * 1024 * 1024,
+                  maxWorkspaceFiles: 100_000,
+                  memoryBytes: 6 * 1024 * 1024 * 1024,
+                  timeoutMs: profile.limits.timeoutMs,
+                },
+                model: profile.model,
+                skills: selectedSkills,
+              };
+              await ctx.call(execution.calls.requestAttemptV2, {
+                agentProfile: strictProfile,
+                attemptId,
+                budget: {
+                  maxDurationMs: profile.limits.timeoutMs,
+                  maxInputBytes: strictProfile.limits.maxInputBytes,
+                  maxOutputBytes: profile.limits.maxOutputBytes,
+                },
+                correlationToken: token,
+                declaredOutputPaths: [],
+                inputArtifacts: artifacts.map((digest) => ({
+                  digest,
+                  kind: "artifact" as const,
+                  path: `${digest}.bin`,
+                  size: 0,
+                })),
+                repository: { id: engine.repository, sha: engine.repository_sha },
+                runId: row.run_id,
+                skills: selectedBundle === null ? [] : [selectedBundle],
+                startedAt: input.now,
+                stepId: step.id,
+                task: {
+                  mediaType: "application/json",
+                  payload: JSON.parse(engine.task_payload_json) as unknown,
+                },
+              });
+            }
           } catch (error) {
             row = await appendAudit(db, row, "infrastructure.failed", input.now, {
               message: error instanceof Error ? error.message : String(error),
@@ -2127,12 +2181,6 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
             await publishProjection(ctx, retry.row, retry.engine);
             return { delayMs: retry.delayMs, kind: "sleep" as const };
           }
-          engine = { ...engine, attempt_count: number, engine_phase: "running" };
-          await db
-            .updateTable("run_engine_state")
-            .set({ attempt_count: number, engine_phase: "running" })
-            .where("run_id", "=", row.run_id)
-            .execute();
           ctx.publish(runs.events.stepRequestedV1, {
             correlationToken: token,
             runId: row.run_id,

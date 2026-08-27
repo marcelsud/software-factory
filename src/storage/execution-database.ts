@@ -10,27 +10,27 @@ export interface StepAttemptRow {
   started_at: string;
   step_id: string;
 }
-
 export interface WorkspaceRow {
   attempt_id: string;
   created_at: string;
   status: string;
   workspace_id: string;
 }
-
 export interface AttemptResultRow {
   attempt_id: string;
   finished_at: string;
   result_json: string;
 }
-
+export interface AttemptCancellationRow {
+  attempt_id: string;
+  cancelled_at: string;
+}
 export interface AttemptRequestRow {
   attempt_id: string;
   protocol_version: number;
   request_digest: string;
   request_json: string;
 }
-
 export interface WorkspaceLifecycleRow {
   attempt_id: string;
   cleaned_at: string | null;
@@ -39,7 +39,6 @@ export interface WorkspaceLifecycleRow {
   path: string | null;
   ready_at: string | null;
 }
-
 export interface AttemptResultMetadataRow {
   attempt_id: string;
   changed_files_json: string;
@@ -51,8 +50,8 @@ export interface AttemptResultMetadataRow {
   tests_json: string;
   timing_json: string;
 }
-
 export interface ExecutionDatabase {
+  attempt_cancellations: AttemptCancellationRow;
   attempt_requests: AttemptRequestRow;
   attempt_result_metadata: AttemptResultMetadataRow;
   attempt_results: AttemptResultRow;
@@ -129,6 +128,11 @@ export const executionMigrations = {
           resources_json TEXT NOT NULL,
           FOREIGN KEY (attempt_id) REFERENCES step_attempts(attempt_id)
         );
+        CREATE TABLE IF NOT EXISTS attempt_cancellations (
+          attempt_id TEXT PRIMARY KEY,
+          cancelled_at TEXT NOT NULL,
+          FOREIGN KEY (attempt_id) REFERENCES step_attempts(attempt_id)
+        );
       `,
     },
   ],
@@ -193,6 +197,10 @@ export const executionMigrations = {
           tests_json TEXT NOT NULL,
           timing_json TEXT NOT NULL,
           resources_json TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS chimpbase_execution.attempt_cancellations (
+          attempt_id TEXT PRIMARY KEY REFERENCES chimpbase_execution.step_attempts(attempt_id),
+          cancelled_at TEXT NOT NULL
         );
       `,
     },

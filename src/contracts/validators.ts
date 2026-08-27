@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { type Infer, v } from "chimpbase/runtime";
 
 export const emptyInput = v.object({});
@@ -259,10 +260,16 @@ export const strictAgentProfile = v.object({
   environment: v.record(v.string()),
   instructions: v.string(),
   limits: v.object({
+    cpuSeconds: v.integer(),
+    maxFileBytes: v.integer(),
     maxInputBytes: v.integer(),
     maxLogBytes: v.integer(),
     maxOutputBytes: v.integer(),
     maxPatchBytes: v.integer(),
+    maxPids: v.integer(),
+    maxWorkspaceBytes: v.integer(),
+    maxWorkspaceFiles: v.integer(),
+    memoryBytes: v.integer(),
     timeoutMs: v.integer(),
   }),
   model: v.string(),
@@ -302,6 +309,7 @@ export const agentFailure = v.object({
 
 export const agentChangedFile = v.object({
   digest,
+  contentBase64: v.string().optional(),
   path: v.string(),
   size: v.integer(),
 });
@@ -373,13 +381,46 @@ export function parseAgentRequest(value: unknown): Infer<typeof agentRequest> {
     request.agentProfile.capabilities.some((capability, index) => capability !== expected[index])
   )
     throw new Error("agent request capabilities do not match the pinned preset");
+  const profileSkillIds = [...request.agentProfile.skills].sort();
+  const bundleSkillIds = request.skills.map(({ id }) => id).sort();
+  if (
+    new Set(profileSkillIds).size !== profileSkillIds.length ||
+    new Set(bundleSkillIds).size !== bundleSkillIds.length ||
+    profileSkillIds.length !== bundleSkillIds.length ||
+    profileSkillIds.some((id, index) => id !== bundleSkillIds[index])
+  )
+    throw new Error("agent request skill bundles must match the pinned profile skills one-to-one");
+  for (const bundle of request.skills) {
+    if (!bundle.digest.startsWith("sha256:")) continue;
+    const canonical = JSON.stringify({
+      files: [...bundle.files]
+        .sort((left, right) => left.path.localeCompare(right.path))
+        .map(({ contentBase64, digest: fileDigest, kind, path, size }) => ({
+          contentBase64: contentBase64 ?? null,
+          digest: fileDigest,
+          kind,
+          path,
+          size,
+        })),
+      instructions: bundle.instructions,
+    });
+    const actual = `sha256:${createHash("sha256").update(canonical).digest("hex")}`;
+    if (actual !== bundle.digest)
+      throw new Error(`agent skill bundle digest mismatch: ${bundle.id}`);
+  }
   if (
     request.agentProfile.command.length === 0 ||
     request.agentProfile.limits.timeoutMs <= 0 ||
+    request.agentProfile.limits.cpuSeconds <= 0 ||
+    request.agentProfile.limits.maxFileBytes <= 0 ||
     request.agentProfile.limits.maxInputBytes <= 0 ||
     request.agentProfile.limits.maxOutputBytes <= 0 ||
     request.agentProfile.limits.maxLogBytes <= 0 ||
     request.agentProfile.limits.maxPatchBytes <= 0 ||
+    request.agentProfile.limits.maxPids <= 0 ||
+    request.agentProfile.limits.maxWorkspaceBytes <= 0 ||
+    request.agentProfile.limits.maxWorkspaceFiles <= 0 ||
+    request.agentProfile.limits.memoryBytes <= 0 ||
     request.budget.maxDurationMs <= 0 ||
     request.budget.maxInputBytes <= 0 ||
     request.budget.maxOutputBytes <= 0
@@ -701,6 +742,7 @@ export const eventRecord = v.object({
   occurredAt: isoTimestamp,
   payload: v.unknown(),
 });
+export type PinnedSkillBundle = Infer<typeof pinnedSkillBundle>;
 
 export type DefinitionRevision = Infer<typeof definitionRevision>;
 export type ExecutionPlan = Infer<typeof executionPlan>;

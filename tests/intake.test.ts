@@ -827,6 +827,7 @@ describe("leaf-03 GitHub intake", () => {
     expect(transport.calls[0]?.method).toBe("listChangedIssues");
     const actions: Array<{ name: string; args: unknown }> = [];
     let composedRepositoryEvents: unknown;
+    let composedLocalRepositories: unknown;
     const host: IntakeHost = {
       async close() {},
       async executeAction(name, args) {
@@ -842,6 +843,7 @@ describe("leaf-03 GitHub intake", () => {
       installShutdown: () => () => {},
       openHost: async (...args: unknown[]) => {
         composedRepositoryEvents = args[3];
+        composedLocalRepositories = args[4];
         return host;
       },
       readStdin: async () => JSON.stringify(issueAction),
@@ -862,6 +864,9 @@ describe("leaf-03 GitHub intake", () => {
     );
     expect(composedRepositoryEvents).toMatchObject({
       factory: expect.arrayContaining(["issue.opened", "issue.edited", "issue_comment.created"]),
+    });
+    expect(composedLocalRepositories).toMatchObject({
+      "example/software-factory": expect.any(String),
     });
   });
 });

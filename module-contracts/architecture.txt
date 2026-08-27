@@ -3,9 +3,11 @@ Chimpbase module architecture
 assets v1
   depends: none
   call: assets/getArtifact@v1
+  call: assets/getSkillBundle@v1
   call: assets/listRunArtifacts@v1
   call: assets/materializeArtifact@v1
   call: assets/putArtifact@v1
+  call: assets/putSkillBundle@v1
   call: assets/resolveSkill@v1
   event: assets/artifactStored@v1
   event: assets/skillRevisionPinned@v1
@@ -31,7 +33,9 @@ effects v1
   event: effects/effectQueued@v1
 execution v1
   depends: assets
+  call: execution/cancelAttempt@v1
   call: execution/getAttempt@v1
+  call: execution/getAttemptProtocol@v1
   call: execution/getAttemptV2@v1
   call: execution/getAttemptV3@v1
   call: execution/requestAttempt@v1

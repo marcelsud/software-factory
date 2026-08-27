@@ -103,6 +103,7 @@ export interface RunEngineStateRow {
   terminal_published: number;
 }
 export interface RunExecutionPinRow {
+  execution_protocol: string;
   repository_sha: string;
   run_id: string;
   task_payload_json: string;
@@ -262,6 +263,7 @@ export const runsMigrations = {
       sql: `
         CREATE TABLE IF NOT EXISTS run_execution_pins (
           run_id TEXT PRIMARY KEY,
+          execution_protocol TEXT NOT NULL,
           repository_sha TEXT NOT NULL,
           task_payload_json TEXT NOT NULL,
           FOREIGN KEY (run_id) REFERENCES runs(run_id)
@@ -389,6 +391,7 @@ export const runsMigrations = {
       sql: `
         CREATE TABLE IF NOT EXISTS chimpbase_runs.run_execution_pins (
           run_id TEXT PRIMARY KEY REFERENCES chimpbase_runs.runs(run_id),
+          execution_protocol TEXT NOT NULL,
           repository_sha TEXT NOT NULL,
           task_payload_json TEXT NOT NULL
         );

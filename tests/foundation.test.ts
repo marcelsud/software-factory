@@ -444,7 +444,7 @@ describe("foundation", () => {
     const profile = plan.agentProfiles["triage-agent"];
     expect(profile).toMatchObject({
       capabilities: ["repository.read"],
-      command: ["factory-agent"],
+      command: ["/home/marcelsud/.bun/bin/bun", "/workspace/src/adapters/json-stdio-agent.mjs"],
       model: "trusted-composition-default",
     });
     if (profile === undefined) return;
@@ -763,10 +763,16 @@ describe("foundation", () => {
           capabilityPreset: "read-only",
           environment: {},
           limits: {
+            cpuSeconds: 1,
+            maxFileBytes: 1024,
             ...profile.limits,
             maxInputBytes: 1024,
             maxLogBytes: 1024,
             maxPatchBytes: 1024,
+            maxPids: 4,
+            maxWorkspaceBytes: 1024,
+            maxWorkspaceFiles: 10,
+            memoryBytes: 1024 * 1024,
           },
         },
         attemptId: "attempt",
@@ -786,7 +792,7 @@ describe("foundation", () => {
     expect(agentResult.outcome?.outcome).toBe("completed");
     expect(agent.requests[0]?.agentProfile).toMatchObject({
       capabilities: ["repository.read"],
-      command: ["factory-agent"],
+      command: ["/home/marcelsud/.bun/bin/bun", "/workspace/src/adapters/json-stdio-agent.mjs"],
       model: "trusted-composition-default",
     });
 

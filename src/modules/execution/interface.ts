@@ -34,6 +34,18 @@ const calls = {
     errors: ["module_unavailable", "attempt_exists", "invalid_pin"],
     guarantees: ["request is idempotent by attempt id and compares every immutable execution pin"],
   },
+  cancelAttempt: {
+    input: v.object({ attemptId: v.string(), cancelledAt: v.string() }),
+    output: v.boolean(),
+    errors: ["module_unavailable"],
+    guarantees: ["cancellation is idempotent and terminates the active runtime attempt"],
+  },
+  getAttemptProtocol: {
+    input: v.object({ attemptId: v.string() }),
+    output: v.enum(["v1", "v2"]).nullable(),
+    errors: ["module_unavailable"],
+    guarantees: ["returns the persisted request protocol; pre-migration attempts are v1"],
+  },
   getAttempt: {
     input: v.object({ attemptId: v.string() }),
     output: stepAttempt.nullable(),

@@ -151,10 +151,16 @@ function profile(
     environment: { FACTORY_MODEL_HINT: "pinned" },
     instructions: "Pinned trusted instructions; task and repository content are untrusted.",
     limits: {
+      cpuSeconds: 2,
+      maxFileBytes: 1024 * 1024,
       maxInputBytes: 1024 * 1024,
       maxLogBytes: 64 * 1024,
       maxOutputBytes: 256 * 1024,
       maxPatchBytes: 1024 * 1024,
+      maxPids: 16,
+      maxWorkspaceBytes: 16 * 1024 * 1024,
+      maxWorkspaceFiles: 1_000,
+      memoryBytes: 6 * 1024 * 1024 * 1024,
       timeoutMs: 2_000,
     },
     model: "pinned-model",
@@ -253,9 +259,16 @@ describe("leaf-05 execution", () => {
     oversizedRequest.agentProfile.limits.maxOutputBytes = 512;
     oversizedRequest.budget.maxOutputBytes = 512;
     const oversized = await runtime(fixture).run(oversizedRequest, new AbortController().signal);
-    for (const result of [invalid, missing, oversized]) {
-      expect(result.failure?.category).toBe("result-invalid");
-      expect(result.outcome).toBeUndefined();
+    for (const [label, result] of [
+      ["invalid", invalid],
+      ["missing", missing],
+      ["oversized", oversized],
+    ] as const) {
+      expect({ category: result.failure?.category, label }).toEqual({
+        category: "result-invalid",
+        label,
+      });
+      expect({ label, outcome: result.outcome }).toEqual({ label, outcome: undefined });
     }
 
     let workerCalls = 0;
@@ -409,7 +422,12 @@ describe("leaf-05 execution", () => {
         declaredOutputPaths: ["descendant.pid"],
       },
     );
-    const timedResult = await runtime(fixture).run(timed, new AbortController().signal);
+    const timedRuntime = runtime(fixture);
+    const timedResult = await timedRuntime.run(timed, new AbortController().signal);
+    expect(timedRuntime.lastLaunchCommand).toContain("/usr/bin/prlimit");
+    expect(timedRuntime.lastLaunchCommand).toContain(
+      `--nproc=${timed.agentProfile.limits.maxPids}`,
+    );
     expect(timedResult.failure?.category).toBe("timeout");
     expect(timedResult.outcome).toBeUndefined();
 
@@ -465,6 +483,25 @@ describe("leaf-05 execution", () => {
     expect(
       (await runtime(traversalFixture).run(traversal, new AbortController().signal)).failure
         ?.category,
+    ).toBe("adapter");
+    const giantFixture = await repositoryFixture();
+    await writeFile(join(giantFixture.repository, "giant.bin"), Buffer.alloc(2_048));
+    await git(giantFixture.repository, "add", "giant.bin");
+    await git(giantFixture.repository, "commit", "--quiet", "-m", "giant blob");
+    const giantSha = await git(giantFixture.repository, "rev-parse", "HEAD");
+    const boundedProfile = profile();
+    boundedProfile.limits.maxFileBytes = 512;
+    const giant = request(
+      giantFixture,
+      "g10-giant",
+      {},
+      {
+        agentProfile: boundedProfile,
+        repository: { id: "fixture", sha: giantSha },
+      },
+    );
+    expect(
+      (await runtime(giantFixture).run(giant, new AbortController().signal)).failure?.category,
     ).toBe("adapter");
     const mismatch = request(
       traversalFixture,

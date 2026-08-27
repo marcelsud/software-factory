@@ -31,9 +31,9 @@ export const SQLITE_MODULE_LIMITATIONS = {
 
 export const MODULE_RESOURCES = {
   assets: {
-    collections: ["artifacts", "skill-revisions"],
+    collections: ["artifacts", "skill-bundles", "skill-revisions"],
     kvPrefixes: ["artifact-bytes", "artifact-materializations"],
-    tables: ["artifacts", "skill_revisions"],
+    tables: ["artifact_blobs", "artifacts", "skill_bundles", "skill_revisions"],
   },
   definitions: {
     collections: [
@@ -64,6 +64,7 @@ export const MODULE_RESOURCES = {
     tables: [
       "attempt_requests",
       "attempt_result_metadata",
+      "attempt_cancellations",
       "attempt_results",
       "step_attempts",
       "workspace_lifecycle",
@@ -132,6 +133,8 @@ export const RESOURCE_OWNERS = {
   "artifact-materializations": "assets",
   artifacts: "assets",
   attempt_requests: "execution",
+  attempt_cancellations: "execution",
+  artifact_blobs: "assets",
   attempt_result_metadata: "execution",
   attempt_results: "execution",
   definition_revisions: "definitions",
@@ -218,6 +221,8 @@ export const RESOURCE_OWNERS = {
   source_payload_snapshots: "intake",
   step_attempts: "execution",
   telemetry: "chimpbase",
+  "skill-bundles": "assets",
+  skill_bundles: "assets",
   "step-attempts": "execution",
   "workflow-engine": "chimpbase",
   workflow_signals: "runs",
