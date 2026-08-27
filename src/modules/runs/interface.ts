@@ -74,10 +74,12 @@ const startRunInputV3 = v.object({
   flowId: v.string(),
   moduleManifestDigest: v.string(),
   repository: v.string(),
+  repositorySha: v.string().optional(),
   runId: v.string(),
   startedAt: v.string(),
   subject: v.string(),
   workflowId: v.string(),
+  taskPayload: v.unknown().optional(),
   workflowVersionDigest: v.string(),
 });
 

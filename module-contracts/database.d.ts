@@ -22,8 +22,11 @@ export interface EffectsDatabase {
 }
 
 export interface ExecutionDatabase {
+  "attempt_requests": Record<string, unknown>;
+  "attempt_result_metadata": Record<string, unknown>;
   "attempt_results": Record<string, unknown>;
   "step_attempts": Record<string, unknown>;
+  "workspace_lifecycle": Record<string, unknown>;
   "workspaces": Record<string, unknown>;
 }
 
@@ -50,6 +53,7 @@ export interface RunsDatabase {
   "run_admissions": Record<string, unknown>;
   "run_audit": Record<string, unknown>;
   "run_engine_state": Record<string, unknown>;
+  "run_execution_pins": Record<string, unknown>;
   "run_gates": Record<string, unknown>;
   "run_identities": Record<string, unknown>;
   "runs": Record<string, unknown>;

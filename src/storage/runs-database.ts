@@ -102,6 +102,11 @@ export interface RunEngineStateRow {
   subject: string;
   terminal_published: number;
 }
+export interface RunExecutionPinRow {
+  repository_sha: string;
+  run_id: string;
+  task_payload_json: string;
+}
 
 export interface RunAdmissionRow {
   limit_value: number;
@@ -120,6 +125,7 @@ export interface RunAdmissionSlotRow {
 export interface RunsDatabase {
   operator_commands: OperatorCommandRow;
   run_admission_slots: RunAdmissionSlotRow;
+  run_execution_pins: RunExecutionPinRow;
   run_admissions: RunAdmissionRow;
   run_engine_state: RunEngineStateRow;
   run_identities: RunIdentityRow;
@@ -251,6 +257,17 @@ export const runsMigrations = {
         );
       `,
     },
+    {
+      name: "005_execution_request_pins",
+      sql: `
+        CREATE TABLE IF NOT EXISTS run_execution_pins (
+          run_id TEXT PRIMARY KEY,
+          repository_sha TEXT NOT NULL,
+          task_payload_json TEXT NOT NULL,
+          FOREIGN KEY (run_id) REFERENCES runs(run_id)
+        );
+      `,
+    },
   ],
   postgres: [
     {
@@ -364,6 +381,16 @@ export const runsMigrations = {
           slot_number INTEGER NOT NULL,
           run_id TEXT NOT NULL UNIQUE REFERENCES chimpbase_runs.runs(run_id),
           PRIMARY KEY (scope_key, slot_number)
+        );
+      `,
+    },
+    {
+      name: "005_execution_request_pins",
+      sql: `
+        CREATE TABLE IF NOT EXISTS chimpbase_runs.run_execution_pins (
+          run_id TEXT PRIMARY KEY REFERENCES chimpbase_runs.runs(run_id),
+          repository_sha TEXT NOT NULL,
+          task_payload_json TEXT NOT NULL
         );
       `,
     },

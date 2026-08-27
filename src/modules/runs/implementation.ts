@@ -9,6 +9,8 @@ import { type ChimpbaseContext, type Infer, v, workflow } from "chimpbase/runtim
 import type { Kysely } from "kysely";
 
 import {
+  type AttemptFinished,
+  CAPABILITY_PRESETS,
   type ExecutionPlanV2,
   type FactoryEvent,
   isDataRecord,
@@ -326,7 +328,20 @@ async function loadRows(db: Kysely<RunsDatabase>, runId: string) {
     .selectAll()
     .where("run_id", "=", runId)
     .executeTakeFirst();
-  return { engine: engine ?? null, row };
+  if (engine === undefined) return { engine: null, row };
+  const pins = await db
+    .selectFrom("run_execution_pins")
+    .selectAll()
+    .where("run_id", "=", runId)
+    .executeTakeFirst();
+  return {
+    engine: {
+      ...engine,
+      repository_sha: pins?.repository_sha ?? row.definition_digest,
+      task_payload_json: pins?.task_payload_json ?? "null",
+    },
+    row,
+  };
 }
 
 function sameLegacyIdentity(
@@ -673,6 +688,19 @@ async function scheduleRetry(
   return { delayMs, engine: nextEngine, row: nextRow };
 }
 
+function capabilityPresetFor(capabilities: readonly string[]): keyof typeof CAPABILITY_PRESETS {
+  for (const [preset, expected] of Object.entries(CAPABILITY_PRESETS) as Array<
+    [keyof typeof CAPABILITY_PRESETS, readonly string[]]
+  >) {
+    if (
+      capabilities.length === expected.length &&
+      expected.every((capability) => capabilities.includes(capability))
+    )
+      return preset;
+  }
+  throw new Error("invalid_revision_pin: agent capabilities do not match an execution preset");
+}
+
 function validResult(
   step: ExecutionPlanV2["steps"][number],
   result: unknown,
@@ -706,75 +734,106 @@ function validResult(
   });
 }
 
+type AttemptCompletion = Omit<AttemptFinished, "result"> & {
+  readonly failure?: unknown;
+  readonly result?: AttemptFinished["result"];
+};
+
+async function consumeAttemptFinished(
+  ctx: RunsContext,
+  outcome: AttemptCompletion,
+): Promise<boolean> {
+  const db = runsDb(ctx);
+  const loaded = await loadRows(db, outcome.runId);
+  if (
+    loaded === null ||
+    isTerminal(loaded.row.status) ||
+    loaded.row.current_attempt_id !== outcome.attemptId ||
+    loaded.row.current_correlation_token !== outcome.correlationToken
+  )
+    return false;
+  if (loaded.engine === null) {
+    const failed = outcome.outcome === "failed";
+    const updated = await appendAudit(
+      db,
+      loaded.row,
+      `attempt.${outcome.outcome}`,
+      outcome.finishedAt,
+      outcome,
+      {
+        current_attempt_id: null,
+        current_correlation_token: failed ? null : loaded.row.current_correlation_token,
+        current_effect_key: failed ? null : loaded.row.current_effect_key,
+        current_gate_id: failed ? null : loaded.row.current_gate_id,
+        current_gate_status: failed ? null : loaded.row.current_gate_status,
+        current_step_id: failed ? null : loaded.row.current_step_id,
+        finished_at: failed ? outcome.finishedAt : loaded.row.finished_at,
+        status: failed ? "failed" : "running",
+      },
+    );
+    await publishProjection(ctx, updated);
+    if (failed) {
+      await ctx.workflow.signal(updated.workflow_id, "finish", {});
+      const projection = runFromRow(updated);
+      ctx.publish(runs.events.runFinishedV1, finishedV1(projection));
+      ctx.publish(runs.events.runFinishedV2, finishedV2(projection));
+    }
+    return true;
+  }
+  const identity = `attempt:${outcome.attemptId}:${outcome.finishedAt}`;
+  if (
+    !(await recordWorkflowSignal(
+      ctx,
+      loaded.row,
+      identity,
+      "attempt.finished",
+      outcome.correlationToken,
+      outcome.finishedAt,
+      outcome,
+    ))
+  )
+    return false;
+  const row = await appendAudit(
+    db,
+    loaded.row,
+    `attempt.${outcome.outcome}`,
+    outcome.finishedAt,
+    outcome,
+  );
+  await db
+    .updateTable("run_engine_state")
+    .set({ pending_json: JSON.stringify({ kind: "attempt", outcome }) })
+    .where("run_id", "=", row.run_id)
+    .execute();
+  await signalResume(ctx, row, identity, outcome.finishedAt, "attempt.finished");
+  return true;
+}
+
 function createSubscriptions(dependencies: RunsImplementationDependencies) {
-  const attemptFinished = defineChimpbaseModuleSubscription(
+  const attemptFinishedStrict = defineChimpbaseModuleSubscription(
+    execution.events.attemptFinishedV2,
+    "record-attempt-outcome-v2",
+    async (ctx, finished) =>
+      await consumeAttemptFinished(ctx, {
+        agentProfileDigest: finished.agentProfileDigest,
+        attemptId: finished.attemptId,
+        correlationToken: finished.correlationToken,
+        failure: finished.result.failure,
+        finishedAt: finished.finishedAt,
+        outcome: finished.result.outcome === undefined ? "failed" : finished.result.status,
+        ...(finished.result.outcome === undefined ? {} : { result: finished.result.outcome }),
+        runId: finished.runId,
+        startedAt: finished.startedAt,
+        stepId: finished.stepId,
+      }),
+  );
+  const attemptFinishedLegacy = defineChimpbaseModuleSubscription(
     execution.events.attemptFinishedV1,
-    "record-attempt-outcome",
+    "record-attempt-outcome-v1",
     async (ctx, outcome) => {
-      const db = runsDb(ctx);
-      const loaded = await loadRows(db, outcome.runId);
-      if (
-        loaded === null ||
-        isTerminal(loaded.row.status) ||
-        loaded.row.current_attempt_id !== outcome.attemptId ||
-        loaded.row.current_correlation_token !== outcome.correlationToken
-      )
-        return false;
-      if (loaded.engine === null) {
-        const failed = outcome.outcome === "failed";
-        const updated = await appendAudit(
-          db,
-          loaded.row,
-          `attempt.${outcome.outcome}`,
-          outcome.finishedAt,
-          outcome,
-          {
-            current_attempt_id: null,
-            current_correlation_token: failed ? null : loaded.row.current_correlation_token,
-            current_effect_key: failed ? null : loaded.row.current_effect_key,
-            current_gate_id: failed ? null : loaded.row.current_gate_id,
-            current_gate_status: failed ? null : loaded.row.current_gate_status,
-            current_step_id: failed ? null : loaded.row.current_step_id,
-            finished_at: failed ? outcome.finishedAt : loaded.row.finished_at,
-            status: failed ? "failed" : "running",
-          },
-        );
-        await publishProjection(ctx, updated);
-        if (failed) {
-          await ctx.workflow.signal(updated.workflow_id, "finish", {});
-          const projection = runFromRow(updated);
-          ctx.publish(runs.events.runFinishedV1, finishedV1(projection));
-          ctx.publish(runs.events.runFinishedV2, finishedV2(projection));
-        }
-        return true;
-      }
-      const identity = `attempt:${outcome.attemptId}:${outcome.finishedAt}`;
-      if (
-        !(await recordWorkflowSignal(
-          ctx,
-          loaded.row,
-          identity,
-          "attempt.finished",
-          outcome.correlationToken,
-          outcome.finishedAt,
-          outcome,
-        ))
-      )
-        return false;
-      const row = await appendAudit(
-        db,
-        loaded.row,
-        `attempt.${outcome.outcome}`,
-        outcome.finishedAt,
-        outcome,
-      );
-      await db
-        .updateTable("run_engine_state")
-        .set({ pending_json: JSON.stringify({ kind: "attempt", outcome }) })
-        .where("run_id", "=", row.run_id)
-        .execute();
-      await signalResume(ctx, row, identity, outcome.finishedAt, "attempt.finished");
-      return true;
+      const loaded = await loadRows(runsDb(ctx), outcome.runId);
+      if (loaded?.engine !== null) return false;
+      return await consumeAttemptFinished(ctx, outcome);
     },
   );
 
@@ -880,9 +939,11 @@ function createSubscriptions(dependencies: RunsImplementationDependencies) {
           flowId,
           moduleManifestDigest: dependencies.moduleManifestDigest,
           repository: accepted.event.repository,
+          repositorySha: accepted.event.sourceRevision,
           runId,
           startedAt: accepted.event.observedAt,
           subject: accepted.event.subject,
+          taskPayload: accepted.event.payload,
           workflowId: digestIdentity("workflow", runId),
           workflowVersionDigest: dependencies.workflowVersionDigest,
         });
@@ -934,7 +995,7 @@ function createSubscriptions(dependencies: RunsImplementationDependencies) {
       return started;
     },
   );
-  return [attemptFinished, effectFinished, acceptedEvent] as const;
+  return [attemptFinishedStrict, attemptFinishedLegacy, effectFinished, acceptedEvent] as const;
 }
 
 export function createRunsImplementation(dependencies: RunsImplementationDependencies = {}) {
@@ -956,6 +1017,7 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
       tables: [
         "operator_commands",
         "run_admission_slots",
+        "run_execution_pins",
         "run_admissions",
         "run_audit",
         "run_engine_state",
@@ -1122,7 +1184,9 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
             existing.row.workflow_id !== scopedWorkflowId(input.workflowId) ||
             existing.row.workflow_version_digest !== input.workflowVersionDigest ||
             existing.engine.repository !== input.repository ||
-            existing.engine.subject !== input.subject
+            existing.engine.subject !== input.subject ||
+            existing.engine.repository_sha !== (input.repositorySha ?? input.definitionDigest) ||
+            existing.engine.task_payload_json !== JSON.stringify(input.taskPayload ?? null)
           )
             throw new Error("run_exists: immutable run identity has different pins");
           return runV3FromRows(existing.row, existing.engine);
@@ -1185,6 +1249,14 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
           .values({ initial_correlation_json: "null", run_id: input.runId })
           .execute();
         await db.insertInto("run_engine_state").values(engine).execute();
+        await db
+          .insertInto("run_execution_pins")
+          .values({
+            repository_sha: input.repositorySha ?? input.definitionDigest,
+            run_id: input.runId,
+            task_payload_json: JSON.stringify(input.taskPayload ?? null),
+          })
+          .execute();
         await db
           .insertInto("run_admissions")
           .values({
@@ -1786,7 +1858,11 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
               return { kind: "complete" as const };
             }
             row = next.row;
-            engine = next.engine;
+            engine = {
+              ...next.engine,
+              repository_sha: engine.repository_sha,
+              task_payload_json: engine.task_payload_json,
+            };
             await publishProjection(ctx, row, engine);
             return { kind: "sleep" as const, delayMs: 0 };
           }
@@ -1988,22 +2064,55 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
               status: "running",
             },
           );
-          engine = { ...engine, attempt_count: number, engine_phase: "running" };
-          await db
-            .updateTable("run_engine_state")
-            .set({ attempt_count: number, engine_phase: "running" })
-            .where("run_id", "=", row.run_id)
-            .execute();
           try {
-            await ctx.call(execution.calls.requestAttempt, {
-              agentProfile: profile,
+            const capabilityPreset = capabilityPresetFor(step.capabilities);
+            const strictProfile = {
+              capabilities: [...CAPABILITY_PRESETS[capabilityPreset]],
+              capabilityPreset,
+              command: profile.command,
+              digest: profile.digest,
+              environment: {},
+              instructions: profile.instructions,
+              limits: {
+                maxInputBytes: 8 * 1024 * 1024,
+                maxLogBytes: Math.min(profile.limits.maxOutputBytes, 1024 * 1024),
+                maxOutputBytes: profile.limits.maxOutputBytes,
+                maxPatchBytes: 16 * 1024 * 1024,
+                timeoutMs: profile.limits.timeoutMs,
+              },
+              model: profile.model,
+              skills: profile.skills,
+            };
+            await ctx.call(execution.calls.requestAttemptV2, {
+              agentProfile: strictProfile,
               attemptId,
+              budget: {
+                maxDurationMs: profile.limits.timeoutMs,
+                maxInputBytes: strictProfile.limits.maxInputBytes,
+                maxOutputBytes: profile.limits.maxOutputBytes,
+              },
               correlationToken: token,
-              inputArtifactDigests: artifacts,
+              declaredOutputPaths: [],
+              inputArtifacts: artifacts.map((digest) => ({
+                digest,
+                kind: "artifact" as const,
+                path: `${digest}.bin`,
+                size: 0,
+              })),
+              repository: { id: engine.repository, sha: engine.repository_sha },
               runId: row.run_id,
-              skillDigests: plan.skillRevisions,
+              skills: profile.skills.map((id) => ({
+                digest: plan.skillRevisions[id] ?? "",
+                files: [],
+                id,
+                instructions: "",
+              })),
               startedAt: input.now,
               stepId: step.id,
+              task: {
+                mediaType: "application/json",
+                payload: JSON.parse(engine.task_payload_json) as unknown,
+              },
             });
           } catch (error) {
             row = await appendAudit(db, row, "infrastructure.failed", input.now, {
@@ -2018,6 +2127,12 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
             await publishProjection(ctx, retry.row, retry.engine);
             return { delayMs: retry.delayMs, kind: "sleep" as const };
           }
+          engine = { ...engine, attempt_count: number, engine_phase: "running" };
+          await db
+            .updateTable("run_engine_state")
+            .set({ attempt_count: number, engine_phase: "running" })
+            .where("run_id", "=", row.run_id)
+            .execute();
           ctx.publish(runs.events.stepRequestedV1, {
             correlationToken: token,
             runId: row.run_id,

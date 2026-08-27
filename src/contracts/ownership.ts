@@ -1,5 +1,5 @@
 export const CAPABILITY_OWNERS = {
-  "agent.execute": "agent-runtime",
+  "agent.run": "agent-runtime",
   "artifact.bytes": "artifact-byte-driver",
   "definition.compile": "definitions",
   "git.publish": "git-publisher",
@@ -61,7 +61,14 @@ export const MODULE_RESOURCES = {
   execution: {
     collections: ["step-attempts", "workspaces"],
     queues: ["agent-workers"],
-    tables: ["attempt_results", "step_attempts", "workspaces"],
+    tables: [
+      "attempt_requests",
+      "attempt_result_metadata",
+      "attempt_results",
+      "step_attempts",
+      "workspace_lifecycle",
+      "workspaces",
+    ],
   },
   intake: {
     collections: [
@@ -102,6 +109,7 @@ export const MODULE_RESOURCES = {
     tables: [
       "operator_commands",
       "run_admission_slots",
+      "run_execution_pins",
       "run_admissions",
       "run_audit",
       "run_engine_state",
@@ -123,6 +131,8 @@ export const RESOURCE_OWNERS = {
   "artifact-bytes": "assets",
   "artifact-materializations": "assets",
   artifacts: "assets",
+  attempt_requests: "execution",
+  attempt_result_metadata: "execution",
   attempt_results: "execution",
   definition_revisions: "definitions",
   "definition-revisions": "definitions",
@@ -140,7 +150,9 @@ export const RESOURCE_OWNERS = {
   "event-delivery": "chimpbase",
   "event:ArtifactStored.v1": "assets",
   "event:AttemptFinished.v1": "execution",
+  "event:AttemptFinished.v2": "execution",
   "event:AttemptQueued.v1": "execution",
+  "event:AttemptQueued.v2": "execution",
   "event:DefinitionPublished.v1": "definitions",
   "event:EffectFinished.v1": "effects",
   "event:EffectFinished.v2": "effects",
@@ -193,6 +205,7 @@ export const RESOURCE_OWNERS = {
   run_gates: "runs",
   run_identities: "runs",
   "run-engine-state": "runs",
+  run_execution_pins: "runs",
   run_engine_state: "runs",
   "run-gates": "runs",
   "run-projections": "operations",
@@ -209,5 +222,6 @@ export const RESOURCE_OWNERS = {
   "workflow-engine": "chimpbase",
   workflow_signals: "runs",
   "workflow-signals": "runs",
+  workspace_lifecycle: "execution",
   workspaces: "execution",
 } as const;

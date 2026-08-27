@@ -227,6 +227,182 @@ export const stepResultDocument = v.object({
   summary: v.string(),
 });
 
+export const capabilityPreset = v.enum(["read-only", "patch", "test", "release"]);
+
+export const CAPABILITY_PRESETS = {
+  "read-only": ["repository.read"],
+  patch: ["repository.read", "repository.patch"],
+  test: ["repository.read", "repository.patch", "process.test"],
+  release: ["repository.read", "repository.patch", "process.test", "repository.release"],
+} as const;
+
+export const agentMaterialization = v.object({
+  contentBase64: v.string().optional(),
+  digest,
+  kind: v.enum(["artifact", "skill", "task"]),
+  path: v.string(),
+  size: v.integer(),
+});
+
+export const pinnedSkillBundle = v.object({
+  digest,
+  files: v.array(agentMaterialization),
+  id: identifier,
+  instructions: v.string(),
+});
+
+export const strictAgentProfile = v.object({
+  capabilities: v.array(v.string()),
+  capabilityPreset,
+  command: v.array(v.string()),
+  digest,
+  environment: v.record(v.string()),
+  instructions: v.string(),
+  limits: v.object({
+    maxInputBytes: v.integer(),
+    maxLogBytes: v.integer(),
+    maxOutputBytes: v.integer(),
+    maxPatchBytes: v.integer(),
+    timeoutMs: v.integer(),
+  }),
+  model: v.string(),
+  skills: v.array(v.string()),
+});
+
+export const agentRequest = v.object({
+  agentProfile: strictAgentProfile,
+  attemptId: identifier,
+  budget: v.object({
+    maxDurationMs: v.integer(),
+    maxInputBytes: v.integer(),
+    maxOutputBytes: v.integer(),
+  }),
+  correlationToken: identifier,
+  declaredOutputPaths: v.array(v.string()),
+  inputArtifacts: v.array(agentMaterialization),
+  repository: v.object({
+    id: identifier,
+    sha: digest,
+  }),
+  runId: identifier,
+  skills: v.array(pinnedSkillBundle),
+  startedAt: isoTimestamp,
+  stepId: identifier,
+  task: v.object({
+    mediaType: v.string(),
+    payload: v.unknown(),
+  }),
+});
+
+export const agentFailure = v.object({
+  category: v.enum(["timeout", "cancel", "result-invalid", "process", "sandbox", "adapter"]),
+  message: v.string(),
+  retriable: v.boolean(),
+});
+
+export const agentChangedFile = v.object({
+  digest,
+  path: v.string(),
+  size: v.integer(),
+});
+
+export const agentResult = v.object({
+  attemptId: identifier,
+  changedFiles: v.array(agentChangedFile),
+  commit: v
+    .object({
+      sha: digest,
+    })
+    .optional(),
+  failure: agentFailure.optional(),
+  logs: v.object({
+    stderrBytes: v.integer(),
+    stderrDigest: digest,
+    stderrTruncated: v.boolean(),
+    stdoutBytes: v.integer(),
+    stdoutDigest: digest,
+  }),
+  outcome: stepResultDocument.optional(),
+  patch: v
+    .object({
+      digest,
+      size: v.integer(),
+    })
+    .optional(),
+  resources: v.object({
+    cpuMs: v.integer(),
+    maxRssBytes: v.integer(),
+  }),
+  status: v.enum(["succeeded", "failed"]),
+  tests: v.array(
+    v.object({
+      command: v.array(v.string()),
+      durationMs: v.integer(),
+      exitCode: v.integer(),
+    }),
+  ),
+  timing: v.object({
+    durationMs: v.integer(),
+    finishedAt: isoTimestamp,
+    startedAt: isoTimestamp,
+  }),
+});
+
+export const attemptFinishedV2 = v.object({
+  agentProfileDigest: digest,
+  attemptId: identifier,
+  correlationToken: identifier,
+  finishedAt: isoTimestamp,
+  result: agentResult,
+  runId: identifier,
+  startedAt: isoTimestamp,
+  stepId: identifier,
+});
+
+function isCapabilityPreset(value: string): value is keyof typeof CAPABILITY_PRESETS {
+  return Object.hasOwn(CAPABILITY_PRESETS, value);
+}
+
+export function parseAgentRequest(value: unknown): Infer<typeof agentRequest> {
+  const request = agentRequest.parse(value);
+  const preset = request.agentProfile.capabilityPreset;
+  if (!isCapabilityPreset(preset)) throw new Error("agent request capability preset is invalid");
+  const expected = CAPABILITY_PRESETS[preset];
+  if (
+    request.agentProfile.capabilities.length !== expected.length ||
+    request.agentProfile.capabilities.some((capability, index) => capability !== expected[index])
+  )
+    throw new Error("agent request capabilities do not match the pinned preset");
+  if (
+    request.agentProfile.command.length === 0 ||
+    request.agentProfile.limits.timeoutMs <= 0 ||
+    request.agentProfile.limits.maxInputBytes <= 0 ||
+    request.agentProfile.limits.maxOutputBytes <= 0 ||
+    request.agentProfile.limits.maxLogBytes <= 0 ||
+    request.agentProfile.limits.maxPatchBytes <= 0 ||
+    request.budget.maxDurationMs <= 0 ||
+    request.budget.maxInputBytes <= 0 ||
+    request.budget.maxOutputBytes <= 0
+  )
+    throw new Error("agent request limits and command must be non-empty and positive");
+  return request;
+}
+
+export function parseAgentResult(value: unknown): Infer<typeof agentResult> {
+  const result = agentResult.parse(value);
+  const hasOutcome = result.outcome !== undefined;
+  const hasFailure = result.failure !== undefined;
+  if (hasOutcome === hasFailure)
+    throw new Error(
+      "agent result must contain exactly one domain outcome or infrastructure failure",
+    );
+  if (result.status === "succeeded" && !hasOutcome)
+    throw new Error("successful agent result must contain a domain outcome");
+  if (result.status === "failed" && !hasOutcome && !hasFailure)
+    throw new Error("failed agent result must contain an outcome or failure");
+  return result;
+}
+
 export const stepAttempt = v.object({
   agentProfileDigest: digest,
   attemptId: identifier,
@@ -246,6 +422,19 @@ export const stepAttemptV2 = v.object({
   finishedAt: isoTimestamp.optional(),
   outcome: v.enum(["pending", "succeeded", "failed"]),
   result: stepResultDocument.optional(),
+  runId: identifier,
+  startedAt: isoTimestamp,
+  stepId: identifier,
+  workspaceStatus: v.enum(["queued", "ready", "finished"]),
+});
+
+export const stepAttemptV3 = v.object({
+  agentProfileDigest: digest,
+  attemptId: identifier,
+  correlationToken: identifier,
+  finishedAt: isoTimestamp.optional(),
+  outcome: v.enum(["pending", "succeeded", "failed"]),
+  result: agentResult.optional(),
   runId: identifier,
   startedAt: isoTimestamp,
   stepId: identifier,
@@ -520,9 +709,15 @@ export type PinnedAgentProfile = Infer<typeof pinnedAgentProfile>;
 export type FactoryEvent = Infer<typeof factoryEvent>;
 export type Artifact = Infer<typeof artifact>;
 export type StepResultDocument = Infer<typeof stepResultDocument>;
+export type AgentRequest = Infer<typeof agentRequest>;
+export type AgentResult = Infer<typeof agentResult>;
+export type AgentFailure = Infer<typeof agentFailure>;
+export type AgentMaterialization = Infer<typeof agentMaterialization>;
 export type StepAttempt = Infer<typeof stepAttempt>;
 export type StepAttemptV2 = Infer<typeof stepAttemptV2>;
+export type StepAttemptV3 = Infer<typeof stepAttemptV3>;
 export type AttemptFinished = Infer<typeof attemptFinished>;
+export type AttemptFinishedV2 = Infer<typeof attemptFinishedV2>;
 export type EffectIntent = Infer<typeof effectIntent>;
 export type EffectIntentV2 = Infer<typeof effectIntentV2>;
 export type EffectReceipt = Infer<typeof effectReceipt>;

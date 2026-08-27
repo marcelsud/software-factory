@@ -1455,7 +1455,7 @@ function moduleCallsForV2(flow: FlowDefinition): string[] {
     "runs.startRunV3",
   ]);
   if (flow.triggers.length > 0) calls.add("intake.acceptSourceEventV2");
-  if (flow.steps.some((step) => step.kind === "agent")) calls.add("execution.requestAttempt");
+  if (flow.steps.some((step) => step.kind === "agent")) calls.add("execution.requestAttemptV2");
   if (flow.steps.some((step) => step.kind === "effect")) calls.add("effects.requestEffectV2");
   if (flow.steps.some((step) => step.skill !== undefined)) calls.add("assets.resolveSkill");
   return [...calls].sort();
