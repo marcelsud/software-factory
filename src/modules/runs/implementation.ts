@@ -136,11 +136,13 @@ const genericRunWorkflow = workflow<Infer<typeof workflowInput>, GenericWorkflow
 export interface RunsImplementationDependencies {
   readonly moduleManifestDigest?: string;
   readonly workflowVersionDigest?: string;
+  readonly strictEffects?: boolean;
   readonly repositoryPins?: Readonly<Record<string, string>>;
 }
 
 type StartRunV2Input = Infer<typeof runs.calls.startRunV2.input>;
 interface RunsContext {
+  readonly call: ChimpbaseContext["call"];
   readonly db: { readonly schema: string | null; kysely(): unknown };
   readonly module: { readonly name: string } | null;
   readonly publish: ChimpbaseContext["publish"];
@@ -344,12 +346,18 @@ async function loadRows(db: Kysely<RunsDatabase>, runId: string) {
     .selectAll()
     .where("run_id", "=", runId)
     .executeTakeFirst();
+  const treePin = await db
+    .selectFrom("run_effect_tree_pins")
+    .select("tree_digest")
+    .where("run_id", "=", runId)
+    .executeTakeFirst();
   return {
     engine: {
       ...engine,
       execution_protocol: pins?.execution_protocol ?? "v1",
       repository_sha: pins?.repository_sha ?? "",
       task_payload_json: pins?.task_payload_json ?? "null",
+      tree_digest: treePin?.tree_digest ?? null,
     },
     row,
   };
@@ -759,7 +767,6 @@ function validResult(
     return expected === "unknown" || typeof data[key] === expected;
   });
 }
-
 type AttemptCompletion = Omit<AttemptFinished, "result"> & {
   readonly failure?: unknown;
   readonly result?: AttemptFinished["result"];
@@ -778,6 +785,23 @@ async function consumeAttemptFinished(
     loaded.row.current_correlation_token !== outcome.correlationToken
   )
     return false;
+  const treeDigest = await ctx.call(execution.calls.getAttemptGitTreeV1, {
+    attemptId: outcome.attemptId,
+  });
+  if (treeDigest !== null) {
+    const existingTree = await db
+      .selectFrom("run_effect_tree_pins")
+      .select("tree_digest")
+      .where("run_id", "=", outcome.runId)
+      .executeTakeFirst();
+    if (existingTree !== undefined && existingTree.tree_digest !== treeDigest)
+      throw new Error("invalid_revision_pin: run git tree changed");
+    if (existingTree === undefined)
+      await db
+        .insertInto("run_effect_tree_pins")
+        .values({ run_id: outcome.runId, tree_digest: treeDigest })
+        .execute();
+  }
   if (loaded.engine === null) {
     const failed = outcome.outcome === "failed";
     const updated = await appendAudit(
@@ -1066,20 +1090,18 @@ function createSubscriptions(dependencies: RunsImplementationDependencies) {
 function strictEffectOperation(
   step: ExecutionPlanV2["steps"][number],
   row: RunRow,
-  engine: RunEngineStateRow & RunExecutionPinRow,
+  engine: RunEngineStateRow & RunExecutionPinRow & { readonly tree_digest: string | null },
   artifacts: readonly string[],
 ): EffectOperationV3 {
   const branch = `factory/${row.run_id.replace(/[^A-Za-z0-9._-]/g, "-").slice(0, 80)}`;
   if (step.effectCapability === "repository.write") {
-    const treeDigest = artifacts[0] ?? step.effectPayloadDigest;
-    if (treeDigest === undefined) throw new Error("invalid_revision_pin: effect tree is missing");
     return {
       kind: "push-verified-commit",
       payload: {
         baseRevision: engine.repository_sha,
         branch,
         commitMessage: `Factory run ${row.run_id}, step ${step.id}`,
-        treeDigest,
+        treeDigest: engine.tree_digest,
         verified: true,
       },
     };
@@ -1111,6 +1133,7 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
       tables: [
         "operator_commands",
         "run_admission_slots",
+        "run_effect_tree_pins",
         "run_execution_pins",
         "run_admissions",
         "run_audit",
@@ -1970,6 +1993,7 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
               ...next.engine,
               repository_sha: engine.repository_sha,
               task_payload_json: engine.task_payload_json,
+              tree_digest: engine.tree_digest,
             };
             await publishProjection(ctx, row, engine);
             return { kind: "sleep" as const, delayMs: 0 };
@@ -2343,41 +2367,45 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
           .set({ attempt_count: number, engine_phase: "running" })
           .where("run_id", "=", row.run_id)
           .execute();
-        const operation = strictEffectOperation(step, row, engine, artifacts);
-        const payloadDigest = effectPayloadDigest(operation);
-        const strictIntent = {
+        const legacyIntent = {
           capability: step.effectCapability ?? "",
           correlationToken: token,
-          dryRun: false,
           expectedExternalRevision: null,
           idempotencyKey,
-          operation,
-          payloadDigest,
-          provenance: {
-            agentProfileId: null,
-            definitionDigest: row.definition_digest,
-            flowId: row.flow_id,
-            requestedBy: "runs" as const,
-            runId: row.run_id,
-            stepId: step.id,
-          },
-          requestedAt: input.now,
-          target: { repository: step.effectTarget ?? "", subject: engine.subject },
-        };
-        const legacyIntent = {
-          capability: strictIntent.capability,
-          correlationToken: strictIntent.correlationToken,
-          expectedExternalRevision: strictIntent.expectedExternalRevision,
-          idempotencyKey: strictIntent.idempotencyKey,
-          payloadDigest: strictIntent.payloadDigest,
+          payloadDigest: artifacts[0] ?? step.effectPayloadDigest ?? "",
           provenance: `${row.run_id}/step:${step.id}`,
-          requestedAt: strictIntent.requestedAt,
+          requestedAt: input.now,
           runId: row.run_id,
           target: step.effectTarget ?? "",
         };
+        const strictIntent =
+          dependencies.strictEffects === true
+            ? (() => {
+                const operation = strictEffectOperation(step, row, engine, artifacts);
+                return {
+                  capability: step.effectCapability ?? "",
+                  correlationToken: token,
+                  dryRun: false,
+                  expectedExternalRevision: null,
+                  idempotencyKey,
+                  operation,
+                  payloadDigest: effectPayloadDigest(operation),
+                  provenance: {
+                    agentProfileId: null,
+                    definitionDigest: row.definition_digest,
+                    flowId: row.flow_id,
+                    requestedBy: "runs" as const,
+                    runId: row.run_id,
+                    stepId: step.id,
+                  },
+                  requestedAt: input.now,
+                  target: { repository: step.effectTarget ?? "", subject: engine.subject },
+                };
+              })()
+            : null;
         try {
           await ctx.call(effects.calls.requestEffectV2, legacyIntent);
-          await ctx.call(effects.calls.requestEffectV3, strictIntent);
+          if (strictIntent !== null) await ctx.call(effects.calls.requestEffectV3, strictIntent);
         } catch (error) {
           row = await appendAudit(db, row, "infrastructure.failed", input.now, {
             message: error instanceof Error ? error.message : String(error),
@@ -2402,7 +2430,7 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
           target: legacyIntent.target,
         });
         ctx.publish(runs.events.effectRequestedV2, legacyIntent);
-        ctx.publish(runs.events.effectRequestedV3, strictIntent);
+        if (strictIntent !== null) ctx.publish(runs.events.effectRequestedV3, strictIntent);
         await publishProjection(ctx, row, engine);
         return { kind: "wait" as const, signal: "resume" };
       },

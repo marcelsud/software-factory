@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import {
   type ChimpbaseModuleContext,
   type ChimpbaseModuleInterface,
@@ -279,6 +281,7 @@ export const recordEffectOutcome = action({
 });
 const strictClaim = v.object({
   claimedAt: v.string(),
+  claimToken: v.string(),
   idempotencyKey: v.string(),
   staleBefore: v.string(),
 });
@@ -291,7 +294,7 @@ export const claimEffectExecutionV3 = action({
     const result = await ctx.db
       .kysely<EffectsDatabase>()
       .updateTable("effect_receipts_v3")
-      .set({ claimed_at: input.claimedAt })
+      .set({ claimed_at: input.claimedAt, claim_token: input.claimToken })
       .where("idempotency_key", "=", input.idempotencyKey)
       .where("status", "=", "queued")
       .where((expression) =>
@@ -306,6 +309,7 @@ export const claimEffectExecutionV3 = action({
 });
 
 const strictOutcome = v.object({
+  claimToken: v.string(),
   finishedAt: v.string(),
   idempotencyKey: v.string(),
   result: effectResultV3,
@@ -343,7 +347,7 @@ export const recordEffectOutcomeV3 = action({
       .set(updated)
       .where("idempotency_key", "=", input.idempotencyKey)
       .where("status", "=", "queued")
-      .where("claimed_at", "is not", null)
+      .where("claim_token", "=", input.claimToken)
       .executeTakeFirst();
     if (result.numUpdatedRows === 0n) {
       const committed = await db
@@ -377,9 +381,11 @@ export function createEffectsImplementation(dependencies: EffectsImplementationD
   const finish = async (
     ctx: ChimpbaseModuleContext<EffectsDatabase>,
     idempotencyKey: string,
+    claimToken: string,
     result: EffectResultV3,
   ) =>
     await ctx.action(recordEffectOutcomeV3, {
+      claimToken,
       finishedAt: now().toISOString(),
       idempotencyKey,
       result,
@@ -449,6 +455,7 @@ export function createEffectsImplementation(dependencies: EffectsImplementationD
       };
     if (operation.kind !== "push-verified-commit")
       throw new Error(`effect_adapter_unavailable: ${operation.kind}`);
+    if (operation.payload.treeDigest === null) throw new Error("effect_tree_pin_missing");
     return {
       baseRevision: operation.payload.baseRevision,
       branch: operation.payload.branch,
@@ -540,10 +547,12 @@ export function createEffectsImplementation(dependencies: EffectsImplementationD
     if (receipt === null) throw new Error("receipt_not_found");
     if (receipt.status === "finished") return receipt;
     const claimedAt = now();
+    const claimToken = randomUUID();
     const claimed = await ctx.action(claimEffectExecutionV3, {
       claimedAt: claimedAt.toISOString(),
+      claimToken,
       idempotencyKey,
-      staleBefore: new Date(claimedAt.getTime() - 30_000).toISOString(),
+      staleBefore: new Date(claimedAt.getTime() - 120_000).toISOString(),
     });
     if (!claimed) return (await loadReceiptV3(db, idempotencyKey)) ?? receipt;
     const row = await db
@@ -553,8 +562,21 @@ export function createEffectsImplementation(dependencies: EffectsImplementationD
       .executeTakeFirst();
     if (row === undefined) throw new Error("receipt_not_found");
     const intent = effectIntentV3.parse(JSON.parse(row.intent_json));
+    if (
+      intent.operation.kind === "push-verified-commit" &&
+      intent.operation.payload.treeDigest === null
+    ) {
+      await finish(ctx, idempotencyKey, claimToken, {
+        externalId: null,
+        externalRevision: null,
+        externalUrl: null,
+        failureCategory: "validation",
+        outcome: "rejected",
+      });
+      return (await loadReceiptV3(db, idempotencyKey)) ?? receipt;
+    }
     if (row.dry_run === 1) {
-      await finish(ctx, idempotencyKey, {
+      await finish(ctx, idempotencyKey, claimToken, {
         externalId: null,
         externalRevision: null,
         externalUrl: null,
@@ -568,7 +590,10 @@ export function createEffectsImplementation(dependencies: EffectsImplementationD
       const existing = await probe(intent, undefined);
       await recordReconciliation(db, idempotencyKey, existing);
       if (existing !== null) {
-        await finish(ctx, idempotencyKey, { ...existing, outcome: "already_applied" });
+        await finish(ctx, idempotencyKey, claimToken, {
+          ...existing,
+          outcome: "already_applied",
+        });
         return (await loadReceiptV3(db, idempotencyKey)) ?? receipt;
       }
       if (intent.expectedExternalRevision !== null) {
@@ -582,7 +607,7 @@ export function createEffectsImplementation(dependencies: EffectsImplementationD
           .where("idempotency_key", "=", idempotencyKey)
           .execute();
         if (observed !== intent.expectedExternalRevision) {
-          await finish(ctx, idempotencyKey, {
+          await finish(ctx, idempotencyKey, claimToken, {
             externalId: null,
             externalRevision: observed,
             externalUrl: null,
@@ -594,7 +619,7 @@ export function createEffectsImplementation(dependencies: EffectsImplementationD
       }
       body = await renderBody(ctx, intent);
       const result = await apply(intent, body);
-      await finish(ctx, idempotencyKey, result);
+      await finish(ctx, idempotencyKey, claimToken, result);
     } catch (error) {
       if (
         (error instanceof GitHubWriteError && error.category === "unavailable") ||
@@ -602,9 +627,9 @@ export function createEffectsImplementation(dependencies: EffectsImplementationD
       ) {
         await db
           .updateTable("effect_receipts_v3")
-          .set({ claimed_at: null })
+          .set({ claimed_at: null, claim_token: null })
           .where("idempotency_key", "=", idempotencyKey)
-          .where("claimed_at", "=", claimedAt.toISOString())
+          .where("claim_token", "=", claimToken)
           .execute();
         throw error;
       }
@@ -620,7 +645,10 @@ export function createEffectsImplementation(dependencies: EffectsImplementationD
         }
         await recordReconciliation(db, idempotencyKey, reconciled);
         if (reconciled !== null) {
-          await finish(ctx, idempotencyKey, { ...reconciled, outcome: "applied" });
+          await finish(ctx, idempotencyKey, claimToken, {
+            ...reconciled,
+            outcome: "applied",
+          });
           return (await loadReceiptV3(db, idempotencyKey)) ?? receipt;
         }
       }
@@ -639,7 +667,7 @@ export function createEffectsImplementation(dependencies: EffectsImplementationD
           : category === "permission" || category === "validation"
             ? "rejected"
             : "failed";
-      await finish(ctx, idempotencyKey, {
+      await finish(ctx, idempotencyKey, claimToken, {
         externalId: null,
         externalRevision: null,
         externalUrl: null,
@@ -785,6 +813,7 @@ export function createEffectsImplementation(dependencies: EffectsImplementationD
           external_id: null,
           external_revision: null,
           claimed_at: null,
+          claim_token: null,
           external_url: null,
           failure_category: null,
           finished_at: null,

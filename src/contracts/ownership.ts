@@ -139,6 +139,7 @@ export const MODULE_RESOURCES = {
     tables: [
       "operator_commands",
       "run_admission_slots",
+      "run_effect_tree_pins",
       "run_execution_pins",
       "run_admissions",
       "run_audit",
@@ -255,6 +256,7 @@ export const RESOURCE_OWNERS = {
   run_gates: "runs",
   run_identities: "runs",
   "run-engine-state": "runs",
+  run_effect_tree_pins: "runs",
   run_execution_pins: "runs",
   run_engine_state: "runs",
   "run-gates": "runs",

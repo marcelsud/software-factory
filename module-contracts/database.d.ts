@@ -64,6 +64,7 @@ export interface RunsDatabase {
   "run_admission_slots": Record<string, unknown>;
   "run_admissions": Record<string, unknown>;
   "run_audit": Record<string, unknown>;
+  "run_effect_tree_pins": Record<string, unknown>;
   "run_engine_state": Record<string, unknown>;
   "run_execution_pins": Record<string, unknown>;
   "run_gates": Record<string, unknown>;

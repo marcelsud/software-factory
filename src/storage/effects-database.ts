@@ -54,6 +54,7 @@ export interface EffectPreconditionV3Row {
 
 export interface EffectReceiptV3Row {
   claimed_at: string | null;
+  claim_token: string | null;
   correlation_token: string;
   effect_id: string;
   external_id: string | null;
@@ -174,6 +175,7 @@ export const effectsMigrations = {
           correlation_token TEXT NOT NULL,
           status TEXT NOT NULL,
           claimed_at TEXT,
+          claim_token TEXT,
           outcome TEXT,
           external_revision TEXT,
           external_url TEXT,
@@ -275,6 +277,7 @@ export const effectsMigrations = {
           correlation_token TEXT NOT NULL,
           status TEXT NOT NULL,
           claimed_at TEXT,
+          claim_token TEXT,
           outcome TEXT,
           external_revision TEXT,
           external_url TEXT,

@@ -670,14 +670,21 @@ describe("leaf-07 effects", () => {
         ).result as { status: string };
         if (projection.status === "succeeded") break;
       }
-      expect(publisher.publications).toHaveLength(1);
+      expect(publisher.publications).toHaveLength(0);
       expect(
         (
           await strict.host.executeAction("runs/getRunV3@v1", {
             runId: "run:g10-engine",
           })
         ).result,
-      ).toMatchObject({ status: "succeeded" });
+      ).toMatchObject({ status: "failed" });
+      expect(
+        (
+          await strict.host.executeAction("runs/getRunAudit@v1", {
+            runId: "run:g10-engine",
+          })
+        ).result,
+      ).toEqual(expect.arrayContaining([expect.objectContaining({ kind: "effect.rejected" })]));
     } finally {
       await strict.host.close();
     }
@@ -930,11 +937,12 @@ describe("leaf-07 effects", () => {
 
   test("[G18] Contract tests cover success, already-applied, conflict, rate-limit retry, permission failure, and ambiguous network failure", async () => {
     let calls = 0;
+    const sleeps: number[] = [];
     const real = new FetchGitHubWriteTransport({
       fetch: async () => {
         calls += 1;
         return calls === 1
-          ? new Response("{}", { headers: { "retry-after": "0" }, status: 429 })
+          ? new Response("{}", { headers: { "retry-after": "60" }, status: 429 })
           : new Response(
               JSON.stringify({
                 html_url: "https://example.invalid/label",
@@ -945,7 +953,9 @@ describe("leaf-07 effects", () => {
             );
       },
       repositories: { factory: "example/software-factory" },
-      sleep: async () => {},
+      sleep: async (milliseconds) => {
+        sleeps.push(milliseconds);
+      },
       tokenProvider: {
         async getToken() {
           return "separate-write-token";
@@ -957,6 +967,7 @@ describe("leaf-07 effects", () => {
       (await real.apply({ intent: value, marker: effectMarker(value.idempotencyKey) })).outcome,
     ).toBe("applied");
     expect(calls).toBe(2);
+    expect(sleeps).toEqual([2_000]);
     let pullProbeUrl = "";
     const pullMarker = effectMarker("effect:g18-pr");
     const pullTransport = new FetchGitHubWriteTransport({

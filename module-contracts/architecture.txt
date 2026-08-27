@@ -54,6 +54,7 @@ execution v1
   depends: assets
   call: execution/cancelAttempt@v1
   call: execution/getAttempt@v1
+  call: execution/getAttemptGitTreeV1@v1
   call: execution/getAttemptProtocol@v1
   call: execution/getAttemptProtocolV2@v1
   call: execution/getAttemptV2@v1

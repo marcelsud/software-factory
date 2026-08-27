@@ -18,6 +18,7 @@ import { promisify } from "node:util";
 import { createChimpbase } from "chimpbase/runtime/bun";
 
 import { createSoftwareFactoryApp } from "../chimpbase.app.ts";
+import { VerifiedGitPublisher } from "../src/adapters/git-publisher.ts";
 import {
   LocalProcessAgentRuntime,
   type LocalProcessAgentRuntimeOptions,
@@ -384,11 +385,65 @@ describe("leaf-05 execution", () => {
     const first = await isolated.run(firstRequest, new AbortController().signal);
     const second = await isolated.run(secondRequest, new AbortController().signal);
     expect(first.changedFiles.map(({ path }) => path)).toEqual(["private-a.txt"]);
+    const treeDigest = first.commit?.sha;
+    expect(treeDigest).toMatch(/^[a-f0-9]{40,64}$/);
+    if (treeDigest === undefined) throw new Error("trusted execution did not pin a git tree");
+    expect(await git(fixture.repository, "cat-file", "-t", treeDigest)).toBe("tree");
+    const remote = join(fixture.root, "remote.git");
+    await mkdir(remote);
+    await git(remote, "init", "--bare", "--quiet");
+    await git(fixture.repository, "remote", "add", "origin", remote);
+    const publication = await new VerifiedGitPublisher({
+      repositories: { fixture: fixture.repository },
+    }).pushVerifiedCommit({
+      baseRevision: fixture.sha,
+      branch: "factory/execution-g6",
+      commitMessage: "verified execution tree",
+      repository: "fixture",
+      treeDigest,
+      verified: true,
+    });
+    expect(publication.outcome).toBe("applied");
+    expect(
+      await git(fixture.repository, "rev-parse", `${publication.externalRevision ?? ""}^{tree}`),
+    ).toBe(treeDigest);
     expect(second.outcome?.data.sawOtherWorkspace).toBe(false);
     expect(second.outcome?.data.artifact).toBe("declared artifact");
     expect(
       (await readdir(fixture.workspaces)).filter((name) => name.startsWith("attempt-")),
     ).toHaveLength(2);
+    const pinRuntime = runtime(fixture);
+    const pinHost = await createChimpbase({
+      app: createSoftwareFactoryApp({
+        agentRuntime: pinRuntime,
+        readTransport: unavailableGitHubReadTransport,
+      }),
+      storage: { engine: "memory" },
+      subscriptions: { dispatch: "sync" },
+    });
+    try {
+      const pinRequest = request(
+        fixture,
+        "g6-tree-pin",
+        { content: "tree pin", mode: "write", path: "tree-pin.txt" },
+        {
+          agentProfile: profile(undefined, "patch"),
+          declaredOutputPaths: ["tree-pin.txt"],
+        },
+      );
+      await pinHost.executeAction("execution/requestAttemptV2@v1", pinRequest);
+      await pinHost.processNextQueueJob();
+      const persistedTree = (
+        await pinHost.executeAction("execution/getAttemptGitTreeV1@v1", {
+          attemptId: pinRequest.attemptId,
+        })
+      ).result as string | null;
+      expect(persistedTree).toMatch(/^[a-f0-9]{40,64}$/);
+      if (persistedTree === null) throw new Error("execution tree pin was not persisted");
+      expect(await git(fixture.repository, "cat-file", "-t", persistedTree)).toBe("tree");
+    } finally {
+      await pinHost.close();
+    }
   });
 
   test("[G7] read-only sandbox has no writes, network, GitHub token, or host git metadata", async () => {

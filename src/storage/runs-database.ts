@@ -108,6 +108,10 @@ export interface RunExecutionPinRow {
   run_id: string;
   task_payload_json: string;
 }
+export interface RunEffectTreePinRow {
+  run_id: string;
+  tree_digest: string;
+}
 
 export interface RunAdmissionRow {
   limit_value: number;
@@ -133,6 +137,7 @@ export interface RunsDatabase {
   run_audit: RunAuditRow;
   run_gates: RunGateRow;
   runs: RunRow;
+  run_effect_tree_pins: RunEffectTreePinRow;
   workflow_signals: WorkflowSignalRow;
 }
 
@@ -270,6 +275,16 @@ export const runsMigrations = {
         );
       `,
     },
+    {
+      name: "006_effect_tree_pin",
+      sql: `
+        CREATE TABLE IF NOT EXISTS run_effect_tree_pins (
+          run_id TEXT PRIMARY KEY,
+          tree_digest TEXT NOT NULL,
+          FOREIGN KEY (run_id) REFERENCES runs(run_id)
+        );
+      `,
+    },
   ],
   postgres: [
     {
@@ -394,6 +409,15 @@ export const runsMigrations = {
           execution_protocol TEXT NOT NULL,
           repository_sha TEXT NOT NULL,
           task_payload_json TEXT NOT NULL
+        );
+      `,
+    },
+    {
+      name: "006_effect_tree_pin",
+      sql: `
+        CREATE TABLE IF NOT EXISTS chimpbase_runs.run_effect_tree_pins (
+          run_id TEXT PRIMARY KEY REFERENCES chimpbase_runs.runs(run_id),
+          tree_digest TEXT NOT NULL
         );
       `,
     },

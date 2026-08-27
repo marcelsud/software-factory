@@ -3948,7 +3948,14 @@
                                 "type": "string"
                               },
                               "treeDigest": {
-                                "type": "string"
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
                               },
                               "verified": {
                                 "const": true
@@ -5117,7 +5124,14 @@
                             "type": "string"
                           },
                           "treeDigest": {
-                            "type": "string"
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
                           },
                           "verified": {
                             "const": true
@@ -5889,7 +5903,14 @@
                             "type": "string"
                           },
                           "treeDigest": {
-                            "type": "string"
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
                           },
                           "verified": {
                             "const": true
@@ -6226,6 +6247,38 @@
                   "stepId"
                 ],
                 "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "version": 1
+        },
+        {
+          "errors": [
+            "module_unavailable"
+          ],
+          "guarantees": [
+            "returns only the trusted git tree pinned from the isolated workspace"
+          ],
+          "id": "execution/getAttemptGitTreeV1@v1",
+          "inputSchema": {
+            "properties": {
+              "attemptId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "attemptId"
+            ],
+            "type": "object"
+          },
+          "name": "getAttemptGitTreeV1",
+          "outputSchema": {
+            "anyOf": [
+              {
+                "type": "string"
               },
               {
                 "type": "null"
@@ -11985,7 +12038,14 @@
                             "type": "string"
                           },
                           "treeDigest": {
-                            "type": "string"
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
                           },
                           "verified": {
                             "const": true
@@ -12805,14 +12865,16 @@
           "002_audit_and_gates",
           "003_engine_state_and_admission",
           "004_atomic_admission_and_generations",
-          "005_execution_request_pins"
+          "005_execution_request_pins",
+          "006_effect_tree_pin"
         ],
         "sqlite": [
           "001_ledger",
           "002_audit_and_gates",
           "003_engine_state_and_admission",
           "004_atomic_admission_and_generations",
-          "005_execution_request_pins"
+          "005_execution_request_pins",
+          "006_effect_tree_pin"
         ]
       },
       "name": "runs",
@@ -12831,6 +12893,7 @@
           "run_admission_slots",
           "run_admissions",
           "run_audit",
+          "run_effect_tree_pins",
           "run_engine_state",
           "run_execution_pins",
           "run_gates",
@@ -16535,7 +16598,14 @@
                             "type": "string"
                           },
                           "treeDigest": {
-                            "type": "string"
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
                           },
                           "verified": {
                             "const": true
@@ -17635,7 +17705,14 @@
                         "type": "string"
                       },
                       "treeDigest": {
-                        "type": "string"
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
                       },
                       "verified": {
                         "const": true
@@ -18406,7 +18483,14 @@
                         "type": "string"
                       },
                       "treeDigest": {
-                        "type": "string"
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
                       },
                       "verified": {
                         "const": true
@@ -18688,6 +18772,32 @@
               "stepId"
             ],
             "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "provider": "execution"
+    },
+    {
+      "inputSchema": {
+        "properties": {
+          "attemptId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "attemptId"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "execution/getAttemptGitTreeV1@v1",
+      "outputSchema": {
+        "anyOf": [
+          {
+            "type": "string"
           },
           {
             "type": "null"
@@ -24127,7 +24237,14 @@
                         "type": "string"
                       },
                       "treeDigest": {
-                        "type": "string"
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
                       },
                       "verified": {
                         "const": true

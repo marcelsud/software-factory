@@ -789,7 +789,7 @@ export const effectOperationV3 = v.union(
       baseRevision: v.string(),
       branch: v.string(),
       commitMessage: v.string(),
-      treeDigest: digest,
+      treeDigest: digest.nullable(),
       verified: v.literal(true),
     }),
   }),

@@ -505,7 +505,11 @@ export class LocalProcessAgentRuntime implements AgentRuntime {
     } catch (error) {
       return failureResult(request, "result-invalid", message(error), started, finished, logs);
     }
-    let exported: { changedFiles: AgentResult["changedFiles"]; patch?: AgentResult["patch"] };
+    let exported: {
+      changedFiles: AgentResult["changedFiles"];
+      patch?: AgentResult["patch"];
+      treeDigest: string;
+    };
     try {
       exported = await this.#manager.exportChanges(workspace);
     } catch (error) {
@@ -518,6 +522,7 @@ export class LocalProcessAgentRuntime implements AgentRuntime {
     const result = {
       ...trustedResult,
       ...exported,
+      commit: { sha: exported.treeDigest },
       logs,
       resources: { cpuMs: capture.cpuMs, maxRssBytes: capture.maxRssBytes },
       timing: {
@@ -631,9 +636,11 @@ class WorkspaceManager {
     await this.#rejectLinks(factoryRoot);
   }
 
-  async exportChanges(
-    workspace: Workspace,
-  ): Promise<{ changedFiles: AgentResult["changedFiles"]; patch?: AgentResult["patch"] }> {
+  async exportChanges(workspace: Workspace): Promise<{
+    changedFiles: AgentResult["changedFiles"];
+    patch?: AgentResult["patch"];
+    treeDigest: string;
+  }> {
     await this.#rejectLinks(workspace.path);
     const head = (await git(workspace.path, ["rev-parse", "HEAD"])).stdout.toString("utf8").trim();
     if (head !== workspace.request.repository.sha)
@@ -702,7 +709,11 @@ class WorkspaceManager {
         size: bytes.length,
       };
     });
-    if (sorted.length === 0) return { changedFiles };
+    await git(workspace.path, ["add", "-A", "--"]);
+    const treeDigest = (await git(workspace.path, ["write-tree"])).stdout.toString("utf8").trim();
+    if (!/^[a-f0-9]{40,64}$/.test(treeDigest))
+      throw new Error("workspace produced an invalid git tree");
+    if (sorted.length === 0) return { changedFiles, treeDigest };
 
     const patchChunks: Buffer[] = [];
     let patchBytes = 0;
@@ -758,7 +769,7 @@ class WorkspaceManager {
     const patch = Buffer.concat(patchChunks);
     if (patch.length > workspace.request.agentProfile.limits.maxPatchBytes)
       throw new Error("exported patch exceeded maxPatchBytes");
-    return { changedFiles, patch: { digest: sha256(patch), size: patch.length } };
+    return { changedFiles, patch: { digest: sha256(patch), size: patch.length }, treeDigest };
   }
 
   async cleanup(workspacePath: string): Promise<void> {

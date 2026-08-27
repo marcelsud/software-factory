@@ -41,7 +41,7 @@ export class FetchGitHubWriteTransport implements GitHubWriteTransport {
   constructor(options: FetchGitHubWriteTransportOptions) {
     this.#apiBaseUrl = (options.apiBaseUrl ?? "https://api.github.com").replace(/\/$/, "");
     this.#fetch = options.fetch ?? globalThis.fetch;
-    this.#maxAttempts = Math.max(1, options.maxAttempts ?? 3);
+    this.#maxAttempts = Math.min(3, Math.max(1, options.maxAttempts ?? 3));
     this.#repositories = options.repositories ?? {};
     this.#sleep =
       options.sleep ??
@@ -218,6 +218,7 @@ export class FetchGitHubWriteTransport implements GitHubWriteTransport {
             "user-agent": "software-factory",
             "x-github-api-version": "2022-11-28",
           },
+          signal: AbortSignal.timeout(5_000),
           method,
         });
       } catch (error) {
@@ -231,7 +232,7 @@ export class FetchGitHubWriteTransport implements GitHubWriteTransport {
         response.status === 429 ||
         (response.status === 403 && response.headers.get("x-ratelimit-remaining") === "0");
       if (rateLimited && attempt < this.#maxAttempts) {
-        await this.#sleep(retryAfterMs ?? 1_000);
+        await this.#sleep(Math.min(retryAfterMs ?? 1_000, 2_000));
         continue;
       }
       if (!response.ok) {

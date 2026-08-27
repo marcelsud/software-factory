@@ -42,7 +42,12 @@ export function createSoftwareFactoryApp(dependencies?: FactoryAppDependencies) 
       createExecutionImplementation(dependencies),
       createIntakeImplementation(dependencies ?? { readTransport: unavailableGitHubReadTransport }),
       operationsImplementation,
-      createRunsImplementation(dependencies),
+      createRunsImplementation({
+        ...dependencies,
+        strictEffects:
+          dependencies?.gitPublisher !== undefined ||
+          dependencies?.githubWriteTransport !== undefined,
+      }),
     ],
     worker: { maxAttempts: 5, retryDelayMs: 1_000 },
   });

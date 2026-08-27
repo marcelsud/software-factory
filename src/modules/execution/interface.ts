@@ -79,6 +79,12 @@ const calls = {
     errors: ["module_unavailable"],
     guarantees: ["returns the strict committed workspace and complete runtime result metadata"],
   },
+  getAttemptGitTreeV1: {
+    input: v.object({ attemptId: v.string() }),
+    output: v.string().nullable(),
+    errors: ["module_unavailable"],
+    guarantees: ["returns only the trusted git tree pinned from the isolated workspace"],
+  },
 } as const;
 
 const events = {
