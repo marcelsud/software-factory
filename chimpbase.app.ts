@@ -18,7 +18,10 @@ import {
   type IntakeImplementationDependencies,
   unavailableGitHubReadTransport,
 } from "./src/modules/intake/implementation.ts";
-import { operationsImplementation } from "./src/modules/operations/implementation.ts";
+import {
+  createOperationsImplementation,
+  type OperationsImplementationDependencies,
+} from "./src/modules/operations/implementation.ts";
 import {
   createRunsImplementation,
   FACTORY_RUNS_V2_WORKFLOW_DIGEST,
@@ -29,6 +32,7 @@ export type FactoryAppDependencies = AssetsImplementationDependencies &
   EffectsImplementationDependencies &
   ExecutionImplementationDependencies &
   IntakeImplementationDependencies &
+  OperationsImplementationDependencies &
   RunsImplementationDependencies;
 export { FACTORY_RUNS_V2_WORKFLOW_DIGEST };
 
@@ -41,7 +45,7 @@ export function createSoftwareFactoryApp(dependencies?: FactoryAppDependencies) 
       createEffectsImplementation(dependencies),
       createExecutionImplementation(dependencies),
       createIntakeImplementation(dependencies ?? { readTransport: unavailableGitHubReadTransport }),
-      operationsImplementation,
+      createOperationsImplementation(dependencies),
       createRunsImplementation({
         ...dependencies,
         strictEffects:

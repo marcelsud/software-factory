@@ -141,10 +141,6 @@ export const operationsMigrations = {
           source_key TEXT,
           payload_json TEXT NOT NULL
         );
-        CREATE INDEX IF NOT EXISTS operations_events_order
-          ON chimpbase_operations.event_projections(sequence, event_id);
-        CREATE INDEX IF NOT EXISTS operations_events_run_order
-          ON chimpbase_operations.event_projections(run_id, sequence, event_id);
 
         CREATE TABLE IF NOT EXISTS chimpbase_operations.run_projections (
           run_id TEXT PRIMARY KEY,
@@ -154,8 +150,6 @@ export const operationsMigrations = {
           finished_at TEXT,
           projection_json TEXT NOT NULL
         );
-        CREATE INDEX IF NOT EXISTS operations_runs_order
-          ON chimpbase_operations.run_projections(started_at DESC, run_id);
 
         CREATE TABLE IF NOT EXISTS chimpbase_operations.timeline_projections (
           run_id TEXT NOT NULL,
@@ -166,8 +160,6 @@ export const operationsMigrations = {
           payload_json TEXT NOT NULL,
           PRIMARY KEY (run_id, event_id)
         );
-        CREATE INDEX IF NOT EXISTS operations_timeline_order
-          ON chimpbase_operations.timeline_projections(run_id, sequence, event_id);
 
         CREATE TABLE IF NOT EXISTS chimpbase_operations.effect_projections (
           idempotency_key TEXT PRIMARY KEY,
@@ -178,8 +170,6 @@ export const operationsMigrations = {
           finished_at TEXT,
           projection_json TEXT NOT NULL
         );
-        CREATE INDEX IF NOT EXISTS operations_effects_order
-          ON chimpbase_operations.effect_projections(requested_at DESC, idempotency_key);
 
         CREATE TABLE IF NOT EXISTS chimpbase_operations.operator_command_audit (
           command_key TEXT PRIMARY KEY,
@@ -193,8 +183,6 @@ export const operationsMigrations = {
           command_json TEXT NOT NULL,
           result_json TEXT
         );
-        CREATE INDEX IF NOT EXISTS operations_commands_run_order
-          ON chimpbase_operations.operator_command_audit(run_id, requested_at, command_key);
       `,
     },
   ],

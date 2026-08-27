@@ -318,3 +318,21 @@ function fakeGitResult(revision: string, outcome: "applied" | "already_applied")
     outcome,
   };
 }
+
+export class FakeOperationsProbe {
+  credentials = true;
+  lagMs: number | null = 0;
+  locks = 0;
+  repositories: Record<string, "reachable" | "unreachable"> = {};
+  storage = true;
+  worker = true;
+  workflow = true;
+
+  readonly credentialsPresent = () => this.credentials;
+  readonly pollLagMs = () => this.lagMs;
+  readonly repositoryReachability = () => ({ ...this.repositories });
+  readonly staleLocks = () => this.locks;
+  readonly storageReady = () => this.storage;
+  readonly workerReady = () => this.worker;
+  readonly workflowReady = () => this.workflow;
+}

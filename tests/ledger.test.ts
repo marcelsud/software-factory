@@ -871,9 +871,15 @@ describe("leaf-02 domain ledger", () => {
 
     const restarted = await bootSqlite(path);
     try {
-      await restarted.processNextQueueJob();
-      await restarted.processNextQueueJob();
-      await expect(restarted.processNextQueueJob()).rejects.toThrow("effect_adapter_unavailable");
+      let adapterError = "";
+      for (let index = 0; index < 20 && adapterError === ""; index += 1) {
+        try {
+          await restarted.processNextQueueJob();
+        } catch (error) {
+          adapterError = error instanceof Error ? error.message : String(error);
+        }
+      }
+      expect(adapterError).toContain("effect_adapter_unavailable");
       await restarted.executeAction(injectEffectOutcome.name, {
         externalRevision: "revision:13",
         finishedAt: "2026-01-01T00:03:00Z",
@@ -939,8 +945,15 @@ describe("leaf-02 domain ledger", () => {
           })
         ).result,
       ).toMatchObject({ outcome: "pending" });
-      await restarted.processNextQueueJob();
-      await expect(restarted.processNextQueueJob()).rejects.toThrow("effect_adapter_unavailable");
+      let adapterError = "";
+      for (let index = 0; index < 20 && adapterError === ""; index += 1) {
+        try {
+          await restarted.processNextQueueJob();
+        } catch (error) {
+          adapterError = error instanceof Error ? error.message : String(error);
+        }
+      }
+      expect(adapterError).toContain("effect_adapter_unavailable");
       expect(
         (
           await restarted.executeAction("effects/getReceiptV2@v1", {

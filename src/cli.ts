@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, readFile, realpath } from "node:fs/promises";
+import { type FileHandle, mkdir, open, readFile, realpath, rm } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs, promisify } from "node:util";
@@ -34,7 +34,7 @@ import {
   DefinitionCompileError,
   type FactoryDefinition,
 } from "./compiler.ts";
-import { type FactoryEvent, factoryEvent } from "./contracts/index.ts";
+import { type FactoryEvent, factoryEvent, type OperationsHealth } from "./contracts/index.ts";
 
 export interface CliIo {
   readonly stderr: (text: string) => void;
@@ -60,6 +60,13 @@ export interface CliDependencies {
   readonly readStdin?: () => Promise<string>;
   readonly readText: (path: string) => Promise<string>;
   readonly sleep?: (delayMs: number, signal: AbortSignal) => Promise<void>;
+  readonly now?: () => Date;
+  readonly acquireDaemonLock?: () => Promise<() => Promise<void>>;
+  readonly inspectDaemonLock?: () => Promise<"active" | "clear" | "stale">;
+  readonly credentialsPresent?: () => boolean | Promise<boolean>;
+  readonly repositoryReachability?: (
+    repositories: Readonly<Record<string, string>>,
+  ) => Promise<Record<string, "reachable" | "unreachable">>;
 }
 
 const defaultIo: CliIo = {
@@ -77,6 +84,34 @@ const defaultDependencies: Required<CliDependencies> = {
     });
   },
   createAbortController: () => new AbortController(),
+  now: () => new Date(),
+  acquireDaemonLock: defaultAcquireDaemonLock,
+  inspectDaemonLock: defaultInspectDaemonLock,
+  credentialsPresent: environmentCredentialsPresent,
+  async repositoryReachability(repositories) {
+    const transport = new FetchGitHubReadTransport({
+      clock: () => new Date(),
+      repositories,
+      tokenProvider: tokenProviderFromEnvironment(),
+    });
+    return Object.fromEntries(
+      await Promise.all(
+        Object.keys(repositories)
+          .sort()
+          .map(async (repositoryId) => {
+            try {
+              const diagnostic = await transport.diagnoseReadPermission({ repositoryId });
+              return [
+                repositoryId,
+                diagnostic.canReadIssues ? "reachable" : "unreachable",
+              ] as const;
+            } catch {
+              return [repositoryId, "unreachable"] as const;
+            }
+          }),
+      ),
+    );
+  },
   installShutdown(abort) {
     process.once("SIGINT", abort);
     process.once("SIGTERM", abort);
@@ -145,12 +180,15 @@ const defaultDependencies: Required<CliDependencies> = {
         ),
         agentRuntime,
         clock,
+        credentialsPresent: environmentCredentialsPresent,
         moduleManifestDigest: createHash("sha256").update(manifest).digest("hex"),
         readTransport,
         repositoryEvents,
         repositoryPins,
+        repositoryReachability: () => defaultDependencies.repositoryReachability(repositories),
         signal,
         sourceRepositories,
+        staleLocks: async () => ((await defaultInspectDaemonLock()) === "stale" ? 1 : 0),
         workflowVersionDigest: FACTORY_RUNS_V2_WORKFLOW_DIGEST,
       }),
       projectDir: process.cwd(),
@@ -180,13 +218,31 @@ export async function runCli(
     if (command === "daemon") return await daemonCommand(rest, io, dependencies);
     if (command === "trigger") return await triggerCommand(rest, io, dependencies);
     if (command === "skills") return await skillsCommand(rest, io, dependencies);
+    if (
+      command === "status" ||
+      command === "runs" ||
+      command === "show" ||
+      command === "events" ||
+      command === "effects"
+    )
+      return await operationsReadCommand(command, rest, io, dependencies);
+    if (
+      command === "pause" ||
+      command === "resume" ||
+      command === "retry" ||
+      command === "cancel" ||
+      command === "approve" ||
+      command === "reject"
+    )
+      return await operationsMutationCommand(command, rest, io, dependencies);
+    if (command === "doctor") return await doctorCommand(rest, io, dependencies);
     if (command === "modules" && rest.length === 1 && rest[0] === "check") {
       await dependencies.checkModules();
       io.stdout("Chimpbase modules: 0 fail\n");
       return 0;
     }
     io.stderr(
-      "Usage: factory validate --config <path> | factory plan --config <path> [--json] | factory skills list|inspect|verify --config <path> [--id <skill>] [--json] | factory poll --once [--config <path>] [--repository <id>] | factory daemon [--once] [--config <path>] [--repository <id>] | factory trigger --event <file|stdin> [--config <path>] [--repository <id>] | factory modules check\n",
+      "Usage: factory validate|plan|skills|poll|daemon|trigger|status|runs|show|events|effects|pause|resume|retry|cancel|approve|reject|doctor|modules check\n",
     );
     return 2;
   } catch (error) {
@@ -432,27 +488,35 @@ async function daemonCommand(
   const definition = await loadDefinition(values.config, dependencies);
   const repositories = githubRepositories(definition, values.repository);
   const composition = repositoryComposition(repositories, values.config);
+  const releaseLock = await (
+    dependencies.acquireDaemonLock ?? defaultDependencies.acquireDaemonLock
+  )();
   const controller = (
     dependencies.createAbortController ?? defaultDependencies.createAbortController
   )();
   const removeShutdown = (dependencies.installShutdown ?? defaultDependencies.installShutdown)(() =>
     controller.abort(),
   );
-  const host = await (dependencies.openHost ?? defaultDependencies.openHost)(
-    composition.repositories,
-    controller.signal,
-    composition.sourceRepositories,
-    composition.repositoryEvents,
-    composition.localRepositories,
-  );
-  await activateCheckedDefinition(host, values.config, dependencies);
-  const intervalMs = positiveInteger(
-    process.env.FACTORY_POLL_INTERVAL_MS ?? "30000",
-    "FACTORY_POLL_INTERVAL_MS",
-  );
+  let host: CliHost | undefined;
   try {
+    host = await (dependencies.openHost ?? defaultDependencies.openHost)(
+      composition.repositories,
+      controller.signal,
+      composition.sourceRepositories,
+      composition.repositoryEvents,
+      composition.localRepositories,
+    );
+    await activateCheckedDefinition(host, values.config, dependencies);
+    const intervalMs = positiveInteger(
+      process.env.FACTORY_POLL_INTERVAL_MS ?? "30000",
+      "FACTORY_POLL_INTERVAL_MS",
+    );
     do {
-      const accepted = await pollOnce(host, repositories, new Date().toISOString());
+      const accepted = await pollOnce(
+        host,
+        repositories,
+        (dependencies.now ?? defaultDependencies.now)().toISOString(),
+      );
       io.stdout(`polled ${repositories.length} repositories; accepted ${accepted}\n`);
       if (values.once || controller.signal.aborted) break;
       await (dependencies.sleep ?? defaultDependencies.sleep)(intervalMs, controller.signal);
@@ -464,7 +528,8 @@ async function daemonCommand(
   } finally {
     removeShutdown();
     controller.abort();
-    await host.close();
+    await host?.close();
+    await releaseLock();
   }
 }
 
@@ -480,6 +545,7 @@ async function triggerCommand(
       config: { type: "string", default: process.env.FACTORY_CONFIG ?? "factory.yaml" },
       event: { type: "string" },
       repository: { type: "string" },
+      json: { type: "boolean", default: false },
     },
     strict: true,
   });
@@ -492,7 +558,7 @@ async function triggerCommand(
       ? await (dependencies.readStdin ?? defaultDependencies.readStdin)()
       : await dependencies.readText(values.event);
   const raw: unknown = JSON.parse(source);
-  const observedAt = new Date().toISOString();
+  const observedAt = (dependencies.now ?? defaultDependencies.now)().toISOString();
   const repositoryId = repositories[0]?.id;
   const allowedEvents =
     repositoryId === undefined ? undefined : composition.repositoryEvents[repositoryId];
@@ -529,12 +595,325 @@ async function triggerCommand(
       ).result as { readonly idempotent: boolean };
       if (!result.idempotent) accepted += 1;
     }
-    io.stdout(`triggered ${accepted} events\n`);
+    io.stdout(
+      values.json
+        ? `${canonicalJson({ accepted, normalized: events.length })}\n`
+        : `triggered ${accepted} events\n`,
+    );
     return 0;
   } finally {
     controller.abort();
     await host.close();
   }
+}
+
+type OperationsCommand = "status" | "runs" | "show" | "events" | "effects";
+
+async function operationsHost(
+  config: string,
+  dependencies: CliDependencies,
+): Promise<{ host: CliHost; controller: AbortController }> {
+  const definition = await loadDefinition(config, dependencies);
+  const repositories = githubRepositories(definition);
+  const composition = repositoryComposition(repositories, config);
+  const controller = (
+    dependencies.createAbortController ?? defaultDependencies.createAbortController
+  )();
+  const host = await (dependencies.openHost ?? defaultDependencies.openHost)(
+    composition.repositories,
+    controller.signal,
+    composition.sourceRepositories,
+    composition.repositoryEvents,
+    composition.localRepositories,
+  );
+  return { controller, host };
+}
+
+async function operationsReadCommand(
+  command: OperationsCommand,
+  argv: readonly string[],
+  io: CliIo,
+  dependencies: CliDependencies,
+): Promise<number> {
+  const { positionals, values } = parseArgs({
+    allowPositionals: true,
+    args: [...argv],
+    options: {
+      after: { type: "string" },
+      config: { type: "string", default: process.env.FACTORY_CONFIG ?? "factory.yaml" },
+      json: { type: "boolean", default: false },
+      limit: { type: "string", default: "25" },
+      run: { type: "string" },
+      status: { type: "string" },
+    },
+    strict: true,
+  });
+  const opened = await operationsHost(values.config, dependencies);
+  try {
+    let result: unknown;
+    if (command === "status") {
+      if (positionals.length !== 0) throw new Error("status accepts no positional arguments");
+      result = (await opened.host.executeAction("operations/getHealthV2@v1", {})).result;
+    } else if (command === "show") {
+      if (positionals.length !== 1) throw new Error("show requires exactly one run id");
+      result = (
+        await opened.host.executeAction("operations/showRunV2@v1", {
+          runId: positionals[0],
+        })
+      ).result;
+      if (result === null) throw new Error(`run_not_found: ${positionals[0]}`);
+    } else {
+      if (positionals.length !== 0) throw new Error(`${command} accepts no positional arguments`);
+      const input = {
+        ...(values.after === undefined ? {} : { after: values.after }),
+        limit: positiveInteger(values.limit, "limit"),
+        ...(values.run === undefined ? {} : { runId: values.run }),
+        ...(values.status === undefined ? {} : { status: values.status }),
+      };
+      const action =
+        command === "runs"
+          ? "operations/listRunsV2@v1"
+          : command === "events"
+            ? "operations/listEventsV2@v1"
+            : "operations/listEffectsV2@v1";
+      result = (await opened.host.executeAction(action, input)).result;
+    }
+    io.stdout(values.json ? `${canonicalJson(result)}\n` : renderOperations(command, result));
+    return 0;
+  } finally {
+    opened.controller.abort();
+    await opened.host.close();
+  }
+}
+
+function renderOperations(command: OperationsCommand, value: unknown): string {
+  if (command === "status") {
+    const health = value as OperationsHealth;
+    return `${[
+      `status: ${health.status}`,
+      `storage: ${health.storage}`,
+      `workflow: ${health.workflow}`,
+      `worker: ${health.worker}`,
+      `pending effects: ${health.pendingEffects}`,
+      `unreconciled effects: ${health.unreconciledEffects}`,
+      `stale locks: ${health.staleLocks}`,
+    ].join("\n")}\n`;
+  }
+  if (command === "show") {
+    const details = value as {
+      run: {
+        runId: string;
+        status: string;
+        flowId: string;
+        stateId: string;
+        revisions: Record<string, { drift: boolean; pinned: unknown; current: unknown }>;
+      };
+      timeline: Array<{ kind: string; occurredAt: string }>;
+    };
+    const drift = Object.entries(details.run.revisions)
+      .filter(([, revision]) => revision.drift)
+      .map(([name]) => name)
+      .sort();
+    return `${[
+      `run: ${details.run.runId}`,
+      `status: ${details.run.status}`,
+      `flow/state: ${details.run.flowId}/${details.run.stateId}`,
+      `revision drift: ${drift.length === 0 ? "none" : drift.join(",")}`,
+      ...details.timeline.map((entry) => `${entry.occurredAt}\t${entry.kind}`),
+    ].join("\n")}\n`;
+  }
+  const page = value as { items: SafeCliRecord[]; nextCursor: string | null };
+  if (command === "runs")
+    return `${[
+      "RUN\tSTATUS\tFLOW\tSTATE",
+      ...page.items.map((item) => `${item.runId}\t${item.status}\t${item.flowId}\t${item.stateId}`),
+      ...(page.nextCursor === null ? [] : [`next: ${page.nextCursor}`]),
+    ].join("\n")}\n`;
+  const id = command === "events" ? "eventId" : "idempotencyKey";
+  const label = command === "events" ? "kind" : "status";
+  return `${[
+    `${id.toUpperCase()}\t${label.toUpperCase()}`,
+    ...page.items.map((item) => `${item[id]}\t${item[label]}`),
+    ...(page.nextCursor === null ? [] : [`next: ${page.nextCursor}`]),
+  ].join("\n")}\n`;
+}
+
+type SafeCliRecord = Record<string, string | number | boolean | null | undefined>;
+type MutationCommand = "pause" | "resume" | "retry" | "cancel" | "approve" | "reject";
+
+async function operationsMutationCommand(
+  command: MutationCommand,
+  argv: readonly string[],
+  io: CliIo,
+  dependencies: CliDependencies,
+): Promise<number> {
+  const { positionals, values } = parseArgs({
+    allowPositionals: true,
+    args: [...argv],
+    options: {
+      actor: { type: "string", default: process.env.USER ?? "operator" },
+      "command-key": { type: "string" },
+      config: { type: "string", default: process.env.FACTORY_CONFIG ?? "factory.yaml" },
+      correlation: { type: "string" },
+      gate: { type: "string" },
+      json: { type: "boolean", default: false },
+    },
+    strict: true,
+  });
+  const runId = positionals[0];
+  if (runId === undefined || positionals.length !== 1)
+    throw new Error(`${command} requires exactly one run id`);
+  const opened = await operationsHost(values.config, dependencies);
+  try {
+    const details = (await opened.host.executeAction("operations/showRunV2@v1", { runId }))
+      .result as {
+      run: {
+        currentCorrelationToken: string | null;
+        currentGateId: string | null;
+        updatedAt: string;
+      };
+    } | null;
+    if (details === null) throw new Error(`run_not_found: ${runId}`);
+    const correlationToken = values.correlation ?? details.run.currentCorrelationToken ?? undefined;
+    const gateId = values.gate ?? details.run.currentGateId ?? undefined;
+    const requestedAt = (dependencies.now ?? defaultDependencies.now)().toISOString();
+    const commandKey =
+      values["command-key"] ??
+      `cmd_${createHash("sha256")
+        .update(
+          canonicalJson({
+            actor: values.actor,
+            command,
+            correlationToken,
+            gateId,
+            runId,
+            state: details.run.updatedAt,
+          }),
+        )
+        .digest("hex")}`;
+    const audit = (
+      await opened.host.executeAction("operations/applyOperatorCommand@v1", {
+        actor: values.actor,
+        commandKey,
+        ...(correlationToken === undefined ? {} : { correlationToken }),
+        ...(gateId === undefined ? {} : { gateId }),
+        kind: command,
+        requestedAt,
+        runId,
+      })
+    ).result as { error: string | null; outcome: string };
+    io.stdout(
+      values.json
+        ? `${canonicalJson(audit)}\n`
+        : `${command} ${runId}: ${audit.outcome}${audit.error === null ? "" : ` (${audit.error})`}\n`,
+    );
+    return audit.outcome === "applied" ? 0 : 1;
+  } finally {
+    opened.controller.abort();
+    await opened.host.close();
+  }
+}
+
+async function doctorCommand(
+  argv: readonly string[],
+  io: CliIo,
+  dependencies: CliDependencies,
+): Promise<number> {
+  const { values } = parseArgs({
+    allowPositionals: false,
+    args: [...argv],
+    options: {
+      config: { type: "string", default: process.env.FACTORY_CONFIG ?? "factory.yaml" },
+      json: { type: "boolean", default: false },
+    },
+    strict: true,
+  });
+  const checks: Array<{ detail: string; name: string; status: "ok" | "fail" }> = [];
+  let definition: FactoryDefinition | null = null;
+  try {
+    definition = compileFactoryDefinition(await dependencies.readText(values.config), {
+      allowUnpinnedSkills: true,
+      sourceName: values.config,
+    }).definition;
+    checks.push({ detail: values.config, name: "config", status: "ok" });
+  } catch (error) {
+    checks.push({ detail: safeCliError(error), name: "config", status: "fail" });
+  }
+  const credentials = await (
+    dependencies.credentialsPresent ?? defaultDependencies.credentialsPresent
+  )();
+  checks.push({
+    detail: credentials ? "present" : "GitHub credentials are missing",
+    name: "credentials",
+    status: credentials ? "ok" : "fail",
+  });
+  try {
+    await dependencies.checkModules();
+    checks.push({ detail: "module manifest matches", name: "schema", status: "ok" });
+  } catch (error) {
+    checks.push({ detail: safeCliError(error), name: "schema", status: "fail" });
+  }
+  const lock = await (dependencies.inspectDaemonLock ?? defaultDependencies.inspectDaemonLock)();
+  checks.push({
+    detail: lock,
+    name: "daemon-lock",
+    status: lock === "stale" ? "fail" : "ok",
+  });
+  if (definition !== null) {
+    const configured = githubRepositories(definition);
+    const repositories = Object.fromEntries(configured.map((entry) => [entry.id, entry.fullName]));
+    const reachability = await (
+      dependencies.repositoryReachability ?? defaultDependencies.repositoryReachability
+    )(repositories);
+    for (const [repository, status] of Object.entries(reachability).sort(([a], [b]) =>
+      a.localeCompare(b),
+    ))
+      checks.push({
+        detail: status,
+        name: `repository:${repository}`,
+        status: status === "reachable" ? "ok" : "fail",
+      });
+    const composition = repositoryComposition(configured, values.config);
+    const controller = (
+      dependencies.createAbortController ?? defaultDependencies.createAbortController
+    )();
+    let host: CliHost | undefined;
+    try {
+      host = await (dependencies.openHost ?? defaultDependencies.openHost)(
+        composition.repositories,
+        controller.signal,
+        composition.sourceRepositories,
+        composition.repositoryEvents,
+        composition.localRepositories,
+      );
+      const health = (await host.executeAction("operations/getHealthV2@v1", {}))
+        .result as OperationsHealth;
+      checks.push({
+        detail: String(health.unreconciledEffects),
+        name: "unreconciled-effects",
+        status: health.unreconciledEffects === 0 ? "ok" : "fail",
+      });
+    } catch (error) {
+      checks.push({ detail: safeCliError(error), name: "unreconciled-effects", status: "fail" });
+    } finally {
+      controller.abort();
+      await host?.close();
+    }
+  } else {
+    checks.push({ detail: "config invalid", name: "repositories", status: "fail" });
+    checks.push({ detail: "config invalid", name: "unreconciled-effects", status: "fail" });
+  }
+  const result = { checks, ok: checks.every((check) => check.status === "ok") };
+  io.stdout(
+    values.json
+      ? `${canonicalJson(result)}\n`
+      : `${checks.map((check) => `${check.status === "ok" ? "OK" : "FAIL"}\t${check.name}\t${check.detail}`).join("\n")}\n`,
+  );
+  return result.ok ? 0 : 1;
+}
+
+function safeCliError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function parseIntakeOptions(argv: readonly string[]) {
@@ -712,6 +1091,68 @@ function tokenProviderFromEnvironment(): GitHubTokenProvider {
         "GitHub read authentication requires GITHUB_TOKEN or GITHUB_APP_ID, GITHUB_INSTALLATION_ID, and GITHUB_APP_PRIVATE_KEY",
       );
     },
+  };
+}
+
+const daemonLockPath = () => resolve(process.env.FACTORY_DAEMON_LOCK ?? ".factory/daemon.lock");
+
+function environmentCredentialsPresent(): boolean {
+  const token = process.env.GITHUB_TOKEN;
+  if (token !== undefined && token.trim() !== "") return true;
+  return Boolean(
+    process.env.GITHUB_APP_ID &&
+      process.env.GITHUB_INSTALLATION_ID &&
+      process.env.GITHUB_APP_PRIVATE_KEY,
+  );
+}
+
+function processIsAlive(pid: number): boolean {
+  if (!Number.isSafeInteger(pid) || pid < 1) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+async function defaultInspectDaemonLock(): Promise<"active" | "clear" | "stale"> {
+  try {
+    const value = JSON.parse(await readFile(daemonLockPath(), "utf8")) as {
+      pid?: number;
+      startedAt?: string;
+    };
+    return typeof value.startedAt === "string" && processIsAlive(value.pid ?? 0)
+      ? "active"
+      : "stale";
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT" ? "clear" : "stale";
+  }
+}
+
+async function defaultAcquireDaemonLock(): Promise<() => Promise<void>> {
+  const path = daemonLockPath();
+  await mkdir(dirname(path), { recursive: true });
+  const record = { pid: process.pid, startedAt: new Date().toISOString() };
+  let handle: FileHandle;
+  try {
+    handle = await open(path, "wx");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    if ((await defaultInspectDaemonLock()) === "active")
+      throw new Error("daemon_conflict: another factory daemon is active");
+    await rm(path, { force: true });
+    handle = await open(path, "wx");
+  }
+  await handle.writeFile(canonicalJson(record));
+  await handle.close();
+  return async () => {
+    try {
+      const current: unknown = JSON.parse(await readFile(path, "utf8"));
+      if (canonicalJson(current) === canonicalJson(record)) await rm(path, { force: true });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
   };
 }
 

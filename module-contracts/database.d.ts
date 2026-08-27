@@ -54,9 +54,11 @@ export interface IntakeDatabase {
 }
 
 export interface OperationsDatabase {
-  "effect-projections": Record<string, unknown>;
-  "event-projections": Record<string, unknown>;
-  "run-projections": Record<string, unknown>;
+  "effect_projections": Record<string, unknown>;
+  "event_projections": Record<string, unknown>;
+  "operator_command_audit": Record<string, unknown>;
+  "run_projections": Record<string, unknown>;
+  "timeline_projections": Record<string, unknown>;
 }
 
 export interface RunsDatabase {
