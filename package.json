@@ -1,0 +1,46 @@
+{
+  "name": "@software-factory/factory",
+  "version": "0.1.0",
+  "description": "Local-first software factory built on Chimpbase",
+  "license": "Apache-2.0",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "bun@1.3.14",
+  "bin": {
+    "factory": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "module-contracts",
+    "vendor/chimpbase-0.7.0.tgz"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "bun build ./src/index.ts ./src/cli.ts --target=node --packages=external --outdir=dist && tsc -p tsconfig.build.json",
+    "check": "bun run typecheck && bun run test && bun run lint && bun run modules:check",
+    "format": "biome format --write .",
+    "lint": "biome check .",
+    "modules:sync": "chimpbase modules sync --artifacts-dir module-contracts --modules-dir src/modules --composition-root chimpbase.app.ts",
+    "modules:check": "chimpbase modules check --artifacts-dir module-contracts --modules-dir src/modules --composition-root chimpbase.app.ts && node -e \"console.log('0 fail')\"",
+    "test": "bun test --seed=1",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "chimpbase": "file:vendor/chimpbase-0.7.0.tgz",
+    "yaml": "2.8.1"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.2.2",
+    "@types/node": "22.18.1",
+    "bun-types": "1.3.14",
+    "typescript": "5.9.3"
+  }
+}
