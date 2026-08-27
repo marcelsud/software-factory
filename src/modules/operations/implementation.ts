@@ -4,7 +4,7 @@ import {
   defineChimpbaseModuleImplementation,
   defineChimpbaseModuleSubscription,
 } from "chimpbase/core";
-import { type Infer, v } from "chimpbase/runtime";
+import { cron, type Infer, onStart, v } from "chimpbase/runtime";
 import type { Kysely } from "kysely";
 import {
   effectReceipt,
@@ -594,6 +594,30 @@ async function booleanProbe(probe: Probe | undefined): Promise<boolean> {
     return false;
   }
 }
+async function refreshWorkerHeartbeat(ctx: OperationsContext): Promise<void> {
+  const db = dbFrom(ctx);
+  const newest = await db
+    .selectFrom("event_projections")
+    .select(({ fn }) => fn.max<number>("sequence").as("sequence"))
+    .executeTakeFirst();
+  const updatedAt = new Date().toISOString();
+  const lastSequence = newest?.sequence ?? 0;
+  await db
+    .insertInto("health_projection")
+    .values({ id: "projection-worker", last_sequence: lastSequence, updated_at: updatedAt })
+    .onConflict((conflict) =>
+      conflict.column("id").doUpdateSet({ last_sequence: lastSequence, updated_at: updatedAt }),
+    )
+    .execute();
+}
+
+const workerHeartbeatStart = onStart("operations.projection-heartbeat.start", async (ctx) => {
+  await refreshWorkerHeartbeat(ctx);
+});
+
+const workerHeartbeatCron = cron("projection-heartbeat", "* * * * *", async (ctx) => {
+  await refreshWorkerHeartbeat(ctx);
+});
 
 function createSubscriptions() {
   return [
@@ -750,6 +774,7 @@ export function createOperationsImplementation(
   return defineChimpbaseModuleImplementation({
     interface: implementationInterface,
     migrations: operationsMigrations,
+    registrations: [workerHeartbeatStart, workerHeartbeatCron],
     subscriptions: createSubscriptions(),
     calls: {
       async listRuns(ctx, input) {
@@ -948,24 +973,17 @@ export function createOperationsImplementation(
           workerReady = await booleanProbe(dependencies.workerReady);
         } else {
           try {
-            const newest = await db
-              .selectFrom("event_projections")
-              .select(({ fn }) => fn.max<number>("sequence").as("sequence"))
-              .executeTakeFirst();
             const heartbeat = await db
               .selectFrom("health_projection")
-              .select(["last_sequence", "updated_at"])
+              .select("updated_at")
               .where("id", "=", "projection-worker")
               .executeTakeFirst();
             const heartbeatAt =
               heartbeat === undefined ? Number.NaN : Date.parse(heartbeat.updated_at);
             workerReady =
-              newest?.sequence === null ||
-              newest?.sequence === undefined ||
-              (heartbeat !== undefined &&
-                heartbeat.last_sequence >= newest.sequence &&
-                Number.isFinite(heartbeatAt) &&
-                checkedAt.getTime() - heartbeatAt <= 60_000);
+              heartbeat !== undefined &&
+              Number.isFinite(heartbeatAt) &&
+              checkedAt.getTime() - heartbeatAt <= 180_000;
           } catch {
             workerReady = false;
           }

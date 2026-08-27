@@ -725,6 +725,15 @@ describe("leaf-08 operations", () => {
       worker: "unavailable",
       workflow: "unavailable",
     });
+    const idleCheckedAt = new Date().toISOString();
+    const idleWorkerHost = await boot(new FakeOperationsProbe(), false, false, idleCheckedAt);
+    await publishRun(idleWorkerHost, "25");
+    const idleWorkerHealth = (await idleWorkerHost.executeAction("operations/getHealthV2@v1", {}))
+      .result as { status: string; worker: string };
+    expect(idleWorkerHealth).toMatchObject({
+      status: "ready",
+      worker: "ready",
+    });
     const staleWorkerHost = await boot(
       new FakeOperationsProbe(),
       false,
@@ -1303,6 +1312,8 @@ describe("leaf-08 operations", () => {
     );
     expect(operationsSource).toContain("ctx.call(intake.calls.getSourceCursor");
     expect(operationsSource).toContain('.selectFrom("health_projection")');
+    expect(operationsSource).toContain('"projection-heartbeat"');
+    expect(operationsSource).toContain('"* * * * *"');
   });
 });
 
