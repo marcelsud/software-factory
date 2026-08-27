@@ -14,7 +14,7 @@ import {
   attemptOutcome,
   type FactoryEvent,
   type OperationsRun,
-  type RunV3,
+  type RunV4,
 } from "../src/contracts/index.ts";
 import { assets } from "../src/modules/assets/interface.ts";
 import { definitions } from "../src/modules/definitions/interface.ts";
@@ -65,9 +65,10 @@ async function boot(
     execution: [execution.events.attemptFinishedV2],
     intake: [intake.events.factoryEventAcceptedV2],
     runs: [
-      runs.events.runStateChangedV3,
+      runs.events.runStateChangedV4,
       runs.events.stepRequestedV2,
       runs.events.effectRequestedV3,
+      runs.events.runStateChangedV3,
     ],
   };
   function extendModule<T extends { calls: object; interface: { calls: object } }>(
@@ -190,7 +191,16 @@ async function finishActualAttempt(host: Host, runId: string, outcome: string): 
     finishedAt: "2026-08-27T12:30:00.000Z",
     outcome: "succeeded",
     result: {
-      data: {},
+      data: {
+        approvedAttemptId: "verifier",
+        architectureChecked: true,
+        docsChecked: true,
+        failingTestObserved: true,
+        passingTestObserved: true,
+        producerAttemptId: "producer",
+        rootCause: "fixture",
+        summary: outcome,
+      },
       outcome,
       outputArtifactDigests: ["a".repeat(64)],
       summary: outcome,
@@ -267,7 +277,7 @@ function sourceEvent(id: string): FactoryEvent {
   };
 }
 
-function runState(id: string, patch: Partial<RunV3> = {}): RunV3 {
+function runState(id: string, patch: Partial<RunV4> = {}): RunV4 {
   const eventIdentity = digest("factory-event", "github:factory", `delivery:${id}`);
   return {
     agentProfileDigests: { triage: `agent:${id}` },
@@ -290,7 +300,7 @@ function runState(id: string, patch: Partial<RunV3> = {}): RunV3 {
   };
 }
 
-async function publishRun(host: Host, id: string, patch: Partial<RunV3> = {}) {
+async function publishRun(host: Host, id: string, patch: Partial<RunV4> = {}) {
   const event = sourceEvent(id);
   await host.executeAction("intake/testPublish0@v1", {
     event,
@@ -418,6 +428,7 @@ describe("leaf-08 operations", () => {
   test("[G1] One timeline reconstructs a run without parsing free-form logs", async () => {
     const host = await boot();
     await publishRun(host, "1");
+    await host.executeAction("runs/testPublish3@v1", runState("1"));
     await host.executeAction("runs/testPublish1@v1", {
       agentProfileDigest: "agent:1",
       attemptId: "attempt:1",
@@ -454,6 +465,8 @@ describe("leaf-08 operations", () => {
       "effect.requested",
       "effect.finished",
     ]);
+    expect(details.timeline.filter(({ kind }) => kind === "run.state")).toHaveLength(1);
+    expect(details.run.outcome).toBe("waiting");
     expect(JSON.stringify(details)).not.toContain("must-not-project");
     expect(JSON.stringify(details)).not.toContain("secret log");
     const legacyRuns = (await host.executeAction("operations/listRuns@v1", { limit: 10 }))

@@ -168,7 +168,21 @@ async function completeAttempt(
     attemptId: current.currentAttemptId,
     finishedAt: "2026-01-01T01:00:00Z",
     outcome: infrastructureFailure ? "failed" : "succeeded",
-    result: { data: {}, outcome, outputArtifactDigests, summary: outcome },
+    result: {
+      data: {
+        approvedAttemptId: "verifier",
+        architectureChecked: true,
+        docsChecked: true,
+        failingTestObserved: true,
+        passingTestObserved: true,
+        producerAttemptId: "producer",
+        rootCause: "fixture",
+        summary: outcome,
+      },
+      outcome,
+      outputArtifactDigests,
+      summary: outcome,
+    },
   });
   try {
     await host.drain({ maxDurationMs: 5_000 });

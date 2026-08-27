@@ -140,7 +140,6 @@ export interface RunsImplementationDependencies {
   readonly moduleManifestDigest?: string;
   readonly workflowVersionDigest?: string;
   readonly strictEffects?: boolean;
-  readonly strictResultValidation?: boolean;
   readonly repositoryPins?: Readonly<Record<string, string>>;
 }
 
@@ -826,7 +825,6 @@ function validResult(
   const outputArtifactDigests = result.outputArtifactDigests;
   const contract = step.resultContracts.find((candidate) => candidate.outcome === result.outcome);
   if (contract === undefined || (contract.legacyOnly === true && !legacy)) return false;
-  if (legacy) return new Set(outputArtifactDigests).size >= contract.requiredArtifactCount;
   if (
     new Set(outputArtifactDigests).size < contract.requiredArtifactCount ||
     !contract.requiredData.every((key) => Object.hasOwn(data, key))
@@ -1036,12 +1034,9 @@ function gateSignalsForEvent(event: FactoryEvent): string[] {
       else signals.push("comment:new-evidence");
     }
   }
-  if (event.eventType === "issue.label_added" && isDataRecord(untrusted.issue)) {
-    const labels = untrusted.issue.labels;
-    if (Array.isArray(labels)) {
-      if (labels.includes("factory:approved")) signals.push("label:factory:approved");
-      if (labels.includes("factory:rejected")) signals.push("label:factory:rejected");
-    }
+  if (event.eventType === "issue.label_added" && typeof untrusted.label === "string") {
+    if (untrusted.label === "factory:approved") signals.push("label:factory:approved");
+    if (untrusted.label === "factory:rejected") signals.push("label:factory:rejected");
   }
   return [...new Set(signals)];
 }
@@ -2161,13 +2156,7 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
               return { delayMs: retry.delayMs, kind: "sleep" as const };
             }
             const result = pending.outcome.result;
-            if (
-              !validResult(
-                step,
-                result,
-                engine.execution_protocol === "v1" && dependencies.strictResultValidation !== true,
-              )
-            ) {
+            if (!validResult(step, result, engine.execution_protocol === "v1")) {
               if (
                 step.skill === "fix" &&
                 isDataRecord(result) &&

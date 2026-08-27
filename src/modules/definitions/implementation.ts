@@ -184,13 +184,22 @@ export function createDefinitionsImplementation() {
       },
       async getExecutionPlanV3(ctx, input) {
         const db = ctx.db.kysely() as unknown as Kysely<DefinitionsDatabase>;
-        const row = await db
+        const current = await db
           .selectFrom("execution_plans_v3")
           .select("plan_json")
           .where("definition_digest", "=", input.definitionDigest)
           .where("flow_id", "=", input.flowId)
           .executeTakeFirst();
-        return row === undefined ? null : executionPlanV3.parse(JSON.parse(row.plan_json));
+        if (current !== undefined) return executionPlanV3.parse(JSON.parse(current.plan_json));
+        const predecessor = await db
+          .selectFrom("execution_plans_v2")
+          .select("plan_json")
+          .where("definition_digest", "=", input.definitionDigest)
+          .where("flow_id", "=", input.flowId)
+          .executeTakeFirst();
+        return predecessor === undefined
+          ? null
+          : executionPlanV3.parse(JSON.parse(predecessor.plan_json));
       },
       async activateDefinition(ctx, input) {
         const db = ctx.db.kysely() as unknown as Kysely<DefinitionsDatabase>;

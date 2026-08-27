@@ -1,3 +1,4 @@
+import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -63,7 +64,6 @@ function testApp() {
   const app = createSoftwareFactoryApp({
     moduleManifestDigest: manifestDigest,
     readTransport: unavailableGitHubReadTransport,
-    strictResultValidation: true,
     workflowVersionDigest,
   });
   const execution = createExecutionImplementation({ deferAttempts: true });
@@ -628,6 +628,27 @@ describe("leaf-09 triage", () => {
       outcome: "completed",
       status: "succeeded",
     });
+    const fallbackDirectory = await mkdtemp(join(tmpdir(), "factory-triage-v2-plan-"));
+    directories.push(fallbackDirectory);
+    const fallbackPath = join(fallbackDirectory, "factory.sqlite");
+    host = await boot(fallbackPath);
+    const fallbackDefinition = await activate(host);
+    const fallbackRun = await accept(host, event("49"), fallbackDefinition);
+    await host.close();
+    const database = new Database(fallbackPath);
+    database
+      .query("DELETE FROM execution_plans_v3 WHERE definition_digest = ?")
+      .run(fallbackDefinition);
+    database.close();
+    host = await boot(fallbackPath);
+    await completeAttempt(
+      host,
+      fallbackRun,
+      "reproduced",
+      { schemaVersion: 1, summary: "pre-upgrade" },
+      [digest("fallback-reproduction")],
+    );
+    expect((await projection(host, fallbackRun)).stateId).toBe("diagnose");
   });
 
   test("[G10] Goal-gate E2E evidence records module/workflow/skill/artifact/effect digests", async () => {
@@ -789,6 +810,20 @@ describe("leaf-09 triage", () => {
     const definition = await activate(host);
     const runId = await accept(host, event("15"), definition);
     await reachConfirmation(host, runId, "g15");
+    const staleApproval = {
+      ...event("45", "issue.label_added", {
+        untrusted: {
+          issue: { labels: ["factory:approved", "unrelated"] },
+          label: "unrelated",
+        },
+      }),
+      subject: "issue:15",
+    };
+    await accept(host, staleApproval, definition);
+    expect(await projection(host, runId)).toMatchObject({
+      currentGateId: "confirm-fix",
+      status: "waiting",
+    });
     const current = await projection(host, runId);
     const signal = {
       correlationToken: current.currentCorrelationToken,
@@ -815,6 +850,25 @@ describe("leaf-09 triage", () => {
     expect(steps.filter((step) => step === "publish-branch")).toHaveLength(1);
     expect(steps.filter((step) => step === "publish-comment")).toHaveLength(1);
     expect(steps.filter((step) => step === "publish-pr")).toHaveLength(1);
+    const rejectRun = await accept(host, event("25"), definition);
+    await reachConfirmation(host, rejectRun, "g15-reject");
+    const explicitRejection = {
+      ...event("48", "issue.label_added", {
+        untrusted: {
+          issue: { labels: ["factory:approved", "factory:rejected"] },
+          label: "factory:rejected",
+        },
+      }),
+      subject: "issue:25",
+    };
+    await accept(host, explicitRejection, definition);
+    expect((await projection(host, rejectRun)).stateId).toBe("cleanup-rejected");
+    expect(
+      (await audit(host, rejectRun)).some(
+        ({ kind, payloadJson }) =>
+          kind === "effect.requested" && JSON.parse(payloadJson).stepId === "publish-pr",
+      ),
+    ).toBe(false);
   });
 
   test("[G16] Rejection or material new information creates a bounded new attempt with prior reports retained", async () => {

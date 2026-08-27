@@ -657,19 +657,6 @@ function createSubscriptions() {
         }),
     ),
     defineChimpbaseModuleSubscription(
-      runs.events.runStateChangedV3,
-      "project-run-state-v3",
-      async (ctx, value) =>
-        recordFact(
-          ctx,
-          "run.state",
-          runTime(value as unknown as SafeObject),
-          value as unknown as SafeObject,
-          value.runId,
-          sourceKey(value.factoryEventId),
-        ),
-    ),
-    defineChimpbaseModuleSubscription(
       runs.events.runStateChangedV4,
       "project-run-state-v4",
       async (ctx, value) =>
@@ -758,18 +745,6 @@ function createSubscriptions() {
         recordFact(
           ctx,
           "effect.finished",
-          value.finishedAt,
-          value as unknown as SafeObject,
-          value.runId,
-        ),
-    ),
-    defineChimpbaseModuleSubscription(
-      runs.events.runFinishedV3,
-      "project-run-finished-v3",
-      async (ctx, value) =>
-        recordFact(
-          ctx,
-          "run.finished",
           value.finishedAt,
           value as unknown as SafeObject,
           value.runId,

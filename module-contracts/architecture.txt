@@ -99,9 +99,7 @@ operations v1
   consumes: definitions/definitionPublished@v1 as project-definition-v1
   consumes: effects/effectFinished@v3 as project-effect-finished-v3
   consumes: runs/effectRequested@v3 as project-effect-request-v3
-  consumes: runs/runFinished@v3 as project-run-finished-v3
   consumes: runs/runFinished@v4 as project-run-finished-v4
-  consumes: runs/runStateChanged@v3 as project-run-state-v3
   consumes: runs/runStateChanged@v4 as project-run-state-v4
   consumes: assets/skillRevisionPinned@v2 as project-skill-v2
   consumes: intake/factoryEventAccepted@v2 as project-source-event-v2

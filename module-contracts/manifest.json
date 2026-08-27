@@ -74,21 +74,9 @@
     },
     {
       "consumer": "operations",
-      "event": "runs/runFinished@v3",
-      "publisher": "runs",
-      "subscription": "project-run-finished-v3"
-    },
-    {
-      "consumer": "operations",
       "event": "runs/runFinished@v4",
       "publisher": "runs",
       "subscription": "project-run-finished-v4"
-    },
-    {
-      "consumer": "operations",
-      "event": "runs/runStateChanged@v3",
-      "publisher": "runs",
-      "subscription": "project-run-state-v3"
     },
     {
       "consumer": "operations",
@@ -12439,16 +12427,8 @@
           "name": "project-effect-request-v3"
         },
         {
-          "event": "runs/runFinished@v3",
-          "name": "project-run-finished-v3"
-        },
-        {
           "event": "runs/runFinished@v4",
           "name": "project-run-finished-v4"
-        },
-        {
-          "event": "runs/runStateChanged@v3",
-          "name": "project-run-state-v3"
         },
         {
           "event": "runs/runStateChanged@v4",
