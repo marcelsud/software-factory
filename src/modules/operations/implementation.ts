@@ -203,7 +203,8 @@ async function recordFact(
       source_key: sourceKey,
     })
     .execute();
-  await rebuild(db);
+  if (runId !== null) await rebuild(db, runId);
+  else if (kind === "definition.published" || kind === "skill.pinned") await rebuild(db);
   return true;
 }
 
@@ -256,29 +257,21 @@ async function nextGlobalTime(ctx: OperationsContext): Promise<string> {
     : latest.occurred_at;
 }
 
-async function rebuild(database: Kysely<OperationsDatabase>) {
+async function rebuild(database: Kysely<OperationsDatabase>, onlyRunId?: string) {
   const facts = (await database.selectFrom("event_projections").selectAll().execute()).sort(
     factOrder,
   );
   const db = database;
-  for (const [index, fact] of facts.entries())
-    await db
-      .updateTable("event_projections")
-      .set({ sequence: -(index + 1) })
-      .where("event_id", "=", fact.event_id)
-      .execute();
-  for (const [index, fact] of facts.entries()) {
-    fact.sequence = index + 1;
-    await db
-      .updateTable("event_projections")
-      .set({ sequence: fact.sequence })
-      .where("event_id", "=", fact.event_id)
-      .execute();
-  }
 
-  await db.deleteFrom("timeline_projections").execute();
-  await db.deleteFrom("effect_projections").execute();
-  await db.deleteFrom("run_projections").execute();
+  if (onlyRunId === undefined) {
+    await db.deleteFrom("timeline_projections").execute();
+    await db.deleteFrom("effect_projections").execute();
+    await db.deleteFrom("run_projections").execute();
+  } else {
+    await db.deleteFrom("timeline_projections").where("run_id", "=", onlyRunId).execute();
+    await db.deleteFrom("effect_projections").where("run_id", "=", onlyRunId).execute();
+    await db.deleteFrom("run_projections").where("run_id", "=", onlyRunId).execute();
+  }
 
   let currentDefinition: string | null = null;
   let currentFlows: Record<string, string> = {};
@@ -303,6 +296,7 @@ async function rebuild(database: Kysely<OperationsDatabase>) {
   const runFacts = new Map<string, OperationEventProjectionRow[]>();
   for (const fact of facts) {
     if (fact.run_id === null) continue;
+    if (onlyRunId !== undefined && fact.run_id !== onlyRunId) continue;
     const entries = runFacts.get(fact.run_id) ?? [];
     entries.push(fact);
     runFacts.set(fact.run_id, entries);
@@ -371,7 +365,11 @@ async function rebuild(database: Kysely<OperationsDatabase>) {
       updated_at: run.updatedAt,
     });
     const timeline = source === undefined ? entries : [source, ...entries];
-    for (const fact of timeline.sort(factOrder))
+    timeline.sort((left, right) => {
+      const occurred = left.occurred_at.localeCompare(right.occurred_at);
+      return occurred === 0 ? left.sequence - right.sequence : occurred;
+    });
+    for (const fact of timeline)
       timelineRows.push({
         event_id: fact.event_id,
         kind: fact.kind,
@@ -383,6 +381,7 @@ async function rebuild(database: Kysely<OperationsDatabase>) {
   }
 
   for (const fact of facts) {
+    if (onlyRunId !== undefined && fact.run_id !== onlyRunId) continue;
     const payload = JSON.parse(fact.payload_json) as SafeObject;
     if (fact.kind === "effect.requested") {
       const value = operationsEffect.parse({
@@ -495,10 +494,6 @@ function auditFromRow(row: OperatorCommandAuditRow) {
     requestedAt: row.requested_at,
     runId: row.run_id,
   });
-}
-
-function safeError(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 async function booleanProbe(probe: Probe | undefined): Promise<boolean> {
@@ -668,13 +663,22 @@ export function createOperationsImplementation(
     calls: {
       async listRuns(ctx, input) {
         const limit = pageSize(input.limit);
-        const page = await ctx.call(operations.calls.listRunsV2, { limit: maximumPageSize });
-        const items = await Promise.all(
-          page.items.map((projection) => legacyRun(dbFrom(ctx), projection)),
-        );
-        return items
-          .filter((item) => input.status === undefined || item.status === input.status)
-          .slice(0, limit);
+        const matches: Infer<typeof run>[] = [];
+        let after: string | null = null;
+        do {
+          const page: Infer<typeof operations.calls.listRunsV2.output> = await ctx.call(
+            operations.calls.listRunsV2,
+            { ...(after === null ? {} : { after }), limit: maximumPageSize },
+          );
+          const items = await Promise.all(
+            page.items.map((projection) => legacyRun(dbFrom(ctx), projection)),
+          );
+          matches.push(
+            ...items.filter((item) => input.status === undefined || item.status === input.status),
+          );
+          after = page.nextCursor;
+        } while (matches.length < limit && after !== null);
+        return matches.slice(0, limit);
       },
       async showRun(ctx, input) {
         const details = await ctx.call(operations.calls.showRunV2, input);
@@ -769,8 +773,8 @@ export function createOperationsImplementation(
           .selectFrom("timeline_projections")
           .selectAll()
           .where("run_id", "=", input.runId)
+          .orderBy("occurred_at", "asc")
           .orderBy("sequence", "asc")
-          .orderBy("event_id", "asc")
           .execute();
         return operationsRunDetails.parse({
           run: JSON.parse(row.projection_json),
@@ -923,8 +927,13 @@ export function createOperationsImplementation(
         if (existing !== undefined) {
           if (existing.command_json !== commandJson)
             throw new Error("command_conflict: command identity has different fields");
-          if (existing.outcome === "applied" || existing.outcome === "rejected")
-            return auditFromRow(existing);
+          if (existing.outcome === "applied") return auditFromRow(existing);
+          if (existing.outcome === "rejected")
+            await db
+              .updateTable("operator_command_audit")
+              .set({ error: null, outcome: "requested" })
+              .where("command_key", "=", input.commandKey)
+              .execute();
         } else {
           await db
             .insertInto("operator_command_audit")
@@ -942,44 +951,77 @@ export function createOperationsImplementation(
             })
             .execute();
         }
-        try {
-          const result = await ctx.call(runs.calls.applyOperatorCommandV2, {
-            commandId: input.commandKey,
-            ...(input.correlationToken === undefined
-              ? {}
-              : { correlationToken: input.correlationToken }),
-            ...(input.gateId === undefined ? {} : { gateId: input.gateId }),
-            issuedAt: input.requestedAt,
-            kind: input.kind,
-            runId: input.runId,
-          });
-          await db
-            .updateTable("operator_command_audit")
-            .set({
-              applied_at: input.requestedAt,
-              error: null,
-              outcome: "applied",
-              result_json: canonical(result),
-            })
-            .where("command_key", "=", input.commandKey)
-            .execute();
-        } catch (error) {
-          await db
-            .updateTable("operator_command_audit")
-            .set({
-              applied_at: null,
-              error: safeError(error),
-              outcome: "rejected",
-              result_json: null,
-            })
-            .where("command_key", "=", input.commandKey)
-            .execute();
-        }
+        const result = await ctx.call(runs.calls.applyOperatorCommandV2, {
+          commandId: input.commandKey,
+          ...(input.correlationToken === undefined
+            ? {}
+            : { correlationToken: input.correlationToken }),
+          ...(input.gateId === undefined ? {} : { gateId: input.gateId }),
+          issuedAt: input.requestedAt,
+          kind: input.kind,
+          runId: input.runId,
+        });
+        await db
+          .updateTable("operator_command_audit")
+          .set({
+            applied_at: input.requestedAt,
+            error: null,
+            outcome: "applied",
+            result_json: canonical(result),
+          })
+          .where("command_key", "=", input.commandKey)
+          .execute();
         return auditFromRow(
           await db
             .selectFrom("operator_command_audit")
             .selectAll()
             .where("command_key", "=", input.commandKey)
+            .executeTakeFirstOrThrow(),
+        );
+      },
+      async recordOperatorCommandRejection(ctx, input) {
+        const db = dbFrom(ctx);
+        const commandJson = canonical(input.request);
+        const existing = await db
+          .selectFrom("operator_command_audit")
+          .selectAll()
+          .where("command_key", "=", input.request.commandKey)
+          .executeTakeFirst();
+        if (existing?.command_json !== undefined && existing.command_json !== commandJson)
+          throw new Error("command_conflict: command identity has different fields");
+        if (existing?.outcome === "applied") return auditFromRow(existing);
+        if (existing === undefined)
+          await db
+            .insertInto("operator_command_audit")
+            .values({
+              actor: input.request.actor,
+              applied_at: null,
+              command_json: commandJson,
+              command_key: input.request.commandKey,
+              error: input.error,
+              kind: input.request.kind,
+              outcome: "rejected",
+              requested_at: input.request.requestedAt,
+              result_json: null,
+              run_id: input.request.runId,
+            })
+            .execute();
+        else
+          await db
+            .updateTable("operator_command_audit")
+            .set({
+              applied_at: null,
+              error: input.error,
+              outcome: "rejected",
+              result_json: null,
+            })
+            .where("command_key", "=", input.request.commandKey)
+            .execute();
+        return auditFromRow(
+          await db
+            .selectFrom("operator_command_audit")
+            .selectAll()
+            .where("command_key", "=", input.request.commandKey)
             .executeTakeFirstOrThrow(),
         );
       },

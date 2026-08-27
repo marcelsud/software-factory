@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { execFile } from "node:child_process";
-import { createHash } from "node:crypto";
-import { type FileHandle, mkdir, open, readFile, realpath, rm } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { link, mkdir, readFile, realpath, rm, unlink, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs, promisify } from "node:util";
@@ -44,6 +44,7 @@ export interface CliIo {
 interface CliHost {
   close(): Promise<void>;
   executeAction(name: string, args?: unknown): Promise<{ readonly result: unknown }>;
+  markPoll?(observedAt: string): void;
 }
 
 export interface CliDependencies {
@@ -85,7 +86,7 @@ const defaultDependencies: Required<CliDependencies> = {
   },
   createAbortController: () => new AbortController(),
   now: () => new Date(),
-  acquireDaemonLock: defaultAcquireDaemonLock,
+  acquireDaemonLock,
   inspectDaemonLock: defaultInspectDaemonLock,
   credentialsPresent: environmentCredentialsPresent,
   async repositoryReachability(repositories) {
@@ -173,7 +174,9 @@ const defaultDependencies: Required<CliDependencies> = {
         await attemptOwners.get(attemptId)?.cancel(attemptId);
       },
     };
-    return await runtime.createChimpbase({
+    let lastPollAt: Date | null = null;
+    const workflowVersionDigest = FACTORY_RUNS_V2_WORKFLOW_DIGEST;
+    const host = await runtime.createChimpbase({
       app: createSoftwareFactoryApp({
         artifactByteDriver: new LocalArtifactByteDriver(
           resolve(process.env.FACTORY_ARTIFACT_ROOT ?? ".factory/artifacts"),
@@ -182,6 +185,8 @@ const defaultDependencies: Required<CliDependencies> = {
         clock,
         credentialsPresent: environmentCredentialsPresent,
         moduleManifestDigest: createHash("sha256").update(manifest).digest("hex"),
+        pollLagMs: () =>
+          lastPollAt === null ? null : Math.max(0, clock().getTime() - lastPollAt.getTime()),
         readTransport,
         repositoryEvents,
         repositoryPins,
@@ -189,12 +194,21 @@ const defaultDependencies: Required<CliDependencies> = {
         signal,
         sourceRepositories,
         staleLocks: async () => ((await defaultInspectDaemonLock()) === "stale" ? 1 : 0),
-        workflowVersionDigest: FACTORY_RUNS_V2_WORKFLOW_DIGEST,
+        workerReady: () => !signal.aborted,
+        workflowReady: () => workflowVersionDigest === FACTORY_RUNS_V2_WORKFLOW_DIGEST,
+        workflowVersionDigest,
       }),
       projectDir: process.cwd(),
       storage: { engine: "sqlite", path },
       subscriptions: { dispatch: "async" },
     });
+    return {
+      close: () => host.close(),
+      executeAction: (name: string, args?: unknown) => host.executeAction(name, args),
+      markPoll(observedAt: string) {
+        lastPollAt = new Date(observedAt);
+      },
+    };
   },
   async readStdin() {
     let source = "";
@@ -648,6 +662,10 @@ async function operationsReadCommand(
     },
     strict: true,
   });
+  if (command === "runs" && values.run !== undefined)
+    throw new Error("--run is not supported by runs");
+  if ((command === "events" || command === "effects") && values.status !== undefined)
+    throw new Error(`--status is not supported by ${command}`);
   const opened = await operationsHost(values.config, dependencies);
   try {
     let result: unknown;
@@ -664,12 +682,18 @@ async function operationsReadCommand(
       if (result === null) throw new Error(`run_not_found: ${positionals[0]}`);
     } else {
       if (positionals.length !== 0) throw new Error(`${command} accepts no positional arguments`);
-      const input = {
-        ...(values.after === undefined ? {} : { after: values.after }),
-        limit: positiveInteger(values.limit, "limit"),
-        ...(values.run === undefined ? {} : { runId: values.run }),
-        ...(values.status === undefined ? {} : { status: values.status }),
-      };
+      const input =
+        command === "runs"
+          ? {
+              ...(values.after === undefined ? {} : { after: values.after }),
+              limit: positiveInteger(values.limit, "limit"),
+              ...(values.status === undefined ? {} : { status: values.status }),
+            }
+          : {
+              ...(values.after === undefined ? {} : { after: values.after }),
+              limit: positiveInteger(values.limit, "limit"),
+              ...(values.run === undefined ? {} : { runId: values.run }),
+            };
       const action =
         command === "runs"
           ? "operations/listRunsV2@v1"
@@ -791,17 +815,27 @@ async function operationsMutationCommand(
           }),
         )
         .digest("hex")}`;
-    const audit = (
-      await opened.host.executeAction("operations/applyOperatorCommand@v1", {
-        actor: values.actor,
-        commandKey,
-        ...(correlationToken === undefined ? {} : { correlationToken }),
-        ...(gateId === undefined ? {} : { gateId }),
-        kind: command,
-        requestedAt,
-        runId,
-      })
-    ).result as { error: string | null; outcome: string };
+    const request = {
+      actor: values.actor,
+      commandKey,
+      ...(correlationToken === undefined ? {} : { correlationToken }),
+      ...(gateId === undefined ? {} : { gateId }),
+      kind: command,
+      requestedAt,
+      runId,
+    };
+    let audit: { error: string | null; outcome: string };
+    try {
+      audit = (await opened.host.executeAction("operations/applyOperatorCommand@v1", request))
+        .result as { error: string | null; outcome: string };
+    } catch (error) {
+      audit = (
+        await opened.host.executeAction("operations/recordOperatorCommandRejection@v1", {
+          error: safeCliError(error),
+          request,
+        })
+      ).result as { error: string | null; outcome: string };
+    }
     io.stdout(
       values.json
         ? `${canonicalJson(audit)}\n`
@@ -1054,6 +1088,7 @@ async function pollOnce(
     ).result as { readonly accepted: number };
     accepted += summary.accepted;
   }
+  host.markPoll?.(observedAt);
   return accepted;
 }
 
@@ -1130,26 +1165,61 @@ async function defaultInspectDaemonLock(): Promise<"active" | "clear" | "stale">
   }
 }
 
-async function defaultAcquireDaemonLock(): Promise<() => Promise<void>> {
+export async function acquireDaemonLock(): Promise<() => Promise<void>> {
   const path = daemonLockPath();
   await mkdir(dirname(path), { recursive: true });
   const record = { pid: process.pid, startedAt: new Date().toISOString() };
-  let handle: FileHandle;
+  const bytes = Buffer.from(canonicalJson(record));
+  const temporary = `${path}.tmp-${process.pid}-${randomUUID()}`;
+  await writeFile(temporary, bytes, { flag: "wx", mode: 0o600 });
   try {
-    handle = await open(path, "wx");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-    if ((await defaultInspectDaemonLock()) === "active")
-      throw new Error("daemon_conflict: another factory daemon is active");
-    await rm(path, { force: true });
-    handle = await open(path, "wx");
+    try {
+      await link(temporary, path);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      let observed: Buffer;
+      try {
+        observed = await readFile(path);
+      } catch (readError) {
+        if ((readError as NodeJS.ErrnoException).code !== "ENOENT") throw readError;
+        observed = Buffer.alloc(0);
+      }
+      if (observed.length > 0) {
+        try {
+          const value = JSON.parse(observed.toString("utf8")) as { pid?: number };
+          if (processIsAlive(value.pid ?? 0))
+            throw new Error("daemon_conflict: another factory daemon is active");
+        } catch (parseError) {
+          if (
+            parseError instanceof Error &&
+            parseError.message === "daemon_conflict: another factory daemon is active"
+          )
+            throw parseError;
+        }
+      }
+      try {
+        const current = await readFile(path);
+        if (!current.equals(observed))
+          throw new Error("daemon_conflict: another factory daemon is active");
+        await unlink(path);
+      } catch (takeoverError) {
+        if ((takeoverError as NodeJS.ErrnoException).code !== "ENOENT") throw takeoverError;
+      }
+      try {
+        await link(temporary, path);
+      } catch (linkError) {
+        if ((linkError as NodeJS.ErrnoException).code === "EEXIST")
+          throw new Error("daemon_conflict: another factory daemon is active");
+        throw linkError;
+      }
+    }
+  } finally {
+    await rm(temporary, { force: true });
   }
-  await handle.writeFile(canonicalJson(record));
-  await handle.close();
   return async () => {
     try {
-      const current: unknown = JSON.parse(await readFile(path, "utf8"));
-      if (canonicalJson(current) === canonicalJson(record)) await rm(path, { force: true });
+      const current = await readFile(path);
+      if (current.equals(bytes)) await unlink(path);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }

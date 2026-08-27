@@ -102,6 +102,12 @@ const calls = {
     errors: ["module_unavailable", "run_not_found", "command_not_allowed", "command_conflict"],
     guarantees: ["records every request before routing an idempotent command through runs"],
   },
+  recordOperatorCommandRejection: {
+    input: v.object({ error: v.string(), request: operatorCommandRequest }),
+    output: operatorCommandAudit,
+    errors: ["module_unavailable", "command_conflict"],
+    guarantees: ["records a rejected command only after the failed routing transaction unwinds"],
+  },
   getOperatorCommand: {
     input: v.object({ commandKey: v.string() }),
     output: operatorCommandAudit.nullable(),

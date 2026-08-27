@@ -1,12 +1,14 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { defineChimpbaseApp } from "chimpbase/core";
 import { createChimpbase } from "chimpbase/runtime/bun";
 
 import { createSoftwareFactoryApp } from "../chimpbase.app.ts";
-import { type CliDependencies, type CliIo, runCli } from "../src/cli.ts";
+import { acquireDaemonLock, type CliDependencies, type CliIo, runCli } from "../src/cli.ts";
 import { canonicalJson, compileFactoryDefinition } from "../src/compiler.ts";
 import {
   attemptOutcome,
@@ -313,6 +315,24 @@ async function listRuns(host: Host, input: Record<string, unknown> = {}) {
     nextCursor: string | null;
   };
 }
+async function applyCommand(
+  host: Host,
+  request: Record<string, unknown>,
+): Promise<{ error: string | null; outcome: string }> {
+  try {
+    return (await host.executeAction("operations/applyOperatorCommand@v1", request)).result as {
+      error: string | null;
+      outcome: string;
+    };
+  } catch (error) {
+    return (
+      await host.executeAction("operations/recordOperatorCommandRejection@v1", {
+        error: error instanceof Error ? error.message : String(error),
+        request,
+      })
+    ).result as { error: string | null; outcome: string };
+  }
+}
 
 function attempt(runId: string, attemptId = "attempt:1") {
   return {
@@ -512,6 +532,75 @@ describe("leaf-08 operations", () => {
     await expect(host.executeAction("operations/listRunsV2@v1", { limit: 0 })).rejects.toThrow(
       "invalid_limit",
     );
+    const initialEvents = (await host.executeAction("operations/listEventsV2@v1", { limit: 100 }))
+      .result as {
+      items: Array<{ eventId: string }>;
+      nextCursor: string | null;
+    };
+    const eventPage = (await host.executeAction("operations/listEventsV2@v1", { limit: 2 }))
+      .result as {
+      items: Array<{ eventId: string }>;
+      nextCursor: string;
+    };
+    const oldEvent = {
+      ...sourceEvent("99"),
+      observedAt: "2020-01-01T00:00:00.000Z",
+    };
+    await host.executeAction("intake/testPublish0@v1", {
+      event: oldEvent,
+      idempotent: false,
+      payloadDigest: digest(canonicalJson(oldEvent.payload)),
+    });
+    await host.drain({ maxDurationMs: 5_000 });
+    const resumedEvents = (
+      await host.executeAction("operations/listEventsV2@v1", {
+        after: eventPage.nextCursor,
+        limit: 100,
+      })
+    ).result as { items: Array<{ eventId: string }> };
+    const allAfterInsert = (await host.executeAction("operations/listEventsV2@v1", { limit: 100 }))
+      .result as { items: Array<{ eventId: string }> };
+    const newEventId = allAfterInsert.items.find(
+      ({ eventId }) => !initialEvents.items.some((item) => item.eventId === eventId),
+    )?.eventId;
+    expect(newEventId).toBeDefined();
+    expect(new Set(resumedEvents.items.map(({ eventId }) => eventId))).toEqual(
+      new Set([
+        ...initialEvents.items.slice(2).map(({ eventId }) => eventId),
+        ...(newEventId === undefined ? [] : [newEventId]),
+      ]),
+    );
+    await host.executeAction("operations/rebuildProjections@v1", {});
+    const resumedAfterRebuild = (
+      await host.executeAction("operations/listEventsV2@v1", {
+        after: eventPage.nextCursor,
+        limit: 100,
+      })
+    ).result as { items: Array<{ eventId: string }> };
+    expect(resumedAfterRebuild).toEqual(resumedEvents);
+
+    for (let index = 0; index <= 100; index += 1) {
+      const failed = index === 0;
+      await host.executeAction(
+        "runs/testPublish0@v1",
+        runState(`bulk-${index}`, {
+          ...(failed
+            ? {
+                finishedAt: "2020-01-01T00:00:00.000Z",
+                outcome: "failed",
+                status: "failed",
+              }
+            : { status: "running" }),
+          runId: failed ? "bulk:failed" : `bulk:running:${index}`,
+          startedAt: new Date(Date.UTC(2020, 0, 1, 0, 0, index)).toISOString(),
+        }),
+      );
+    }
+    await host.drain({ maxDurationMs: 10_000 });
+    const legacyFailed = (
+      await host.executeAction("operations/listRuns@v1", { limit: 1, status: "failed" })
+    ).result as Array<{ runId: string }>;
+    expect(legacyFailed).toEqual([expect.objectContaining({ runId: "bulk:failed" })]);
   });
 
   test("[G5] Stuck waiting/running/retry/effect states are visible", async () => {
@@ -533,6 +622,23 @@ describe("leaf-08 operations", () => {
     });
     const effectsPage = (await host.executeAction("operations/listEffectsV2@v1", { limit: 10 }))
       .result as { items: Array<{ status: string }> };
+    const degradedProbe = new FakeOperationsProbe();
+    degradedProbe.lagMs = 12_345;
+    degradedProbe.worker = false;
+    degradedProbe.workflow = false;
+    const degradedHost = await boot(degradedProbe);
+    const degraded = (await degradedHost.executeAction("operations/getHealthV2@v1", {})).result as {
+      pollLagMs: number | null;
+      status: string;
+      worker: string;
+      workflow: string;
+    };
+    expect(degraded).toMatchObject({
+      pollLagMs: 12_345,
+      status: "degraded",
+      worker: "unavailable",
+      workflow: "unavailable",
+    });
     expect(effectsPage.items[0]?.status).toBe("queued");
   });
 
@@ -540,6 +646,31 @@ describe("leaf-08 operations", () => {
     const host = await boot();
     const activeRun = await startActualRun(host, "10");
     const cancellableRun = await startActualRun(host, "11");
+    const rolledBackRequest = {
+      actor: "alice",
+      commandKey: "command:rollback-rejection",
+      gateId: "missing",
+      kind: "approve",
+      requestedAt: "2026-08-27T12:59:00.000Z",
+      runId: activeRun,
+    };
+    await expect(
+      host.executeAction("operations/applyOperatorCommand@v1", rolledBackRequest),
+    ).rejects.toThrow("command_not_allowed");
+    expect(
+      (
+        await host.executeAction("operations/getOperatorCommand@v1", {
+          commandKey: rolledBackRequest.commandKey,
+        })
+      ).result,
+    ).toBeNull();
+    const separatelyRejected = (
+      await host.executeAction("operations/recordOperatorCommandRejection@v1", {
+        error: "command_not_allowed",
+        request: rolledBackRequest,
+      })
+    ).result as { outcome: string };
+    expect(separatelyRejected.outcome).toBe("rejected");
     const commands = [
       { kind: "pause", runId: activeRun },
       { kind: "resume", runId: activeRun },
@@ -556,10 +687,8 @@ describe("leaf-08 operations", () => {
         requestedAt: `2026-08-27T13:0${index}:00.000Z`,
         runId: command.runId,
       };
-      const first = (await host.executeAction("operations/applyOperatorCommand@v1", input))
-        .result as { outcome: string };
-      const duplicate = (await host.executeAction("operations/applyOperatorCommand@v1", input))
-        .result;
+      const first = await applyCommand(host, input);
+      const duplicate = await applyCommand(host, input);
       expect(duplicate).toEqual(first);
       const stored = (
         await host.executeAction("operations/getOperatorCommand@v1", {
@@ -598,6 +727,14 @@ describe("leaf-08 operations", () => {
         })
       ).result,
     ).toBe("v1");
+    const retryRequest = {
+      actor: "alice",
+      commandKey: "command:retry-real",
+      kind: "retry",
+      requestedAt: "2026-08-27T13:00:00.000Z",
+      runId,
+    };
+    expect((await applyCommand(host, retryRequest)).outcome).toBe("rejected");
     await host.executeAction("execution/testFinishAttempt@v1", {
       attemptId: oldAttempt,
       finishedAt: "2026-08-27T12:01:00.000Z",
@@ -633,15 +770,8 @@ describe("leaf-08 operations", () => {
       };
     }
     expect(retryStatus.status).toBe("retrying");
-    const audit = (
-      await host.executeAction("operations/applyOperatorCommand@v1", {
-        actor: "alice",
-        commandKey: "command:retry-real",
-        kind: "retry",
-        requestedAt: "2026-08-27T13:00:00.000Z",
-        runId,
-      })
-    ).result as { outcome: string };
+    const audit = (await host.executeAction("operations/applyOperatorCommand@v1", retryRequest))
+      .result as { outcome: string };
     expect(audit.outcome).toBe("applied");
     await host.executeAction("runs/driveRun@v1", {
       now: "2026-08-27T13:00:00.001Z",
@@ -764,6 +894,39 @@ describe("leaf-08 operations", () => {
     });
     expect(recovery.code).toBe(0);
     expect(released).toBe(true);
+    const invalidRunFilter = await captureCli(
+      ["runs", "--run", "run:1"],
+      cliDependencies({ executeAction: async () => ({ result: null }) }),
+    );
+    expect(invalidRunFilter.err).toContain("--run is not supported by runs");
+    const invalidStatusFilter = await captureCli(
+      ["events", "--status", "waiting"],
+      cliDependencies({ executeAction: async () => ({ result: null }) }),
+    );
+    expect(invalidStatusFilter.err).toContain("--status is not supported by events");
+
+    const directory = await mkdtemp(join(tmpdir(), "factory-lock-"));
+    const previousLock = process.env.FACTORY_DAEMON_LOCK;
+    process.env.FACTORY_DAEMON_LOCK = join(directory, "daemon.lock");
+    try {
+      const release = await acquireDaemonLock();
+      await expect(acquireDaemonLock()).rejects.toThrow("daemon_conflict");
+      await release();
+      const racers = await Promise.allSettled([acquireDaemonLock(), acquireDaemonLock()]);
+      expect(racers.filter(({ status }) => status === "fulfilled")).toHaveLength(1);
+      expect(racers.filter(({ status }) => status === "rejected")).toHaveLength(1);
+      const acquired = racers.find(
+        (result): result is PromiseFulfilledResult<() => Promise<void>> =>
+          result.status === "fulfilled",
+      );
+      expect(acquired).toBeDefined();
+      if (acquired === undefined) throw new Error("one daemon lock acquisition must succeed");
+      await acquired.value();
+    } finally {
+      if (previousLock === undefined) delete process.env.FACTORY_DAEMON_LOCK;
+      else process.env.FACTORY_DAEMON_LOCK = previousLock;
+      await rm(directory, { force: true, recursive: true });
+    }
   });
 
   test("[G11] Operators inspect source, transitions, attempt, gate, artifact, and receipt", async () => {
@@ -878,17 +1041,15 @@ describe("leaf-08 operations", () => {
     const host = await boot();
     const approveRun = await reachActualGate(host, "17");
     const approvalGate = (await show(host, approveRun)).run;
-    const wrong = (
-      await host.executeAction("operations/applyOperatorCommand@v1", {
-        actor: "alice",
-        commandKey: "command:wrong-gate",
-        correlationToken: approvalGate.currentCorrelationToken,
-        gateId: "other-gate",
-        kind: "approve",
-        requestedAt: "2026-08-27T13:00:00.000Z",
-        runId: approveRun,
-      })
-    ).result as { outcome: string };
+    const wrong = await applyCommand(host, {
+      actor: "alice",
+      commandKey: "command:wrong-gate",
+      correlationToken: approvalGate.currentCorrelationToken,
+      gateId: "other-gate",
+      kind: "approve",
+      requestedAt: "2026-08-27T13:00:00.000Z",
+      runId: approveRun,
+    });
     expect(wrong.outcome).toBe("rejected");
     expect((await show(host, approveRun)).run.currentGateStatus).toBe("pending");
     const approveInput = {
@@ -1035,6 +1196,12 @@ describe("leaf-08 operations", () => {
     });
     expect(invalid.out).toContain('"config"');
     expect(invalid.out).toContain('"status":"fail"');
+    const cliSource = await readFile(new URL("../src/cli.ts", import.meta.url), "utf8");
+    expect(cliSource).toContain("pollLagMs: () =>");
+    expect(cliSource).toContain("workerReady: () => !signal.aborted");
+    expect(cliSource).toContain(
+      "workflowReady: () => workflowVersionDigest === FACTORY_RUNS_V2_WORKFLOW_DIGEST",
+    );
   });
 });
 

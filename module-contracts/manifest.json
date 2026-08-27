@@ -11181,6 +11181,134 @@
         },
         {
           "errors": [
+            "module_unavailable",
+            "command_conflict"
+          ],
+          "guarantees": [
+            "records a rejected command only after the failed routing transaction unwinds"
+          ],
+          "id": "operations/recordOperatorCommandRejection@v1",
+          "inputSchema": {
+            "properties": {
+              "error": {
+                "type": "string"
+              },
+              "request": {
+                "properties": {
+                  "actor": {
+                    "type": "string"
+                  },
+                  "commandKey": {
+                    "type": "string"
+                  },
+                  "correlationToken": {
+                    "type": "string"
+                  },
+                  "gateId": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "enum": [
+                      "approve",
+                      "reject",
+                      "cancel",
+                      "retry",
+                      "pause",
+                      "resume"
+                    ]
+                  },
+                  "requestedAt": {
+                    "type": "string"
+                  },
+                  "runId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "actor",
+                  "commandKey",
+                  "kind",
+                  "requestedAt",
+                  "runId"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "error",
+              "request"
+            ],
+            "type": "object"
+          },
+          "name": "recordOperatorCommandRejection",
+          "outputSchema": {
+            "properties": {
+              "actor": {
+                "type": "string"
+              },
+              "appliedAt": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "commandKey": {
+                "type": "string"
+              },
+              "error": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "kind": {
+                "enum": [
+                  "approve",
+                  "reject",
+                  "cancel",
+                  "retry",
+                  "pause",
+                  "resume"
+                ]
+              },
+              "outcome": {
+                "enum": [
+                  "requested",
+                  "applied",
+                  "rejected"
+                ]
+              },
+              "requestedAt": {
+                "type": "string"
+              },
+              "runId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "actor",
+              "appliedAt",
+              "commandKey",
+              "error",
+              "kind",
+              "outcome",
+              "requestedAt",
+              "runId"
+            ],
+            "type": "object"
+          },
+          "version": 1
+        },
+        {
+          "errors": [
             "module_unavailable"
           ],
           "guarantees": [
@@ -24872,6 +25000,127 @@
           "events",
           "runs",
           "timeline"
+        ],
+        "type": "object"
+      },
+      "provider": "operations"
+    },
+    {
+      "inputSchema": {
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "request": {
+            "properties": {
+              "actor": {
+                "type": "string"
+              },
+              "commandKey": {
+                "type": "string"
+              },
+              "correlationToken": {
+                "type": "string"
+              },
+              "gateId": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "approve",
+                  "reject",
+                  "cancel",
+                  "retry",
+                  "pause",
+                  "resume"
+                ]
+              },
+              "requestedAt": {
+                "type": "string"
+              },
+              "runId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "actor",
+              "commandKey",
+              "kind",
+              "requestedAt",
+              "runId"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "error",
+          "request"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "operations/recordOperatorCommandRejection@v1",
+      "outputSchema": {
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "appliedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "commandKey": {
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "kind": {
+            "enum": [
+              "approve",
+              "reject",
+              "cancel",
+              "retry",
+              "pause",
+              "resume"
+            ]
+          },
+          "outcome": {
+            "enum": [
+              "requested",
+              "applied",
+              "rejected"
+            ]
+          },
+          "requestedAt": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "actor",
+          "appliedAt",
+          "commandKey",
+          "error",
+          "kind",
+          "outcome",
+          "requestedAt",
+          "runId"
         ],
         "type": "object"
       },
