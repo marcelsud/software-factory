@@ -110,6 +110,7 @@ export interface RunExecutionPinRow {
 }
 export interface RunEffectTreePinRow {
   run_id: string;
+  step_id: string;
   tree_digest: string;
 }
 
@@ -279,8 +280,10 @@ export const runsMigrations = {
       name: "006_effect_tree_pin",
       sql: `
         CREATE TABLE IF NOT EXISTS run_effect_tree_pins (
-          run_id TEXT PRIMARY KEY,
+          run_id TEXT NOT NULL,
+          step_id TEXT NOT NULL,
           tree_digest TEXT NOT NULL,
+          PRIMARY KEY (run_id, step_id),
           FOREIGN KEY (run_id) REFERENCES runs(run_id)
         );
       `,
@@ -416,8 +419,10 @@ export const runsMigrations = {
       name: "006_effect_tree_pin",
       sql: `
         CREATE TABLE IF NOT EXISTS chimpbase_runs.run_effect_tree_pins (
-          run_id TEXT PRIMARY KEY REFERENCES chimpbase_runs.runs(run_id),
-          tree_digest TEXT NOT NULL
+          run_id TEXT NOT NULL REFERENCES chimpbase_runs.runs(run_id),
+          step_id TEXT NOT NULL,
+          tree_digest TEXT NOT NULL,
+          PRIMARY KEY (run_id, step_id)
         );
       `,
     },

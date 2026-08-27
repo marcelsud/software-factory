@@ -709,7 +709,14 @@ class WorkspaceManager {
         size: bytes.length,
       };
     });
-    await git(workspace.path, ["add", "-A", "--"]);
+    await git(workspace.path, [
+      "add",
+      "-A",
+      "--",
+      ".",
+      ":(exclude).factory",
+      ":(exclude).factory/**",
+    ]);
     const treeDigest = (await git(workspace.path, ["write-tree"])).stdout.toString("utf8").trim();
     if (!/^[a-f0-9]{40,64}$/.test(treeDigest))
       throw new Error("workspace produced an invalid git tree");

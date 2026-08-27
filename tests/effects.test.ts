@@ -12,7 +12,7 @@ import {
   FetchGitHubWriteTransport,
   GitHubWriteError,
 } from "../src/adapters/github-write-transport.ts";
-import type { GitHubWriteTransport } from "../src/adapters/seams.ts";
+import type { AgentRuntime, GitHubWriteTransport } from "../src/adapters/seams.ts";
 import {
   type EffectIntentV3,
   type EffectOperationV3,
@@ -31,7 +31,11 @@ import {
 import { effectMarker } from "../src/effects/comment-renderer.ts";
 import { compileEffectPolicy, effectPayloadDigest } from "../src/effects/policy.ts";
 import { unavailableGitHubReadTransport } from "../src/modules/intake/implementation.ts";
-import { FakeGitHubWriteTransport, FakeGitPublisher } from "../src/testing/fakes.ts";
+import {
+  FakeAgentRuntime,
+  FakeGitHubWriteTransport,
+  FakeGitPublisher,
+} from "../src/testing/fakes.ts";
 
 const factorySource = await readFile(new URL("../factory.yaml", import.meta.url), "utf8");
 const policy = compileEffectPolicy(factorySource);
@@ -54,6 +58,7 @@ type Host = Awaited<ReturnType<typeof createChimpbase>>;
 async function boot(
   input: {
     effectPolicy?: typeof policy;
+    agentRuntime?: AgentRuntime;
     pinnedPolicy?: boolean;
     gitPublisher?: FakeGitPublisher;
     syncSubscriptions?: boolean;
@@ -63,6 +68,7 @@ async function boot(
   const transport = input.transport ?? new FakeGitHubWriteTransport();
   const gitPublisher = input.gitPublisher ?? new FakeGitPublisher();
   const softwareFactoryApp = createSoftwareFactoryApp({
+    ...(input.agentRuntime === undefined ? {} : { agentRuntime: input.agentRuntime }),
     ...(input.pinnedPolicy === true ? {} : { effectPolicy: input.effectPolicy ?? policy }),
     gitPublisher,
     githubWriteTransport: transport,
@@ -687,6 +693,131 @@ describe("leaf-07 effects", () => {
       ).toEqual(expect.arrayContaining([expect.objectContaining({ kind: "effect.rejected" })]));
     } finally {
       await strict.host.close();
+    }
+    const finalTree = "b".repeat(40);
+    const multiPublisher = new FakeGitPublisher();
+    const multiRuntime = new FakeAgentRuntime((request) => ({
+      attemptId: request.attemptId,
+      changedFiles: [],
+      commit: { sha: request.stepId === "first" ? "a".repeat(40) : finalTree },
+      logs: {
+        stderrBytes: 0,
+        stderrDigest: "empty",
+        stderrTruncated: false,
+        stdoutBytes: 0,
+        stdoutDigest: "empty",
+      },
+      outcome: {
+        data: {},
+        outcome: "next",
+        outputArtifactDigests: [],
+        summary: request.stepId,
+      },
+      resources: { cpuMs: 0, maxRssBytes: 0 },
+      status: "succeeded",
+      tests: [],
+      timing: {
+        durationMs: 0,
+        finishedAt: now,
+        startedAt: now,
+      },
+    }));
+    const multi = await boot({
+      agentRuntime: multiRuntime,
+      gitPublisher: multiPublisher,
+      pinnedPolicy: true,
+    });
+    try {
+      const source = `${factorySource.replaceAll(
+        "flows: [issue-triage]",
+        "flows: [issue-triage, multi-tree]",
+      )}
+  - id: multi-tree
+    initialState: first
+    triggers:
+      - { source: manual-triage, predicates: [] }
+    concurrency: { key: repository, limit: 1 }
+    artifactHandoffs:
+      - { fromStep: first, toStep: second }
+      - { fromStep: second, toStep: publish }
+    steps:
+      - id: first
+        kind: agent
+        agentProfile: triage-agent
+        capabilities: [repository.read]
+        retry: { maxAttempts: 1, backoffMs: 0 }
+        results:
+          - { outcome: next, requiredData: [] }
+      - id: second
+        kind: agent
+        agentProfile: triage-agent
+        capabilities: [repository.read]
+        retry: { maxAttempts: 1, backoffMs: 0 }
+        results:
+          - { outcome: next, requiredData: [] }
+      - id: publish
+        kind: effect
+        capabilities: [repository.write]
+        effectCapability: repository.write
+        effectTarget: factory
+        effectPayloadDigest: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+        retry: { maxAttempts: 1, backoffMs: 0 }
+        results:
+          - { outcome: applied, requiredData: [] }
+          - { outcome: rejected, requiredData: [] }
+    gates: []
+    states:
+      - { id: first, step: first }
+      - { id: second, step: second }
+      - { id: publish, step: publish }
+      - { id: done, terminal: success, outcome: completed }
+      - { id: rejected, terminal: failure, outcome: failed }
+    transitions:
+      - { from: first, to: second, on: next }
+      - { from: second, to: publish, on: next }
+      - { from: publish, to: done, on: applied }
+      - { from: publish, to: rejected, on: rejected }
+`;
+      const revision = (
+        await multi.host.executeAction("definitions/compileDefinition@v1", {
+          source,
+          sourceName: "factory.yaml",
+        })
+      ).result as { definitionDigest: string };
+      await multi.host.executeAction("definitions/activateDefinition@v1", {
+        definitionDigest: revision.definitionDigest,
+      });
+      await multi.host.executeAction("runs/startRunV3@v1", {
+        definitionDigest: revision.definitionDigest,
+        factoryEventId: "event:g10-multi",
+        flowId: "multi-tree",
+        moduleManifestDigest: "manifest:g10-engine",
+        repository: "factory",
+        repositorySha: "base:g10-multi",
+        runId: "run:g10-multi",
+        startedAt: now,
+        subject: "issue:26",
+        workflowId: "workflow:g10-multi",
+        workflowVersionDigest: "workflow-digest:g10-engine",
+      });
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        try {
+          await multi.host.processNextQueueJob();
+        } catch (error) {
+          if (!(error instanceof Error) || !error.message.includes("effect_adapter_unavailable"))
+            throw error;
+        }
+        const projection = (
+          await multi.host.executeAction("runs/getRunV3@v1", {
+            runId: "run:g10-multi",
+          })
+        ).result as { status: string };
+        if (projection.status === "succeeded") break;
+      }
+      expect(multiPublisher.publications).toHaveLength(1);
+      expect(multiPublisher.publications[0]?.treeDigest).toBe(finalTree);
+    } finally {
+      await multi.host.close();
     }
   });
 

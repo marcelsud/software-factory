@@ -388,6 +388,9 @@ describe("leaf-05 execution", () => {
     const treeDigest = first.commit?.sha;
     expect(treeDigest).toMatch(/^[a-f0-9]{40,64}$/);
     if (treeDigest === undefined) throw new Error("trusted execution did not pin a git tree");
+    expect(await git(fixture.repository, "ls-tree", "-r", "--name-only", treeDigest)).not.toMatch(
+      /(?:^|\n)\.factory(?:\/|\n|$)/,
+    );
     expect(await git(fixture.repository, "cat-file", "-t", treeDigest)).toBe("tree");
     const remote = join(fixture.root, "remote.git");
     await mkdir(remote);

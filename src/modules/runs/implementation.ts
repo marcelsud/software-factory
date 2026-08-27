@@ -346,18 +346,12 @@ async function loadRows(db: Kysely<RunsDatabase>, runId: string) {
     .selectAll()
     .where("run_id", "=", runId)
     .executeTakeFirst();
-  const treePin = await db
-    .selectFrom("run_effect_tree_pins")
-    .select("tree_digest")
-    .where("run_id", "=", runId)
-    .executeTakeFirst();
   return {
     engine: {
       ...engine,
       execution_protocol: pins?.execution_protocol ?? "v1",
       repository_sha: pins?.repository_sha ?? "",
       task_payload_json: pins?.task_payload_json ?? "null",
-      tree_digest: treePin?.tree_digest ?? null,
     },
     row,
   };
@@ -788,20 +782,18 @@ async function consumeAttemptFinished(
   const treeDigest = await ctx.call(execution.calls.getAttemptGitTreeV1, {
     attemptId: outcome.attemptId,
   });
-  if (treeDigest !== null) {
-    const existingTree = await db
-      .selectFrom("run_effect_tree_pins")
-      .select("tree_digest")
-      .where("run_id", "=", outcome.runId)
-      .executeTakeFirst();
-    if (existingTree !== undefined && existingTree.tree_digest !== treeDigest)
-      throw new Error("invalid_revision_pin: run git tree changed");
-    if (existingTree === undefined)
-      await db
-        .insertInto("run_effect_tree_pins")
-        .values({ run_id: outcome.runId, tree_digest: treeDigest })
-        .execute();
-  }
+  if (treeDigest !== null)
+    await db
+      .insertInto("run_effect_tree_pins")
+      .values({
+        run_id: outcome.runId,
+        step_id: outcome.stepId,
+        tree_digest: treeDigest,
+      })
+      .onConflict((conflict) =>
+        conflict.columns(["run_id", "step_id"]).doUpdateSet({ tree_digest: treeDigest }),
+      )
+      .execute();
   if (loaded.engine === null) {
     const failed = outcome.outcome === "failed";
     const updated = await appendAudit(
@@ -1090,8 +1082,9 @@ function createSubscriptions(dependencies: RunsImplementationDependencies) {
 function strictEffectOperation(
   step: ExecutionPlanV2["steps"][number],
   row: RunRow,
-  engine: RunEngineStateRow & RunExecutionPinRow & { readonly tree_digest: string | null },
+  engine: RunEngineStateRow & RunExecutionPinRow,
   artifacts: readonly string[],
+  treeDigest: string | null,
 ): EffectOperationV3 {
   const branch = `factory/${row.run_id.replace(/[^A-Za-z0-9._-]/g, "-").slice(0, 80)}`;
   if (step.effectCapability === "repository.write") {
@@ -1101,7 +1094,7 @@ function strictEffectOperation(
         baseRevision: engine.repository_sha,
         branch,
         commitMessage: `Factory run ${row.run_id}, step ${step.id}`,
-        treeDigest: engine.tree_digest,
+        treeDigest,
         verified: true,
       },
     };
@@ -1993,7 +1986,6 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
               ...next.engine,
               repository_sha: engine.repository_sha,
               task_payload_json: engine.task_payload_json,
-              tree_digest: engine.tree_digest,
             };
             await publishProjection(ctx, row, engine);
             return { kind: "sleep" as const, delayMs: 0 };
@@ -2378,10 +2370,28 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
           runId: row.run_id,
           target: step.effectTarget ?? "",
         };
+        let treeDigest: string | null = null;
+        if (dependencies.strictEffects === true) {
+          const sourceSteps = plan.artifactHandoffs
+            .filter((handoff) => handoff.toStep === step.id)
+            .map((handoff) => handoff.fromStep);
+          if (sourceSteps.length > 0) {
+            const treePins = await db
+              .selectFrom("run_effect_tree_pins")
+              .select(["step_id", "tree_digest"])
+              .where("run_id", "=", row.run_id)
+              .where("step_id", "in", sourceSteps)
+              .execute();
+            for (const sourceStep of sourceSteps) {
+              const pin = treePins.find((candidate) => candidate.step_id === sourceStep);
+              if (pin !== undefined) treeDigest = pin.tree_digest;
+            }
+          }
+        }
         const strictIntent =
           dependencies.strictEffects === true
             ? (() => {
-                const operation = strictEffectOperation(step, row, engine, artifacts);
+                const operation = strictEffectOperation(step, row, engine, artifacts, treeDigest);
                 return {
                   capability: step.effectCapability ?? "",
                   correlationToken: token,
