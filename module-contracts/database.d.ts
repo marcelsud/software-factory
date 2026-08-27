@@ -16,6 +16,9 @@ export interface IntakeDatabase {
 }
 
 export interface OperationsDatabase {
+  "effect-projections": Record<string, unknown>;
+  "event-projections": Record<string, unknown>;
+  "run-projections": Record<string, unknown>;
 }
 
 export interface RunsDatabase {

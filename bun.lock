@@ -5,7 +5,7 @@
     "": {
       "name": "@software-factory/factory",
       "dependencies": {
-        "chimpbase": "file:../chimpbase/chimpbase-0.7.0.tgz",
+        "chimpbase": "file:vendor/chimpbase-0.7.0.tgz",
         "yaml": "2.8.1",
       },
       "devDependencies": {
@@ -89,7 +89,7 @@
 
     "bun-types": ["bun-types@1.3.14", "", { "dependencies": { "@types/node": "*" } }, "sha512-4N0ig0fEomHt5R0KCFWjovxow98rIoRwKolrYdCcknNwMekCXRnWEUvgu5soYV8QXtVsrUD8B95MBOZGPvr6KQ=="],
 
-    "chimpbase": ["chimpbase@../chimpbase/chimpbase-0.7.0.tgz", { "dependencies": { "@opentelemetry/api": "^1.9.0", "@opentelemetry/api-logs": "^0.200.0", "@opentelemetry/context-async-hooks": "^2.0.0", "@opentelemetry/exporter-logs-otlp-http": "^0.200.0", "@opentelemetry/exporter-metrics-otlp-http": "^0.200.0", "@opentelemetry/exporter-trace-otlp-http": "^0.200.0", "@opentelemetry/resources": "^2.0.0", "@opentelemetry/sdk-logs": "^0.200.0", "@opentelemetry/sdk-metrics": "^2.0.0", "@opentelemetry/sdk-trace-base": "^2.0.0", "@opentelemetry/semantic-conventions": "^1.25.0", "@types/pg": "^8.15.6", "kysely": "^0.28.11", "pg": "^8.16.3", "typescript": "^5.9.3" }, "bin": { "chimpbase": "./packages/bun/dist/src/cli.js", "chimpbase-node": "./packages/node/dist/src/cli.js" } }, "sha512-7lLmNQJjveKmDGbfpwL30Qi+HrH3nGXj/cY+aGTCbpZPzfrj3PDA5vY0FQg8Iz2kq/m/UK2WfRikfM2sDFdLWw=="],
+    "chimpbase": ["chimpbase@vendor/chimpbase-0.7.0.tgz", { "dependencies": { "@opentelemetry/api": "^1.9.0", "@opentelemetry/api-logs": "^0.200.0", "@opentelemetry/context-async-hooks": "^2.0.0", "@opentelemetry/exporter-logs-otlp-http": "^0.200.0", "@opentelemetry/exporter-metrics-otlp-http": "^0.200.0", "@opentelemetry/exporter-trace-otlp-http": "^0.200.0", "@opentelemetry/resources": "^2.0.0", "@opentelemetry/sdk-logs": "^0.200.0", "@opentelemetry/sdk-metrics": "^2.0.0", "@opentelemetry/sdk-trace-base": "^2.0.0", "@opentelemetry/semantic-conventions": "^1.25.0", "@types/pg": "^8.15.6", "kysely": "^0.28.11", "pg": "^8.16.3", "typescript": "^5.9.3" }, "bin": { "chimpbase": "./packages/bun/dist/src/cli.js", "chimpbase-node": "./packages/node/dist/src/cli.js" } }, "sha512-7lLmNQJjveKmDGbfpwL30Qi+HrH3nGXj/cY+aGTCbpZPzfrj3PDA5vY0FQg8Iz2kq/m/UK2WfRikfM2sDFdLWw=="],
 
     "kysely": ["kysely@0.28.17", "", {}, "sha512-nbD8lB9EB3wNdMhOCdx5Li8DxnLbvKByylRLcJ1h+4SkrowVeECAyZlyiKMThF7xFdRz0jSQ2MoJr+wXux2y0Q=="],
 

@@ -1,3 +1,5 @@
+import type { PinnedAgentProfile, StepResultDocument } from "../contracts/index.ts";
+
 export interface GitHubTransportRequest {
   readonly body?: unknown;
   readonly headers?: Readonly<Record<string, string>>;
@@ -16,17 +18,15 @@ export interface GitHubTransport {
 }
 
 export interface AgentRuntimeRequest {
-  readonly agentProfileDigest: string;
+  readonly agentProfile: PinnedAgentProfile;
   readonly attemptId: string;
   readonly inputArtifactDigests: readonly string[];
-  readonly instructions: string;
   readonly skillDigests: Readonly<Record<string, string>>;
 }
 
 export interface AgentRuntimeResult {
-  readonly exitCode: number;
-  readonly outputArtifactDigests: readonly string[];
-  readonly summary: string;
+  readonly result: StepResultDocument;
+  readonly status: "succeeded" | "failed";
 }
 
 export interface AgentRuntime {

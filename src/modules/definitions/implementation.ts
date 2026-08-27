@@ -1,4 +1,5 @@
 import { defineChimpbaseModuleImplementation } from "chimpbase/core";
+import { MODULE_RESOURCES } from "../../contracts/index.ts";
 import { definitions } from "./interface.ts";
 import { DefinitionRegistry } from "./registry.ts";
 
@@ -19,7 +20,7 @@ export function createDefinitionsImplementation() {
         return registry.getExecutionPlan(input.definitionDigest, input.flowId);
       },
     },
-    resources: {},
+    resources: MODULE_RESOURCES.definitions,
   });
 }
 

@@ -4,7 +4,7 @@
   "description": "Local-first software factory built on Chimpbase",
   "license": "Apache-2.0",
   "type": "module",
-  "private": false,
+  "private": true,
   "engines": {
     "node": ">=22"
   },
@@ -14,7 +14,8 @@
   },
   "files": [
     "dist",
-    "module-contracts"
+    "module-contracts",
+    "vendor/chimpbase-0.7.0.tgz"
   ],
   "exports": {
     ".": {
@@ -33,7 +34,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "chimpbase": "file:../chimpbase/chimpbase-0.7.0.tgz",
+    "chimpbase": "file:vendor/chimpbase-0.7.0.tgz",
     "yaml": "2.8.1"
   },
   "devDependencies": {

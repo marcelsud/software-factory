@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFile } from "node:fs/promises";
+import { readFile, realpath } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -113,15 +113,34 @@ async function planCommand(
     io.stdout(`flow ${flow.id} ${plan.flowDigest}\n`);
     io.stdout(`  agent profiles: ${canonicalJson(plan.agentProfileDigests)}\n`);
     io.stdout(`  skills: ${canonicalJson(plan.skillRevisions)}\n`);
-    io.stdout(`  states: ${plan.states.join(", ")}\n`);
+    io.stdout(`  states: ${plan.states.map((state) => state.id).join(", ")}\n`);
     io.stdout(`  calls: ${plan.calls.join(", ")}\n`);
     io.stdout(`  events: ${plan.events.join(", ")}\n`);
+    io.stdout(
+      `  graph: ${canonicalJson({
+        concurrency: plan.concurrency,
+        effectPermissions: plan.effectPermissions,
+        gates: plan.gates,
+        initialState: plan.initialState,
+        states: plan.states,
+        steps: plan.steps,
+        transitions: plan.transitions,
+      })}\n`,
+    );
   }
   io.stdout(`${compiled.revision.normalizedJson}\n`);
   return 0;
 }
 
-const invokedPath = process.argv[1] === undefined ? "" : resolve(process.argv[1]);
-if (invokedPath === fileURLToPath(import.meta.url)) {
-  process.exitCode = await runCli(process.argv.slice(2));
+const invokedPath = process.argv[1];
+if (invokedPath !== undefined) {
+  try {
+    if ((await realpath(invokedPath)) === (await realpath(fileURLToPath(import.meta.url)))) {
+      process.exitCode = await runCli(process.argv.slice(2));
+    }
+  } catch {
+    if (resolve(invokedPath) === fileURLToPath(import.meta.url)) {
+      process.exitCode = await runCli(process.argv.slice(2));
+    }
+  }
 }

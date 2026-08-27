@@ -1,4 +1,5 @@
 import { defineChimpbaseModuleImplementation } from "chimpbase/core";
+import { MODULE_RESOURCES } from "../../contracts/index.ts";
 
 import { intake } from "./interface.ts";
 
@@ -21,5 +22,5 @@ export const intakeImplementation = defineChimpbaseModuleImplementation({
       return unavailable("pollRepository");
     },
   },
-  resources: {},
+  resources: MODULE_RESOURCES.intake,
 });

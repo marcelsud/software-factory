@@ -6,7 +6,7 @@
 - **Flow definition:** Directed set of states, steps, transitions, gates, retry policy, and concurrency policy that describes how a factory event is handled.
 - **Run:** One execution of a flow for a factory event. It pins all definition, profile, skill, and execution-version revisions used by that execution.
 - **Step attempt:** One bounded attempt to perform a step in a run. A correlation token distinguishes the current attempt from stale results.
-- **Agent profile:** Declared model-independent instructions, allowed skills, and capabilities for agent steps.
+- **Agent profile:** Digest-pinned declaration of provider-neutral model and command selection, instructions, execution limits, allowed skills, and capabilities for agent steps.
 - **Skill revision:** Immutable, digest-identified revision of instructions or supporting material resolved from a skill reference.
 - **Artifact:** Immutable, digest-addressed output associated with a run and classified as public or private.
 - **Gate:** Flow state that waits for one of its declared event, signal, or operator-command kinds before the run can continue.

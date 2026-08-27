@@ -33,7 +33,10 @@ export class FakeAgentRuntime implements AgentRuntime {
   readonly #result: AgentRuntimeResult;
 
   constructor(
-    result: AgentRuntimeResult = { exitCode: 0, outputArtifactDigests: [], summary: "ok" },
+    result: AgentRuntimeResult = {
+      result: { data: {}, outcome: "completed", outputArtifactDigests: [], summary: "ok" },
+      status: "succeeded",
+    },
   ) {
     this.#result = result;
   }

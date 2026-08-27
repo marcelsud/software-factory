@@ -1,4 +1,5 @@
 import { defineChimpbaseModuleImplementation } from "chimpbase/core";
+import { MODULE_RESOURCES } from "../../contracts/index.ts";
 
 import { operations } from "./interface.ts";
 
@@ -27,5 +28,5 @@ export const operationsImplementation = defineChimpbaseModuleImplementation({
       return unavailable("listEffects");
     },
   },
-  resources: {},
+  resources: MODULE_RESOURCES.operations,
 });

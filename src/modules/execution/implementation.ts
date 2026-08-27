@@ -1,4 +1,5 @@
 import { defineChimpbaseModuleImplementation } from "chimpbase/core";
+import { MODULE_RESOURCES } from "../../contracts/index.ts";
 
 import { execution } from "./interface.ts";
 
@@ -18,5 +19,5 @@ export const executionImplementation = defineChimpbaseModuleImplementation({
       return unavailable("getAttempt");
     },
   },
-  resources: {},
+  resources: MODULE_RESOURCES.execution,
 });

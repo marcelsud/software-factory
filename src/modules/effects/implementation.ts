@@ -1,4 +1,5 @@
 import { defineChimpbaseModuleImplementation } from "chimpbase/core";
+import { MODULE_RESOURCES } from "../../contracts/index.ts";
 
 import { effects } from "./interface.ts";
 
@@ -21,5 +22,5 @@ export const effectsImplementation = defineChimpbaseModuleImplementation({
       return unavailable("reconcileEffect");
     },
   },
-  resources: {},
+  resources: MODULE_RESOURCES.effects,
 });

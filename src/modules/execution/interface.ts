@@ -1,7 +1,7 @@
 import { defineChimpbaseModuleInterface } from "chimpbase/core";
 import { v } from "chimpbase/runtime";
 
-import { stepAttempt } from "../../contracts/index.ts";
+import { attemptFinished, pinnedAgentProfile, stepAttempt } from "../../contracts/index.ts";
 
 export const execution = defineChimpbaseModuleInterface({
   name: "execution",
@@ -10,7 +10,7 @@ export const execution = defineChimpbaseModuleInterface({
   calls: {
     requestAttempt: {
       input: v.object({
-        agentProfileDigest: v.string(),
+        agentProfile: pinnedAgentProfile,
         attemptId: v.string(),
         correlationToken: v.string(),
         inputArtifactDigests: v.string().array(),
@@ -33,7 +33,7 @@ export const execution = defineChimpbaseModuleInterface({
   events: {
     attemptFinishedV1: {
       name: "attemptFinished",
-      payload: stepAttempt,
+      payload: attemptFinished,
       version: 1,
     },
   },

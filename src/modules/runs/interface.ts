@@ -1,7 +1,7 @@
 import { defineChimpbaseModuleInterface } from "chimpbase/core";
 import { v } from "chimpbase/runtime";
 
-import { effectIntent, operatorCommand, run } from "../../contracts/index.ts";
+import { effectIntent, operatorCommand, run, runFinished } from "../../contracts/index.ts";
 
 const stepRequest = v.object({
   correlationToken: v.string(),
@@ -10,7 +10,7 @@ const stepRequest = v.object({
 });
 
 const startRunInput = v.object({
-  agentProfileDigest: v.string(),
+  agentProfileDigests: v.record(v.string()),
   definitionDigest: v.string(),
   factoryEventId: v.string(),
   flowDigest: v.string(),
@@ -50,6 +50,6 @@ export const runs = defineChimpbaseModuleInterface({
     runStateChangedV1: { name: "runStateChanged", payload: run, version: 1 },
     stepRequestedV1: { name: "stepRequested", payload: stepRequest, version: 1 },
     effectRequestedV1: { name: "effectRequested", payload: effectIntent, version: 1 },
-    runFinishedV1: { name: "runFinished", payload: run, version: 1 },
+    runFinishedV1: { name: "runFinished", payload: runFinished, version: 1 },
   },
 });

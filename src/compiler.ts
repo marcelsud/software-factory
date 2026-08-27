@@ -3,7 +3,13 @@ import { posix } from "node:path";
 
 import { parseDocument } from "yaml";
 
-import { type DefinitionRevision, type ExecutionPlan, isDataRecord } from "./contracts/index.ts";
+import {
+  CAPABILITY_OWNERS,
+  type DefinitionRevision,
+  type ExecutionPlan,
+  isDataRecord,
+  type PinnedAgentProfile,
+} from "./contracts/index.ts";
 
 export interface DefinitionDiagnostic {
   readonly code: string;
@@ -50,8 +56,10 @@ export interface SkillDefinition {
 
 export interface AgentProfileDefinition {
   readonly capabilities: readonly string[];
+  readonly command: readonly string[];
   readonly id: string;
   readonly instructions: string;
+  readonly limits: { readonly maxOutputBytes: number; readonly timeoutMs: number };
   readonly model: string;
   readonly skills: readonly string[];
 }
@@ -161,24 +169,59 @@ export function compileFactoryDefinition(
   );
   const plans = Object.fromEntries(
     definition.flows.map((flow) => {
+      const pinnedProfiles: Array<[string, PinnedAgentProfile]> = definition.agentProfiles
+        .filter((profile) => flow.steps.some((step) => step.agentProfile === profile.id))
+        .map((profile) => {
+          const profileDigest = sha256(canonicalJson(profile));
+          return [
+            profile.id,
+            {
+              capabilities: [...profile.capabilities],
+              command: [...profile.command],
+              digest: profileDigest,
+              instructions: profile.instructions,
+              limits: { ...profile.limits },
+              model: profile.model,
+              skills: [...profile.skills],
+            },
+          ];
+        });
       const plan = deepFreeze({
         agentProfileDigests: Object.fromEntries(
-          definition.agentProfiles
-            .filter((profile) => flow.steps.some((step) => step.agentProfile === profile.id))
-            .map((profile) => [profile.id, sha256(canonicalJson(profile))]),
+          pinnedProfiles.map(([id, profile]) => [id, profile.digest]),
         ),
+        agentProfiles: Object.fromEntries(pinnedProfiles),
         calls: moduleCallsFor(flow),
+        concurrency: { ...flow.concurrency },
         definitionDigest,
+        effectPermissions: definition.effectPermissions
+          .filter((permission) =>
+            flow.steps.some(
+              (step) => step.kind === "effect" && step.capabilities.includes(permission.capability),
+            ),
+          )
+          .map((permission) => ({
+            capability: permission.capability,
+            targets: [...permission.targets],
+          })),
         events: moduleEventsFor(flow),
         flowDigest: flowDigests[flow.id] ?? "",
         flowId: flow.id,
+        gates: flow.gates.map((gate) => ({ ...gate, accepted: [...gate.accepted] })),
+        initialState: flow.initialState,
         normalizedJson: canonicalJson(flow),
         skillRevisions: Object.fromEntries(
           definition.skills
             .filter((skill) => flow.steps.some((step) => step.skill === skill.id))
             .map((skill) => [skill.id, skill.revision]),
         ),
-        states: flow.states.map((state) => state.id),
+        states: flow.states.map((state) => ({ ...state })),
+        steps: flow.steps.map((step) => ({
+          ...step,
+          capabilities: [...step.capabilities],
+          retry: { ...step.retry },
+        })),
+        transitions: flow.transitions.map((transition) => ({ ...transition })),
       });
       return [flow.id, plan];
     }),
@@ -371,11 +414,41 @@ function parseSkill(value: unknown, index: number, skillRoots: readonly string[]
 
 function parseAgentProfile(value: unknown, index: number): AgentProfileDefinition {
   const path = `$.agentProfiles[${index}]`;
-  const record = objectAt(value, path, ["id", "model", "instructions", "skills", "capabilities"]);
+  const record = objectAt(value, path, [
+    "id",
+    "model",
+    "command",
+    "instructions",
+    "limits",
+    "skills",
+    "capabilities",
+  ]);
+  const command = stringListAt(record.command, `${path}.command`);
+  if (command.length === 0) {
+    fail(
+      `${path}.command`,
+      "agent profile command cannot be empty",
+      "declare the trusted executable and its fixed arguments",
+      "invalid_agent_profile",
+    );
+  }
+  const limits = objectAt(record.limits, `${path}.limits`, ["timeoutMs", "maxOutputBytes"]);
+  const timeoutMs = integerAt(limits.timeoutMs, `${path}.limits.timeoutMs`);
+  const maxOutputBytes = integerAt(limits.maxOutputBytes, `${path}.limits.maxOutputBytes`);
+  if (timeoutMs < 1 || maxOutputBytes < 1) {
+    fail(
+      `${path}.limits`,
+      "agent profile limits must be positive",
+      "set timeoutMs and maxOutputBytes to positive integers",
+      "invalid_agent_profile",
+    );
+  }
   return Object.freeze({
     capabilities: Object.freeze(stringListAt(record.capabilities, `${path}.capabilities`)),
+    command: Object.freeze(command),
     id: idAt(record.id, `${path}.id`),
     instructions: stringAt(record.instructions, `${path}.instructions`),
+    limits: Object.freeze({ maxOutputBytes, timeoutMs }),
     model: stringAt(record.model, `${path}.model`),
     skills: Object.freeze(stringListAt(record.skills, `${path}.skills`)),
   });
@@ -540,6 +613,9 @@ function validateDefinition(definition: FactoryDefinition): void {
   const profiles = uniqueIds(definition.agentProfiles, "$.agentProfiles");
   const capabilities = uniqueIds(definition.capabilities, "$.capabilities");
   uniqueIds(definition.flows, "$.flows");
+  definition.capabilities.forEach((capability, index) => {
+    requireCapabilityOwner(capability.id, `$.capabilities[${index}].id`);
+  });
   const profileById = new Map(definition.agentProfiles.map((profile) => [profile.id, profile]));
 
   definition.sources.forEach((source, index) => {
@@ -555,12 +631,36 @@ function validateDefinition(definition: FactoryDefinition): void {
     profile.capabilities.forEach((capability, child) => {
       if (!capabilities.has(capability))
         missingRef(`$.agentProfiles[${index}].capabilities[${child}]`, "capability", capability);
+      const owner = requireCapabilityOwner(
+        capability,
+        `$.agentProfiles[${index}].capabilities[${child}]`,
+      );
+      if (owner !== "execution" && owner !== "agent-runtime") {
+        fail(
+          `$.agentProfiles[${index}].capabilities[${child}]`,
+          `capability ${JSON.stringify(capability)} is owned by ${JSON.stringify(owner)} and cannot be granted to an agent`,
+          "grant only execution-owned or agent-runtime capabilities to agent profiles",
+          "invalid_capability_owner",
+        );
+      }
     });
   });
   const permittedCapabilities = new Set<string>();
   definition.effectPermissions.forEach((permission, index) => {
     if (!capabilities.has(permission.capability)) {
       missingRef(`$.effectPermissions[${index}].capability`, "capability", permission.capability);
+    }
+    const owner = requireCapabilityOwner(
+      permission.capability,
+      `$.effectPermissions[${index}].capability`,
+    );
+    if (owner !== "effects" && owner !== "git-publisher" && owner !== "github-transport") {
+      fail(
+        `$.effectPermissions[${index}].capability`,
+        `capability ${JSON.stringify(permission.capability)} is owned by ${JSON.stringify(owner)} and cannot be used as an effect`,
+        "declare effect permissions only for effects or trusted publisher capabilities",
+        "invalid_capability_owner",
+      );
     }
     permission.targets.forEach((target, child) => {
       if (!repositories.has(target)) {
@@ -604,6 +704,22 @@ function validateDefinition(definition: FactoryDefinition): void {
       step.capabilities.forEach((capability, child) => {
         if (!capabilities.has(capability))
           missingRef(`${path}.steps[${index}].capabilities[${child}]`, "capability", capability);
+        const owner = requireCapabilityOwner(
+          capability,
+          `${path}.steps[${index}].capabilities[${child}]`,
+        );
+        const allowedForKind =
+          step.kind === "agent"
+            ? owner === "execution" || owner === "agent-runtime"
+            : owner === "effects" || owner === "git-publisher" || owner === "github-transport";
+        if (!allowedForKind) {
+          fail(
+            `${path}.steps[${index}].capabilities[${child}]`,
+            `capability ${JSON.stringify(capability)} is owned by ${JSON.stringify(owner)} and cannot be used by a ${step.kind} step`,
+            `use a capability owned by the ${step.kind} execution boundary`,
+            "invalid_capability_owner",
+          );
+        }
         if (
           step.kind === "agent" &&
           profile !== undefined &&
@@ -680,6 +796,39 @@ function validateDefinition(definition: FactoryDefinition): void {
         );
       }
       transitionKeys.set(key, index);
+    });
+    flow.states.forEach((state, index) => {
+      if (
+        state.terminal === undefined &&
+        !flow.transitions.some((transition) => transition.from === state.id)
+      ) {
+        fail(
+          `${path}.states[${index}].id`,
+          `nonterminal state ${JSON.stringify(state.id)} has no outgoing transition`,
+          "add an outgoing transition or mark the state terminal",
+          "dead_end_state",
+        );
+      }
+    });
+    flow.states.forEach((state) => {
+      if (state.gate === undefined) return;
+      const gateIndex = flow.gates.findIndex((gate) => gate.id === state.gate);
+      const gate = flow.gates[gateIndex];
+      if (gate === undefined) return;
+      gate.accepted.forEach((accepted, acceptedIndex) => {
+        if (
+          !flow.transitions.some(
+            (transition) => transition.from === state.id && transition.on === accepted,
+          )
+        ) {
+          fail(
+            `${path}.gates[${gateIndex}].accepted[${acceptedIndex}]`,
+            `accepted gate input ${JSON.stringify(accepted)} has no transition from state ${JSON.stringify(state.id)}`,
+            "add exactly one transition for every accepted gate input",
+            "incomplete_gate",
+          );
+        }
+      });
     });
     validateReachability(flow, flowIndex);
     validateSynchronousCycles(flow, flowIndex);
@@ -779,6 +928,19 @@ function uniqueIds(entries: readonly { readonly id: string }[], path: string): S
     ids.add(entry.id);
   });
   return ids;
+}
+
+function requireCapabilityOwner(capability: string, path: string): string {
+  const owner = CAPABILITY_OWNERS[capability as keyof typeof CAPABILITY_OWNERS];
+  if (owner === undefined) {
+    fail(
+      path,
+      `capability ${JSON.stringify(capability)} has no declared owner`,
+      "use a capability from the ownership inventory or add its explicit trusted owner",
+      "undeclared_capability_owner",
+    );
+  }
+  return owner;
 }
 
 function missingRef(path: string, kind: string, reference: string): never {

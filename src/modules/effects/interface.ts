@@ -1,7 +1,7 @@
 import { defineChimpbaseModuleInterface } from "chimpbase/core";
 import { v } from "chimpbase/runtime";
 
-import { effectIntent, effectReceipt } from "../../contracts/index.ts";
+import { effectFinished, effectIntent, effectReceipt } from "../../contracts/index.ts";
 
 export const effects = defineChimpbaseModuleInterface({
   name: "effects",
@@ -32,7 +32,7 @@ export const effects = defineChimpbaseModuleInterface({
   events: {
     effectFinishedV1: {
       name: "effectFinished",
-      payload: effectReceipt,
+      payload: effectFinished,
       version: 1,
     },
   },

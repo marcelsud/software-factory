@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   defineChimpbaseModuleImplementation,
   defineChimpbaseModuleInterface,
@@ -19,13 +20,21 @@ import app from "../chimpbase.app.ts";
 import { runCli } from "../src/cli.ts";
 import { compileFactoryDefinition, DefinitionCompileError } from "../src/compiler.ts";
 import {
+  attemptFinished,
   CAPABILITY_OWNERS,
   type DefinitionRevision,
+  effectFinished,
+  executionPlan,
   factoryEvent,
   MODULE_DEPENDENCIES,
+  MODULE_RESOURCES,
   RESOURCE_OWNERS,
+  runFinished,
 } from "../src/contracts/index.ts";
 import { createDefinitionsImplementation } from "../src/modules/definitions/implementation.ts";
+import { effects } from "../src/modules/effects/interface.ts";
+import { execution } from "../src/modules/execution/interface.ts";
+import { runs } from "../src/modules/runs/interface.ts";
 import {
   FakeAgentRuntime,
   FakeGitHubTransport,
@@ -34,6 +43,7 @@ import {
 } from "../src/testing/fakes.ts";
 
 const factorySource = await readFile(new URL("../factory.yaml", import.meta.url), "utf8");
+const projectRoot = fileURLToPath(new URL("../", import.meta.url));
 
 function diagnosticFor(source: string) {
   try {
@@ -79,6 +89,61 @@ describe("foundation", () => {
     expect(exitCode).toBe(0);
     expect(checks).toBe(1);
     expect(output.join("")).toContain("0 fail");
+
+    const checkoutRoot = await mkdtemp(join(tmpdir(), "factory-checkout-"));
+    try {
+      await mkdir(join(checkoutRoot, "vendor"));
+      await writeFile(
+        join(checkoutRoot, "package.json"),
+        await readFile(join(projectRoot, "package.json"), "utf8"),
+      );
+      await writeFile(
+        join(checkoutRoot, "bun.lock"),
+        await readFile(join(projectRoot, "bun.lock"), "utf8"),
+      );
+      await Bun.write(
+        join(checkoutRoot, "vendor/chimpbase-0.7.0.tgz"),
+        Bun.file(join(projectRoot, "vendor/chimpbase-0.7.0.tgz")),
+      );
+      const install = Bun.spawn({
+        cmd: [process.execPath, "install", "--frozen-lockfile", "--silent"],
+        cwd: checkoutRoot,
+        stderr: "pipe",
+        stdout: "ignore",
+      });
+      const installError = new Response(install.stderr).text();
+      const installExit = await install.exited;
+      if (installExit !== 0) throw new Error(await installError);
+      expect(
+        await readFile(join(checkoutRoot, "node_modules/chimpbase/package.json"), "utf8"),
+      ).toContain('"version": "0.7.0"');
+      const build = await Bun.build({
+        entrypoints: [join(projectRoot, "src/cli.ts")],
+        outdir: join(checkoutRoot, "dist"),
+        packages: "external",
+        target: "node",
+      });
+      expect(build.success).toBe(true);
+      const binDirectory = join(checkoutRoot, "node_modules/.bin");
+      const installedBin = join(binDirectory, "factory");
+      await mkdir(binDirectory, { recursive: true });
+      await symlink("../../dist/cli.js", installedBin);
+      const configPath = join(checkoutRoot, "factory.yaml");
+      await writeFile(configPath, factorySource);
+      const invocation = Bun.spawn({
+        cmd: [installedBin, "validate", "--config", configPath],
+        cwd: checkoutRoot,
+        stderr: "pipe",
+        stdout: "pipe",
+      });
+      const invocationOutput = new Response(invocation.stdout).text();
+      const invocationError = new Response(invocation.stderr).text();
+      const invocationExit = await invocation.exited;
+      if (invocationExit !== 0) throw new Error(await invocationError);
+      expect(await invocationOutput).toMatch(/^valid [a-f0-9]{64}\n$/);
+    } finally {
+      await rm(checkoutRoot, { force: true, recursive: true });
+    }
   });
 
   test("[G2] public contracts expose data validators rather than infrastructure types", () => {
@@ -139,12 +204,42 @@ describe("foundation", () => {
       app.modules.map((module) => module.interface.name).sort(),
     );
     const manifest = generateChimpbaseModuleManifest(app.modules);
-    const ownedResources = manifest.modules.flatMap((module) =>
+    const manifestResources = manifest.modules.flatMap((module) =>
       Object.values(module.resources).flatMap((resources) =>
-        resources.map((resource) => `${module.name}/${resource}`),
+        resources.map((resource) => ({ module: module.name, resource })),
       ),
     );
-    expect(new Set(ownedResources).size).toBe(ownedResources.length);
+    const plannedResources = Object.values(MODULE_RESOURCES).flatMap((resources) =>
+      Object.values(resources).flat(),
+    );
+    expect(new Set(manifestResources.map(({ resource }) => resource))).toEqual(
+      new Set(plannedResources),
+    );
+    for (const { module, resource } of manifestResources) {
+      expect(module).toBe(RESOURCE_OWNERS[resource as keyof typeof RESOURCE_OWNERS]);
+    }
+    for (const module of manifest.modules) {
+      for (const event of module.events) {
+        const eventName = `${event.name[0]?.toUpperCase() ?? ""}${event.name.slice(1)}`;
+        const resource = `event:${eventName}.v${event.version}`;
+        expect(module.name).toBe(RESOURCE_OWNERS[resource as keyof typeof RESOURCE_OWNERS]);
+      }
+    }
+    expect(Object.keys(RESOURCE_OWNERS)).toEqual(
+      expect.arrayContaining([
+        "agent-profile-revisions",
+        "delivery-deduplication",
+        "effect-intents",
+        "event:AttemptFinished.v1",
+        "event-sources",
+        "health-routes",
+        "operator-commands",
+        "repository-poll-crons",
+        "run-gates",
+        "source-payload-snapshots",
+        "workspaces",
+      ]),
+    );
   });
 
   test("[G4] architecture checks reject deep imports, undeclared dependencies, cycles, and duplicate contracts", async () => {
@@ -329,14 +424,68 @@ describe("foundation", () => {
     });
   });
 
-  test("[G9] triage plan lists module calls, events, and workflow states", () => {
+  test("[G9] triage plan exposes a fully validated executable graph and resolved profiles", () => {
     const plan = compileFactoryDefinition(factorySource).plans["issue-triage"];
-    expect(plan?.calls).toContain("execution.requestAttempt");
-    expect(plan?.calls).toContain("effects.requestEffect");
-    expect(plan?.events).toContain("DefinitionPublished.v1");
-    expect(plan?.states).toEqual(
+    expect(plan).toBeDefined();
+    if (plan === undefined) return;
+    expect(() => executionPlan.parse(plan)).not.toThrow();
+    expect(plan.calls).toContain("execution.requestAttempt");
+    expect(plan.events).toContain("DefinitionPublished.v1");
+    expect(plan.states.map((state) => state.id)).toEqual(
       expect.arrayContaining(["reproduce", "diagnose", "approve", "fix", "verify", "done"]),
     );
+    expect(plan.steps.find((step) => step.id === "reproduce")?.retry).toEqual({
+      backoffMs: 1000,
+      maxAttempts: 2,
+    });
+    expect(plan.effectPermissions.map((permission) => permission.capability)).toEqual([
+      "repository.write",
+      "issue.comment",
+    ]);
+    expect(plan.transitions).toContainEqual(
+      expect.objectContaining({ from: "approve", mode: "signal", on: "operator.approve" }),
+    );
+    const profile = plan.agentProfiles["triage-agent"];
+    expect(profile).toMatchObject({
+      capabilities: ["repository.read"],
+      command: ["factory-agent"],
+      model: "trusted-composition-default",
+    });
+    if (profile === undefined) return;
+    expect(plan.agentProfileDigests["triage-agent"]).toBe(profile.digest);
+    expect(profile.limits).toEqual({ maxOutputBytes: 1048576, timeoutMs: 900000 });
+    expect(() =>
+      execution.calls.requestAttempt.input.parse({
+        agentProfile: profile,
+        attemptId: "attempt",
+        correlationToken: "token",
+        inputArtifactDigests: [],
+        runId: "run",
+        skillDigests: plan.skillRevisions,
+        startedAt: "2026-01-01T00:00:00Z",
+        stepId: "reproduce",
+      }),
+    ).not.toThrow();
+    expect(() =>
+      runs.calls.startRun.input.parse({
+        agentProfileDigests: plan.agentProfileDigests,
+        definitionDigest: plan.definitionDigest,
+        factoryEventId: "event",
+        flowDigest: plan.flowDigest,
+        flowId: plan.flowId,
+        moduleManifestDigest: "manifest",
+        runId: "run",
+        skillDigests: plan.skillRevisions,
+        startedAt: "2026-01-01T00:00:00Z",
+        workflowVersionDigest: "workflow",
+      }),
+    ).not.toThrow();
+    expect(() =>
+      runs.calls.startRun.input.parse({
+        agentProfileDigest: profile.digest,
+        definitionDigest: plan.definitionDigest,
+      }),
+    ).toThrow();
   });
 
   test("[G10] definition module history keeps previous revisions immutable", () => {
@@ -394,6 +543,22 @@ describe("foundation", () => {
 
   test("[G13] invalid graph and permission cases fail at exact actionable paths", () => {
     const finalTransition = "      - from: publish\n        to: done\n        on: applied\n";
+    const wrongAgentOwner = replaceRequired(
+      factorySource,
+      "    capabilities: [repository.read]",
+      "    capabilities: [repository.write]",
+    );
+    const unownedCapability = replaceRequired(
+      factorySource,
+      "    description: Publish the verified outcome to the issue",
+      "    description: Publish the verified outcome to the issue\n  - id: unknown.capability\n    description: No trusted owner",
+    );
+    const deadEnd = replaceRequired(factorySource, finalTransition, "");
+    const incompleteGate = replaceRequired(
+      factorySource,
+      "accepted: [operator.approve, operator.reject]",
+      "accepted: [operator.approve, operator.reject, operator.cancel]",
+    );
     const cases = [
       replaceRequired(factorySource, "source: github-issues", "source: absent"),
       replaceRequired(factorySource, "on: reproduced", "on: cannot-reproduce"),
@@ -412,6 +577,10 @@ describe("foundation", () => {
         "capabilities: [repository.write, issue.comment]",
         "capabilities: [repository.read]",
       ),
+      wrongAgentOwner,
+      unownedCapability,
+      deadEnd,
+      incompleteGate,
       replaceRequired(factorySource, "version: 1", "version: 1\nunknownRootKey: true"),
       replaceRequired(
         factorySource,
@@ -429,6 +598,10 @@ describe("foundation", () => {
         `${finalTransition}      - from: done\n        to: done\n        on: again\n`,
       ),
     ];
+    expect(diagnosticFor(wrongAgentOwner)?.code).toBe("invalid_capability_owner");
+    expect(diagnosticFor(unownedCapability)?.code).toBe("undeclared_capability_owner");
+    expect(diagnosticFor(deadEnd)?.code).toBe("dead_end_state");
+    expect(diagnosticFor(incompleteGate)?.code).toBe("incomplete_gate");
     for (const source of cases) {
       const diagnostic = diagnosticFor(source);
       expect(diagnostic?.path).toMatch(/^\$(?:\.|\[)/);
@@ -468,6 +641,80 @@ describe("foundation", () => {
         module.calls.every((call) => call.errors.length > 0 || call.guarantees.length > 0),
       ),
     ).toBe(true);
+    const result = {
+      data: { confidence: 1 },
+      outcome: "reproduced",
+      outputArtifactDigests: ["artifact"],
+      summary: "reproduced",
+    };
+    const completedAttempt = {
+      agentProfileDigest: "profile",
+      attemptId: "attempt",
+      correlationToken: "token",
+      finishedAt: "2026-01-01T00:01:00Z",
+      outcome: "succeeded" as const,
+      result,
+      runId: "run",
+      startedAt: "2026-01-01T00:00:00Z",
+      stepId: "reproduce",
+    };
+    expect(attemptFinished.parse(completedAttempt).result.outcome).toBe("reproduced");
+    expect(() =>
+      execution.events.attemptFinishedV1.payload.parse({
+        ...completedAttempt,
+        outcome: "pending",
+      }),
+    ).toThrow();
+    expect(() =>
+      execution.events.attemptFinishedV1.payload.parse({
+        ...completedAttempt,
+        finishedAt: undefined,
+      }),
+    ).toThrow();
+    const completedEffect = {
+      effectId: "effect",
+      externalRevision: "revision",
+      finishedAt: "2026-01-01T00:01:00Z",
+      idempotencyKey: "key",
+      outcome: "applied" as const,
+      recordedAt: "2026-01-01T00:01:00Z",
+      runId: "run",
+    };
+    expect(effectFinished.parse(completedEffect).outcome).toBe("applied");
+    expect(() =>
+      effects.events.effectFinishedV1.payload.parse({ ...completedEffect, outcome: "pending" }),
+    ).toThrow();
+    expect(() =>
+      effects.events.effectFinishedV1.payload.parse({
+        ...completedEffect,
+        finishedAt: undefined,
+      }),
+    ).toThrow();
+    const completedRun = {
+      agentProfileDigests: { triage: "profile" },
+      definitionDigest: "definition",
+      factoryEventId: "event",
+      finishedAt: "2026-01-01T00:01:00Z",
+      flowDigest: "flow",
+      flowId: "triage",
+      moduleManifestDigest: "manifest",
+      runId: "run",
+      skillDigests: {},
+      startedAt: "2026-01-01T00:00:00Z",
+      stateId: "done",
+      status: "succeeded" as const,
+      workflowVersionDigest: "workflow",
+    };
+    expect(runFinished.parse(completedRun).status).toBe("succeeded");
+    expect(() =>
+      runs.events.runFinishedV1.payload.parse({ ...completedRun, status: "running" }),
+    ).toThrow();
+    expect(() =>
+      runs.events.runFinishedV1.payload.parse({
+        ...completedRun,
+        finishedAt: undefined,
+      }),
+    ).toThrow();
   });
 
   test("[G16] validate fails invalid input and plan is a read-only deterministic command", async () => {
@@ -504,22 +751,31 @@ describe("foundation", () => {
     ).toBe(200);
     expect(github.requests).toHaveLength(1);
 
+    const profile =
+      compileFactoryDefinition(factorySource).plans["issue-triage"]?.agentProfiles["triage-agent"];
+    expect(profile).toBeDefined();
+    if (profile === undefined) return;
     const agent = new FakeAgentRuntime({
-      exitCode: 0,
-      outputArtifactDigests: ["out"],
-      summary: "verified",
+      result: {
+        data: { confidence: 0.95 },
+        outcome: "verified",
+        outputArtifactDigests: ["out"],
+        summary: "verified",
+      },
+      status: "succeeded",
     });
-    expect(
-      (
-        await agent.execute({
-          agentProfileDigest: "profile",
-          attemptId: "attempt",
-          inputArtifactDigests: [],
-          instructions: "verify",
-          skillDigests: {},
-        })
-      ).summary,
-    ).toBe("verified");
+    const agentResult = await agent.execute({
+      agentProfile: profile,
+      attemptId: "attempt",
+      inputArtifactDigests: [],
+      skillDigests: {},
+    });
+    expect(agentResult.result.outcome).toBe("verified");
+    expect(agent.requests[0]?.agentProfile).toMatchObject({
+      capabilities: ["repository.read"],
+      command: ["factory-agent"],
+      model: "trusted-composition-default",
+    });
 
     const publisher = new FakeGitPublisher();
     const publication = {

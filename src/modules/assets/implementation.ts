@@ -1,4 +1,5 @@
 import { defineChimpbaseModuleImplementation } from "chimpbase/core";
+import { MODULE_RESOURCES } from "../../contracts/index.ts";
 
 import { assets } from "./interface.ts";
 
@@ -27,5 +28,5 @@ export const assetsImplementation = defineChimpbaseModuleImplementation({
       return unavailable("listRunArtifacts");
     },
   },
-  resources: {},
+  resources: MODULE_RESOURCES.assets,
 });
