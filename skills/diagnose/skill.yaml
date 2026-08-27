@@ -1,0 +1,16 @@
+id: diagnose
+version: 1
+compatibility: 1
+instruction: instructions.md
+includes: [guidance.md]
+inputArtifacts: [reproduction, result.json]
+resultSchema:
+  type: object
+  properties:
+    rootCause: { type: string }
+    evidence: { type: string }
+    confidence: { type: number }
+  required: [rootCause, evidence, confidence]
+  additionalProperties: false
+capabilities: [repository.read]
+customizable: false

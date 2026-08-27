@@ -409,11 +409,7 @@ describe("foundation", () => {
   test("[G8] YAML tags and skill-root escapes are rejected", () => {
     const tagged = replaceRequired(factorySource, "version: 1", "version: !include other.yaml");
     expect(diagnosticFor(tagged)?.code).toBe("invalid_yaml");
-    const escaped = replaceRequired(
-      factorySource,
-      "path: skills/reproduce.md",
-      "path: ../outside.md",
-    );
+    const escaped = replaceRequired(factorySource, "path: skills/reproduce", "path: ../outside.md");
     expect(diagnosticFor(escaped)).toMatchObject({
       code: "skill_root_escape",
       path: "$.skills[0].path",

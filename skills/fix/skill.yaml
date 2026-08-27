@@ -1,0 +1,16 @@
+id: fix
+version: 1
+compatibility: 1
+instruction: instructions.md
+includes: [guidance.md]
+inputArtifacts: [report.md, test-result, reproduction]
+resultSchema:
+  type: object
+  properties:
+    summary: { type: string }
+    changedFiles: { type: string-array }
+    tests: { type: string-array }
+  required: [summary, changedFiles, tests]
+  additionalProperties: false
+capabilities: [repository.read, repository.patch, process.test]
+customizable: false

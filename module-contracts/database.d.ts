@@ -3,8 +3,10 @@
 export interface AssetsDatabase {
   "artifact_blobs": Record<string, unknown>;
   "artifacts": Record<string, unknown>;
+  "artifacts_v2": Record<string, unknown>;
   "skill_bundles": Record<string, unknown>;
   "skill_revisions": Record<string, unknown>;
+  "skill_revisions_v2": Record<string, unknown>;
 }
 
 export interface DefinitionsDatabase {

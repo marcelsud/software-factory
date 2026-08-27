@@ -14,6 +14,8 @@ import {
   type ExecutionPlanV2,
   type FactoryEvent,
   isDataRecord,
+  type PinnedSkillBundle,
+  type PinnedSkillBundleV2,
   type Run,
   type RunV2,
   type RunV3,
@@ -2110,14 +2112,23 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
             } else {
               const capabilityPreset = capabilityPresetFor(step.capabilities);
               const selectedSkills = step.skill === undefined ? [] : [step.skill];
-              const selectedBundle =
-                step.skill === undefined
-                  ? null
-                  : await ctx.call(assets.calls.getSkillBundle, {
-                      digest: plan.skillRevisions[step.skill] ?? "",
-                    });
-              if (step.skill !== undefined && selectedBundle === null)
-                throw new Error(`invalid_revision_pin: skill bundle is missing for ${step.skill}`);
+              let selectedStrictBundle: PinnedSkillBundleV2 | null = null;
+              let selectedLegacyBundle: PinnedSkillBundle | null = null;
+              if (step.skill !== undefined) {
+                const digest = plan.skillRevisions[step.skill] ?? "";
+                try {
+                  selectedStrictBundle = await ctx.call(assets.calls.resolveSkillV2, {
+                    digest,
+                    id: step.skill,
+                  });
+                } catch {
+                  selectedLegacyBundle = await ctx.call(assets.calls.getSkillBundle, { digest });
+                  if (selectedLegacyBundle === null)
+                    throw new Error(
+                      `invalid_revision_pin: skill bundle is missing for ${step.skill}`,
+                    );
+                }
+              }
               const strictProfile = {
                 capabilities: [...CAPABILITY_PRESETS[capabilityPreset]],
                 capabilityPreset,
@@ -2141,7 +2152,7 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
                 model: profile.model,
                 skills: selectedSkills,
               };
-              await ctx.call(execution.calls.requestAttemptV2, {
+              const attemptRequest = {
                 agentProfile: strictProfile,
                 attemptId,
                 budget: {
@@ -2159,14 +2170,24 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
                 })),
                 repository: { id: engine.repository, sha: engine.repository_sha },
                 runId: row.run_id,
-                skills: selectedBundle === null ? [] : [selectedBundle],
                 startedAt: input.now,
                 stepId: step.id,
                 task: {
                   mediaType: "application/json",
                   payload: JSON.parse(engine.task_payload_json) as unknown,
                 },
-              });
+              };
+              if (selectedLegacyBundle !== null) {
+                await ctx.call(execution.calls.requestAttemptV2, {
+                  ...attemptRequest,
+                  skills: [selectedLegacyBundle],
+                });
+              } else {
+                await ctx.call(execution.calls.requestAttemptV3, {
+                  ...attemptRequest,
+                  skills: selectedStrictBundle === null ? [] : [selectedStrictBundle],
+                });
+              }
             }
           } catch (error) {
             row = await appendAudit(db, row, "infrastructure.failed", input.now, {

@@ -1,6 +1,9 @@
 import { defineChimpbaseApp } from "chimpbase/core";
 
-import { assetsImplementation } from "./src/modules/assets/implementation.ts";
+import {
+  type AssetsImplementationDependencies,
+  createAssetsImplementation,
+} from "./src/modules/assets/implementation.ts";
 import { definitionsImplementation } from "./src/modules/definitions/implementation.ts";
 import { effectsImplementation } from "./src/modules/effects/implementation.ts";
 import {
@@ -19,7 +22,8 @@ import {
   type RunsImplementationDependencies,
 } from "./src/modules/runs/implementation.ts";
 
-export type FactoryAppDependencies = ExecutionImplementationDependencies &
+export type FactoryAppDependencies = AssetsImplementationDependencies &
+  ExecutionImplementationDependencies &
   IntakeImplementationDependencies &
   RunsImplementationDependencies;
 export { FACTORY_RUNS_V2_WORKFLOW_DIGEST };
@@ -28,7 +32,7 @@ export function createSoftwareFactoryApp(dependencies?: FactoryAppDependencies) 
   return defineChimpbaseApp({
     project: { name: "software-factory" },
     modules: [
-      assetsImplementation,
+      createAssetsImplementation(dependencies),
       definitionsImplementation,
       effectsImplementation,
       createExecutionImplementation(dependencies),

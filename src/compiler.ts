@@ -519,11 +519,11 @@ function parseSkill(value: unknown, index: number, skillRoots: readonly string[]
   const skillPath = stringAt(record.path, `${path}.path`);
   const normalized = posix.normalize(skillPath.replaceAll("\\", "/"));
   const revision = stringAt(record.revision, `${path}.revision`);
-  if (!/^sha256:[a-f0-9]{64}$/.test(revision)) {
+  if (revision !== "unpinned" && !/^sha256:[a-f0-9]{64}$/.test(revision)) {
     fail(
       `${path}.revision`,
-      `skill revision ${JSON.stringify(revision)} is not a SHA-256 digest`,
-      "pin the skill as sha256:<64 lowercase hexadecimal characters>",
+      `skill revision ${JSON.stringify(revision)} is neither a SHA-256 digest nor the explicit unpinned marker`,
+      'pin the skill as sha256:<64 lowercase hexadecimal characters> or set exactly "unpinned"',
       "invalid_skill_revision",
     );
   }
@@ -1467,9 +1467,9 @@ function moduleCallsForV2(flow: FlowDefinition): string[] {
     "runs.startRunV3",
   ]);
   if (flow.triggers.length > 0) calls.add("intake.acceptSourceEventV2");
-  if (flow.steps.some((step) => step.kind === "agent")) calls.add("execution.requestAttemptV2");
+  if (flow.steps.some((step) => step.kind === "agent")) calls.add("execution.requestAttemptV3");
   if (flow.steps.some((step) => step.kind === "effect")) calls.add("effects.requestEffectV2");
-  if (flow.steps.some((step) => step.skill !== undefined)) calls.add("assets.resolveSkill");
+  if (flow.steps.some((step) => step.skill !== undefined)) calls.add("assets.resolveSkillV2");
   return [...calls].sort();
 }
 
@@ -1485,7 +1485,7 @@ function moduleEventsForV2(flow: FlowDefinition): string[] {
     "RunStateChanged.v3",
   ]);
   if (flow.steps.some((step) => step.kind === "agent")) {
-    events.add("ArtifactStored.v1");
+    events.add("ArtifactStored.v2");
     events.add("AttemptFinished.v1");
     events.add("StepRequested.v1");
     events.add("StepRequested.v2");
@@ -1495,7 +1495,7 @@ function moduleEventsForV2(flow: FlowDefinition): string[] {
     events.add("EffectRequested.v1");
     events.add("EffectRequested.v2");
   }
-  if (flow.steps.some((step) => step.skill !== undefined)) events.add("SkillRevisionPinned.v1");
+  if (flow.steps.some((step) => step.skill !== undefined)) events.add("SkillRevisionPinned.v2");
   return [...events].sort();
 }
 

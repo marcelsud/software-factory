@@ -7,8 +7,10 @@ import {
   type AgentFailure,
   type AgentMaterialization,
   type AgentRequest,
+  type AgentRequestV2,
   type AgentResult,
   parseAgentRequest,
+  parseAgentRequestV2,
   parseAgentResult,
 } from "../contracts/index.ts";
 import type { AgentRuntime } from "./seams.ts";
@@ -104,9 +106,11 @@ export class LocalProcessAgentRuntime implements AgentRuntime {
   }
 
   async run(rawRequest: AgentRequest, signal: AbortSignal): Promise<AgentResult> {
-    let request: AgentRequest;
+    let request: AgentRequest | AgentRequestV2;
     try {
-      request = parseAgentRequest(rawRequest);
+      request = rawRequest.skills.some((skill) => "resultSchema" in skill)
+        ? parseAgentRequestV2(rawRequest)
+        : parseAgentRequest(rawRequest);
       validateRequestPaths(request);
       validateEnvironment(request.agentProfile.environment);
     } catch (error) {

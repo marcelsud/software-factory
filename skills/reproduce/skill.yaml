@@ -1,0 +1,16 @@
+id: reproduce
+version: 1
+compatibility: 1
+instruction: instructions.md
+includes: [guidance.md]
+inputArtifacts: [metadata]
+resultSchema:
+  type: object
+  properties:
+    reproduced: { type: boolean }
+    evidence: { type: string }
+    reproductionArtifact: { type: string }
+  required: [reproduced, evidence]
+  additionalProperties: false
+capabilities: [repository.read]
+customizable: false

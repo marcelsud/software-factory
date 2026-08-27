@@ -3,6 +3,7 @@ import { v } from "chimpbase/runtime";
 
 import {
   agentRequest,
+  agentRequestV2,
   attemptFinished,
   attemptFinishedV2,
   pinnedAgentProfile,
@@ -34,6 +35,14 @@ const calls = {
     errors: ["module_unavailable", "attempt_exists", "invalid_pin"],
     guarantees: ["request is idempotent by attempt id and compares every immutable execution pin"],
   },
+  requestAttemptV3: {
+    input: agentRequestV2,
+    output: stepAttemptV3,
+    errors: ["module_unavailable", "attempt_exists", "invalid_pin"],
+    guarantees: [
+      "request is idempotent by attempt id and validates complete immutable skill and artifact pins",
+    ],
+  },
   cancelAttempt: {
     input: v.object({ attemptId: v.string(), cancelledAt: v.string() }),
     output: v.boolean(),
@@ -45,6 +54,12 @@ const calls = {
     output: v.enum(["v1", "v2"]).nullable(),
     errors: ["module_unavailable"],
     guarantees: ["returns the persisted request protocol; pre-migration attempts are v1"],
+  },
+  getAttemptProtocolV2: {
+    input: v.object({ attemptId: v.string() }),
+    output: v.enum(["v1", "v2", "v3"]).nullable(),
+    errors: ["module_unavailable"],
+    guarantees: ["returns the persisted strict request protocol including V3"],
   },
   getAttempt: {
     input: v.object({ attemptId: v.string() }),
@@ -69,6 +84,7 @@ const calls = {
 const events = {
   attemptQueuedV1: { name: "attemptQueued", payload: stepAttemptV2, version: 1 },
   attemptQueuedV2: { name: "attemptQueued", payload: agentRequest, version: 2 },
+  attemptQueuedV3: { name: "attemptQueued", payload: agentRequestV2, version: 3 },
   attemptFinishedV1: { name: "attemptFinished", payload: attemptFinished, version: 1 },
   attemptFinishedV2: { name: "attemptFinished", payload: attemptFinishedV2, version: 2 },
 } as const;

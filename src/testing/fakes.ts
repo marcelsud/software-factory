@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 
 import type {
   AgentRuntime,
-  ArtifactByteDriver,
   GitHubIssueCommentRecord,
   GitHubIssueRecord,
   GitHubListInput,
@@ -13,6 +12,9 @@ import type {
   GitPublication,
   GitPublisher,
 } from "../adapters/seams.ts";
+
+export { MemoryArtifactByteDriver } from "../adapters/artifact-byte-driver.ts";
+
 import type { AgentRequest, AgentResult } from "../contracts/index.ts";
 
 export interface FakeGitHubReadTransportScript {
@@ -179,32 +181,5 @@ export class FakeGitPublisher implements GitPublisher {
       publication.commitMessage,
     ].join("\0");
     return { revision: createHash("sha256").update(identity, "utf8").digest("hex") };
-  }
-}
-
-export class MemoryArtifactByteDriver implements ArtifactByteDriver {
-  readonly materialized = new Map<string, Uint8Array>();
-  readonly #bytes = new Map<string, Uint8Array>();
-
-  async get(digest: string): Promise<Uint8Array | null> {
-    const bytes = this.#bytes.get(digest);
-    return bytes === undefined ? null : bytes.slice();
-  }
-
-  async materialize(digest: string, destination: string): Promise<void> {
-    const bytes = this.#bytes.get(digest);
-    if (bytes === undefined) throw new Error(`artifact_not_found: ${digest}`);
-    this.materialized.set(destination, bytes.slice());
-  }
-
-  async put(digest: string, bytes: Uint8Array): Promise<void> {
-    const actual = createHash("sha256").update(bytes).digest("hex");
-    if (actual !== digest)
-      throw new Error(`digest_mismatch: expected ${digest}, received ${actual}`);
-    const existing = this.#bytes.get(digest);
-    if (existing !== undefined && !existing.every((byte, index) => byte === bytes[index])) {
-      throw new Error(`immutable_artifact_conflict: ${digest}`);
-    }
-    this.#bytes.set(digest, bytes.slice());
   }
 }

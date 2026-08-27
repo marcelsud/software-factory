@@ -7,6 +7,7 @@ import type { Kysely } from "kysely";
 import type { AgentRuntime } from "../../adapters/seams.ts";
 import {
   type AgentRequest,
+  type AgentRequestV2,
   type AgentResult,
   type AttemptFinished,
   type AttemptFinishedV2,
@@ -15,6 +16,7 @@ import {
   attemptFinishedV2,
   attemptOutcome,
   parseAgentRequest,
+  parseAgentRequestV2,
   parseAgentResult,
   type StepAttempt,
   type StepAttemptV2,
@@ -22,6 +24,7 @@ import {
   stepAttempt,
   stepAttemptV2,
   stepAttemptV3,
+  validateSkillResult,
 } from "../../contracts/index.ts";
 import {
   type ExecutionDatabase,
@@ -133,7 +136,8 @@ async function attemptFromRowV3(
     correlationToken: row.correlation_token,
     ...(row.finished_at === null ? {} : { finishedAt: row.finished_at }),
     outcome: row.outcome,
-    ...(resultRow === undefined || requestRecord?.protocol_version !== 2
+    ...(resultRow === undefined ||
+    (requestRecord?.protocol_version !== 2 && requestRecord?.protocol_version !== 3)
       ? {}
       : { result: parseAgentResult(JSON.parse(resultRow.result_json)) }),
     runId: row.run_id,
@@ -362,7 +366,7 @@ export function createExecutionImplementation(
       payload: {
         attemptId: string;
         outcome?: AttemptOutcome;
-        protocolVersion?: 1 | 2;
+        protocolVersion?: 1 | 2 | 3;
       },
     ) => {
       const db = ctx.db.kysely<ExecutionDatabase>();
@@ -381,7 +385,7 @@ export function createExecutionImplementation(
         .selectAll()
         .where("attempt_id", "=", payload.attemptId)
         .executeTakeFirst();
-      if (payload.protocolVersion !== 2) {
+      if (payload.protocolVersion !== 2 && payload.protocolVersion !== 3) {
         await db
           .updateTable("workspaces")
           .set({ status: "ready" })
@@ -396,11 +400,14 @@ export function createExecutionImplementation(
         return;
       }
 
-      let request: AgentRequest;
+      let request: AgentRequest | AgentRequestV2;
       let result: AgentResult;
       try {
         if (requestRecord === undefined) throw new Error("invalid_pin: attempt request is missing");
-        request = parseAgentRequest(JSON.parse(requestRecord.request_json));
+        request =
+          payload.protocolVersion === 3
+            ? parseAgentRequestV2(JSON.parse(requestRecord.request_json))
+            : parseAgentRequest(JSON.parse(requestRecord.request_json));
         const cancellation = await db
           .selectFrom("attempt_cancellations")
           .select("cancelled_at")
@@ -425,9 +432,17 @@ export function createExecutionImplementation(
             artifactsWithBytes.push(materialization);
             continue;
           }
-          const envelope = await ctx.call(assets.calls.getArtifact, {
-            digest: materialization.digest,
-          });
+          const envelope =
+            payload.protocolVersion === 3
+              ? await ctx.call(assets.calls.materializeForAttemptV2, {
+                  allowedDigests: request.inputArtifacts
+                    .filter((candidate) => candidate.kind === "artifact")
+                    .map((candidate) => candidate.digest),
+                  attemptId: request.attemptId,
+                  digest: materialization.digest,
+                  runId: request.runId,
+                })
+              : await ctx.call(assets.calls.getArtifact, { digest: materialization.digest });
           if (envelope === null) throw new Error(`artifact_not_found: ${materialization.digest}`);
           if (envelope.artifact.runId !== request.runId)
             throw new Error(`artifact_run_mismatch: ${materialization.digest}`);
@@ -447,6 +462,16 @@ export function createExecutionImplementation(
           activeControllers.delete(request.attemptId);
         }
         result = parseAgentResult(returned);
+        if (
+          payload.protocolVersion === 3 &&
+          result.outcome !== undefined &&
+          request.skills.length === 1
+        ) {
+          const selectedSkill = request.skills[0] as AgentRequestV2["skills"][number] | undefined;
+          if (selectedSkill === undefined)
+            throw new Error("invalid_pin: selected skill is missing");
+          validateSkillResult(selectedSkill.resultSchema, result.outcome.data);
+        }
         if (result.attemptId !== row.attempt_id)
           throw new Error("agent result attempt id does not match its lease");
         const encoded = Buffer.byteLength(JSON.stringify(result));
@@ -456,22 +481,69 @@ export function createExecutionImplementation(
         );
         if (encoded > bound) throw new Error("agent result exceeded the committed result bound");
         const outputArtifactDigests: string[] = [];
+        const storeOutput = async (
+          kind: "patch" | "report.md" | "result.json",
+          name: string,
+          mediaType: string,
+          bytes: Uint8Array,
+        ) => {
+          const digest = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+          await ctx.call(assets.calls.storeArtifactV2, {
+            artifact: {
+              attemptId: request.attemptId,
+              classification: "private",
+              createdAt: result.timing.finishedAt,
+              digest,
+              kind,
+              mediaType,
+              name,
+              redaction: "raw-private",
+              retention: "retained",
+              runId: request.runId,
+              size: bytes.byteLength,
+            },
+            contentBase64: Buffer.from(bytes).toString("base64"),
+          });
+          outputArtifactDigests.push(digest);
+        };
         for (const file of result.changedFiles) {
           if (file.contentBase64 === undefined)
             throw new Error(`adapter output bytes missing for ${file.path}`);
-          const digest = `sha256:${file.digest.replace(/^sha256:/u, "")}`;
-          await ctx.call(assets.calls.putArtifact, {
-            artifact: {
-              classification: "private",
-              digest,
-              mediaType: "application/octet-stream",
-              name: file.path,
-              runId: request.runId,
-              size: file.size,
-            },
-            contentBase64: file.contentBase64,
-          });
-          outputArtifactDigests.push(digest);
+          const bytes = Buffer.from(file.contentBase64, "base64");
+          const claimed = `sha256:${file.digest.replace(/^sha256:/u, "")}`;
+          const actual = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+          if (claimed !== actual || file.size !== bytes.byteLength)
+            throw new Error(`digest_mismatch: adapter output ${file.path}`);
+          if (payload.protocolVersion === 3) {
+            await storeOutput("patch", file.path, "application/octet-stream", bytes);
+          } else {
+            await ctx.call(assets.calls.putArtifact, {
+              artifact: {
+                classification: "private",
+                digest: claimed,
+                mediaType: "application/octet-stream",
+                name: file.path,
+                runId: request.runId,
+                size: file.size,
+              },
+              contentBase64: file.contentBase64,
+            });
+            outputArtifactDigests.push(claimed);
+          }
+        }
+        if (payload.protocolVersion === 3 && result.outcome !== undefined) {
+          await storeOutput(
+            "result.json",
+            "result.json",
+            "application/json",
+            Buffer.from(JSON.stringify(result.outcome.data), "utf8"),
+          );
+          await storeOutput(
+            "report.md",
+            "report.md",
+            "text/markdown; charset=utf-8",
+            Buffer.from(result.outcome.summary, "utf8"),
+          );
         }
         result = {
           ...result,
@@ -493,7 +565,9 @@ export function createExecutionImplementation(
         const fallbackRequest =
           requestRecord === undefined
             ? ({ attemptId: row.attempt_id, startedAt: row.started_at } as AgentRequest)
-            : parseAgentRequest(JSON.parse(requestRecord.request_json));
+            : payload.protocolVersion === 3
+              ? parseAgentRequestV2(JSON.parse(requestRecord.request_json))
+              : parseAgentRequest(JSON.parse(requestRecord.request_json));
         const errorMessage = error instanceof Error ? error.message : String(error);
         result = infrastructureResult(
           fallbackRequest,
@@ -555,7 +629,26 @@ export function createExecutionImplementation(
           .select("protocol_version")
           .where("attempt_id", "=", input.attemptId)
           .executeTakeFirst();
-        return request?.protocol_version === 2 ? "v2" : "v1";
+        return request?.protocol_version === 2 || request?.protocol_version === 3 ? "v2" : "v1";
+      },
+      async getAttemptProtocolV2(ctx, input) {
+        const db = ctx.db.kysely() as unknown as Kysely<ExecutionDatabase>;
+        const attempt = await db
+          .selectFrom("step_attempts")
+          .select("attempt_id")
+          .where("attempt_id", "=", input.attemptId)
+          .executeTakeFirst();
+        if (attempt === undefined) return null;
+        const request = await db
+          .selectFrom("attempt_requests")
+          .select("protocol_version")
+          .where("attempt_id", "=", input.attemptId)
+          .executeTakeFirst();
+        return request?.protocol_version === 3
+          ? "v3"
+          : request?.protocol_version === 2
+            ? "v2"
+            : "v1";
       },
       async requestAttempt(ctx, input) {
         const db = ctx.db.kysely() as unknown as Kysely<ExecutionDatabase>;
@@ -625,6 +718,38 @@ export function createExecutionImplementation(
         const attempt = await attemptFromRowV3(db, row);
         await ctx.enqueue("agent-workers", { attemptId: input.attemptId, protocolVersion: 2 });
         ctx.publish(execution.events.attemptQueuedV2, input);
+        ctx.publish(execution.events.attemptQueuedV1, stepAttemptV2.parse(attempt));
+        return attempt;
+      },
+      async requestAttemptV3(ctx, rawInput) {
+        const input = parseAgentRequestV2(rawInput);
+        const db = ctx.db.kysely() as unknown as Kysely<ExecutionDatabase>;
+        const requestJson = canonicalJson(input);
+        const existing = await db
+          .selectFrom("step_attempts")
+          .selectAll()
+          .where("attempt_id", "=", input.attemptId)
+          .executeTakeFirst();
+        if (existing !== undefined) {
+          const existingRequest = await db
+            .selectFrom("attempt_requests")
+            .selectAll()
+            .where("attempt_id", "=", input.attemptId)
+            .executeTakeFirst();
+          if (
+            existingRequest?.protocol_version !== 3 ||
+            existingRequest.request_json !== requestJson
+          )
+            throw new Error("attempt_exists: immutable attempt identity has different pins");
+          return await attemptFromRowV3(db, existing);
+        }
+        const row = strictRow(input);
+        await db.insertInto("step_attempts").values(row).execute();
+        await insertRequest(db, input.attemptId, 3, requestJson);
+        await insertWorkspace(db, input.attemptId, input.startedAt);
+        const attempt = await attemptFromRowV3(db, row);
+        await ctx.enqueue("agent-workers", { attemptId: input.attemptId, protocolVersion: 3 });
+        ctx.publish(execution.events.attemptQueuedV3, input);
         ctx.publish(execution.events.attemptQueuedV1, stepAttemptV2.parse(attempt));
         return attempt;
       },

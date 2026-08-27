@@ -221,6 +221,54 @@ export const artifact = v.object({
   size: v.integer(),
 });
 
+export const artifactKind = v.enum([
+  "result.json",
+  "report.md",
+  "log",
+  "patch",
+  "test-result",
+  "reproduction",
+  "metadata",
+]);
+
+export const artifactV2 = v.object({
+  attemptId: identifier.optional(),
+  classification: v.enum(["public", "private"]),
+  createdAt: isoTimestamp,
+  digest,
+  kind: artifactKind,
+  mediaType: v.string(),
+  name: v.string(),
+  redaction: v.enum(["not-required", "raw-private", "redacted-public"]),
+  retention: v.enum(["ephemeral", "retained"]),
+  runId: identifier,
+  size: v.integer(),
+  sourceDigest: digest.optional(),
+});
+
+export const skillResultProperty = v.object({
+  type: v.enum(["boolean", "number", "string", "string-array"]),
+});
+
+export const skillResultSchema = v.object({
+  additionalProperties: v.boolean(),
+  properties: v.record(skillResultProperty),
+  required: v.string().array(),
+  type: v.enum(["object"]),
+});
+
+export const skillRevisionV2 = v.object({
+  capabilities: v.string().array(),
+  compatibility: v.integer(),
+  customizable: v.boolean(),
+  digest,
+  id: identifier,
+  inputArtifactKinds: artifactKind.array(),
+  resultSchema: skillResultSchema,
+  source: v.string(),
+  version: v.integer(),
+});
+
 export const stepResultDocument = v.object({
   data: v.record(v.unknown()),
   outcome: v.string(),
@@ -250,6 +298,20 @@ export const pinnedSkillBundle = v.object({
   files: v.array(agentMaterialization),
   id: identifier,
   instructions: v.string(),
+});
+
+export const pinnedSkillBundleV2 = v.object({
+  capabilities: v.string().array(),
+  compatibility: v.integer(),
+  customizable: v.boolean(),
+  digest,
+  files: v.array(agentMaterialization),
+  id: identifier,
+  inputArtifactKinds: artifactKind.array(),
+  instructions: v.string(),
+  instructionPath: v.string(),
+  resultSchema: skillResultSchema,
+  version: v.integer(),
 });
 
 export const strictAgentProfile = v.object({
@@ -293,6 +355,31 @@ export const agentRequest = v.object({
   }),
   runId: identifier,
   skills: v.array(pinnedSkillBundle),
+  startedAt: isoTimestamp,
+  stepId: identifier,
+  task: v.object({
+    mediaType: v.string(),
+    payload: v.unknown(),
+  }),
+});
+
+export const agentRequestV2 = v.object({
+  agentProfile: strictAgentProfile,
+  attemptId: identifier,
+  budget: v.object({
+    maxDurationMs: v.integer(),
+    maxInputBytes: v.integer(),
+    maxOutputBytes: v.integer(),
+  }),
+  correlationToken: identifier,
+  declaredOutputPaths: v.array(v.string()),
+  inputArtifacts: v.array(agentMaterialization),
+  repository: v.object({
+    id: identifier,
+    sha: digest,
+  }),
+  runId: identifier,
+  skills: v.array(pinnedSkillBundleV2),
   startedAt: isoTimestamp,
   stepId: identifier,
   task: v.object({
@@ -434,6 +521,30 @@ export function parseAgentRequest(value: unknown): Infer<typeof agentRequest> {
     request.budget.maxOutputBytes <= 0
   )
     throw new Error("agent request limits and command must be non-empty and positive");
+  return request;
+}
+
+export function parseAgentRequestV2(value: unknown): Infer<typeof agentRequestV2> {
+  const request = agentRequestV2.parse(value);
+  parseAgentRequest({
+    ...request,
+    skills: request.skills.map(({ digest: bundleDigest, files, id, instructions }) => ({
+      digest: `strict:${bundleDigest}`,
+      files,
+      id,
+      instructions,
+    })),
+  });
+  for (const bundle of request.skills) {
+    const canonical = JSON.stringify(
+      [...bundle.files]
+        .sort((left, right) => left.path.localeCompare(right.path))
+        .map(({ contentBase64, path }) => [path, contentBase64 ?? ""]),
+    );
+    const actual = `sha256:${createHash("sha256").update(canonical).digest("hex")}`;
+    if (actual !== bundle.digest)
+      throw new Error(`agent skill bundle digest mismatch: ${bundle.id}`);
+  }
   return request;
 }
 
@@ -751,6 +862,10 @@ export const eventRecord = v.object({
   payload: v.unknown(),
 });
 export type PinnedSkillBundle = Infer<typeof pinnedSkillBundle>;
+export type PinnedSkillBundleV2 = Infer<typeof pinnedSkillBundleV2>;
+export type SkillResultSchema = Infer<typeof skillResultSchema>;
+export type SkillRevisionV2 = Infer<typeof skillRevisionV2>;
+export type ArtifactV2 = Infer<typeof artifactV2>;
 
 export type DefinitionRevision = Infer<typeof definitionRevision>;
 export type ExecutionPlan = Infer<typeof executionPlan>;
@@ -760,6 +875,7 @@ export type FactoryEvent = Infer<typeof factoryEvent>;
 export type Artifact = Infer<typeof artifact>;
 export type StepResultDocument = Infer<typeof stepResultDocument>;
 export type AgentRequest = Infer<typeof agentRequest>;
+export type AgentRequestV2 = Infer<typeof agentRequestV2>;
 export type AgentResult = Infer<typeof agentResult>;
 export type AgentFailure = Infer<typeof agentFailure>;
 export type AgentMaterialization = Infer<typeof agentMaterialization>;
