@@ -7,6 +7,7 @@ import {
   CAPABILITY_OWNERS,
   type DefinitionRevision,
   type ExecutionPlan,
+  type ExecutionPlanV2,
   isDataRecord,
   type PinnedAgentProfile,
 } from "./contracts/index.ts";
@@ -64,11 +65,23 @@ export interface AgentProfileDefinition {
   readonly skills: readonly string[];
 }
 
+export interface ResultContractDefinition {
+  readonly dataTypes: Readonly<Record<string, "boolean" | "number" | "string" | "unknown">>;
+  readonly outcome: string;
+  readonly requiredArtifactCount: number;
+  readonly requiredData: readonly string[];
+}
+
 export interface StepDefinition {
   readonly agentProfile?: string;
   readonly capabilities: readonly string[];
+  readonly deterministicOutcome?: string;
+  readonly effectCapability?: string;
+  readonly effectPayloadDigest?: string;
+  readonly effectTarget?: string;
   readonly id: string;
-  readonly kind: "agent" | "effect";
+  readonly kind: "agent" | "deterministic" | "effect";
+  readonly resultContracts: readonly ResultContractDefinition[];
   readonly retry: { readonly backoffMs: number; readonly maxAttempts: number };
   readonly skill?: string;
 }
@@ -77,6 +90,11 @@ export interface GateDefinition {
   readonly accepted: readonly string[];
   readonly id: string;
   readonly kind: "approval" | "event" | "signal";
+  readonly requiredArtifactCount: number;
+  readonly requiredArtifactSteps: readonly string[];
+  readonly requiredOutcome?: string;
+  readonly timeoutMs?: number;
+  readonly timeoutOutcome?: string;
 }
 
 export interface StateDefinition {
@@ -84,6 +102,15 @@ export interface StateDefinition {
   readonly id: string;
   readonly step?: string;
   readonly terminal?: "success" | "failure";
+  readonly terminalOutcome?:
+    | "not_actionable"
+    | "needs_reproduction"
+    | "unable_to_reproduce"
+    | "unable_to_fix"
+    | "failed"
+    | "waiting"
+    | "completed"
+    | "cancelled";
 }
 
 export interface TransitionDefinition {
@@ -93,7 +120,15 @@ export interface TransitionDefinition {
   readonly to: string;
 }
 
+export interface TriggerPredicateDefinition {
+  readonly field: string;
+  readonly operator: "equals" | "not_equals" | "in" | "not_in" | "exists";
+  readonly value?: string;
+  readonly values?: readonly string[];
+}
+
 export interface FlowDefinition {
+  readonly artifactHandoffs: readonly { readonly fromStep: string; readonly toStep: string }[];
   readonly concurrency: { readonly key: string; readonly limit: number };
   readonly gates: readonly GateDefinition[];
   readonly id: string;
@@ -101,7 +136,10 @@ export interface FlowDefinition {
   readonly states: readonly StateDefinition[];
   readonly steps: readonly StepDefinition[];
   readonly transitions: readonly TransitionDefinition[];
-  readonly triggers: readonly { readonly source: string }[];
+  readonly triggers: readonly {
+    readonly predicates: readonly TriggerPredicateDefinition[];
+    readonly source: string;
+  }[];
 }
 
 export interface FactoryDefinition {
@@ -120,8 +158,9 @@ export interface FactoryDefinition {
 
 export interface CompiledDefinition {
   readonly definition: FactoryDefinition;
-  readonly revision: DefinitionRevision;
   readonly plans: Readonly<Record<string, ExecutionPlan>>;
+  readonly plansV2: Readonly<Record<string, ExecutionPlanV2>>;
+  readonly revision: DefinitionRevision;
 }
 
 type DataRecord = Record<string, unknown>;
@@ -207,7 +246,11 @@ export function compileFactoryDefinition(
         events: moduleEventsFor(flow),
         flowDigest: flowDigests[flow.id] ?? "",
         flowId: flow.id,
-        gates: flow.gates.map((gate) => ({ ...gate, accepted: [...gate.accepted] })),
+        gates: flow.gates.map((gate) => ({
+          accepted: [...gate.accepted],
+          id: gate.id,
+          kind: gate.kind,
+        })),
         initialState: flow.initialState,
         normalizedJson: canonicalJson(flow),
         skillRevisions: Object.fromEntries(
@@ -215,15 +258,101 @@ export function compileFactoryDefinition(
             .filter((skill) => flow.steps.some((step) => step.skill === skill.id))
             .map((skill) => [skill.id, skill.revision]),
         ),
-        states: flow.states.map((state) => ({ ...state })),
+        states: flow.states.map((state) => ({
+          ...(state.gate === undefined ? {} : { gate: state.gate }),
+          id: state.id,
+          ...(state.step === undefined ? {} : { step: state.step }),
+          ...(state.terminal === undefined ? {} : { terminal: state.terminal }),
+        })),
         steps: flow.steps.map((step) => ({
-          ...step,
+          ...(step.agentProfile === undefined ? {} : { agentProfile: step.agentProfile }),
           capabilities: [...step.capabilities],
+          id: step.id,
+          kind: step.kind === "deterministic" ? "agent" : step.kind,
           retry: { ...step.retry },
+          ...(step.skill === undefined ? {} : { skill: step.skill }),
         })),
         transitions: flow.transitions.map((transition) => ({ ...transition })),
       });
       return [flow.id, plan];
+    }),
+  );
+  const plansV2 = Object.fromEntries(
+    definition.flows.map((flow) => {
+      const legacy = plans[flow.id];
+      if (legacy === undefined) throw new Error(`compiled plan missing for ${flow.id}`);
+      return [
+        flow.id,
+        deepFreeze({
+          ...legacy,
+          calls: moduleCallsForV2(flow),
+          events: moduleEventsForV2(flow),
+          artifactHandoffs: flow.artifactHandoffs.map((edge) => ({ ...edge })),
+          gates: flow.gates.map((gate) => ({
+            accepted: [...gate.accepted],
+            id: gate.id,
+            kind: gate.kind,
+            requiredArtifactCount: gate.requiredArtifactCount,
+            requiredArtifactSteps: [...gate.requiredArtifactSteps],
+            ...(gate.requiredOutcome === undefined
+              ? {}
+              : { requiredOutcome: gate.requiredOutcome }),
+            ...(gate.timeoutMs === undefined ? {} : { timeoutMs: gate.timeoutMs }),
+            ...(gate.timeoutOutcome === undefined ? {} : { timeoutOutcome: gate.timeoutOutcome }),
+          })),
+          states: flow.states.map((state) => ({
+            ...(state.gate === undefined ? {} : { gate: state.gate }),
+            id: state.id,
+            ...(state.step === undefined ? {} : { step: state.step }),
+            ...(state.terminal === undefined ? {} : { terminal: state.terminal }),
+            ...(state.terminalOutcome === undefined
+              ? {}
+              : { terminalOutcome: state.terminalOutcome }),
+          })),
+          steps: flow.steps.map((step) => ({
+            ...(step.agentProfile === undefined ? {} : { agentProfile: step.agentProfile }),
+            capabilities: [...step.capabilities],
+            ...(step.deterministicOutcome === undefined
+              ? {}
+              : { deterministicOutcome: step.deterministicOutcome }),
+            ...(step.effectCapability === undefined
+              ? {}
+              : { effectCapability: step.effectCapability }),
+            ...(step.effectPayloadDigest === undefined
+              ? {}
+              : { effectPayloadDigest: step.effectPayloadDigest }),
+            ...(step.effectTarget === undefined ? {} : { effectTarget: step.effectTarget }),
+            id: step.id,
+            kind: step.kind,
+            resultContracts: step.resultContracts.map((contract) => ({
+              dataTypes: { ...contract.dataTypes },
+              outcome: contract.outcome,
+              requiredArtifactCount: contract.requiredArtifactCount,
+              requiredData: [...contract.requiredData],
+            })),
+            retry: { ...step.retry },
+            ...(step.skill === undefined ? {} : { skill: step.skill }),
+          })),
+          triggers: flow.triggers.map((trigger) => {
+            const source = definition.sources.find((candidate) => candidate.id === trigger.source);
+            if (source === undefined)
+              throw new Error(`compiled source missing for ${trigger.source}`);
+            return {
+              predicates: trigger.predicates.map((predicate) => ({
+                field: predicate.field,
+                operator: predicate.operator,
+                ...(predicate.value === undefined ? {} : { value: predicate.value }),
+                ...(predicate.values === undefined ? {} : { values: [...predicate.values] }),
+              })),
+              source: trigger.source,
+              sourceId:
+                source.type === "github" && source.repository !== undefined
+                  ? `github:${source.repository}`
+                  : source.id,
+            };
+          }),
+        }),
+      ];
     }),
   );
   const revision = deepFreeze({
@@ -232,7 +361,12 @@ export function compileFactoryDefinition(
     normalizedJson,
     sourceName,
   });
-  return Object.freeze({ definition, plans: deepFreeze(plans), revision });
+  return Object.freeze({
+    definition,
+    plans: deepFreeze(plans),
+    plansV2: deepFreeze(plansV2),
+    revision,
+  });
 }
 
 export function canonicalJson(value: unknown): string {
@@ -465,6 +599,7 @@ function parseFlow(value: unknown, index: number): FlowDefinition {
     "gates",
     "states",
     "transitions",
+    "artifactHandoffs",
   ]);
   const concurrencyRecord = objectAt(record.concurrency, `${path}.concurrency`, ["key", "limit"]);
   const limit = integerAt(concurrencyRecord.limit, `${path}.concurrency.limit`);
@@ -476,6 +611,16 @@ function parseFlow(value: unknown, index: number): FlowDefinition {
       "invalid_value",
     );
   return Object.freeze({
+    artifactHandoffs: (record.artifactHandoffs === undefined
+      ? []
+      : listAt(record.artifactHandoffs, `${path}.artifactHandoffs`).map((entry, child) => {
+          const edgePath = `${path}.artifactHandoffs[${child}]`;
+          const edge = objectAt(entry, edgePath, ["fromStep", "toStep"]);
+          return Object.freeze({
+            fromStep: idAt(edge.fromStep, `${edgePath}.fromStep`),
+            toStep: idAt(edge.toStep, `${edgePath}.toStep`),
+          });
+        })) as readonly { readonly fromStep: string; readonly toStep: string }[],
     concurrency: Object.freeze({
       key: stringAt(concurrencyRecord.key, `${path}.concurrency.key`),
       limit,
@@ -496,8 +641,68 @@ function parseFlow(value: unknown, index: number): FlowDefinition {
     ),
     triggers: listAt(record.triggers, `${path}.triggers`).map((entry, child) => {
       const triggerPath = `${path}.triggers[${child}]`;
-      const trigger = objectAt(entry, triggerPath, ["source"]);
-      return Object.freeze({ source: idAt(trigger.source, `${triggerPath}.source`) });
+      const trigger = objectAt(entry, triggerPath, ["source", "predicates"]);
+      const predicates =
+        trigger.predicates === undefined
+          ? []
+          : listAt(trigger.predicates, `${triggerPath}.predicates`).map((raw, predicateIndex) => {
+              const predicatePath = `${triggerPath}.predicates[${predicateIndex}]`;
+              const predicate = objectAt(raw, predicatePath, [
+                "field",
+                "operator",
+                "value",
+                "values",
+              ]);
+              const field = stringAt(predicate.field, `${predicatePath}.field`);
+              if (
+                !/^(actor|eventType|repository|sourceId|sourceRevision|subject|payload(?:\.[A-Za-z0-9_-]+)*)$/.test(
+                  field,
+                )
+              ) {
+                fail(
+                  `${predicatePath}.field`,
+                  `unsupported predicate field ${JSON.stringify(field)}`,
+                  "use a declared event field or a dotted payload field",
+                  "invalid_trigger_predicate",
+                );
+              }
+              const operator = enumAt(predicate.operator, `${predicatePath}.operator`, [
+                "equals",
+                "not_equals",
+                "in",
+                "not_in",
+                "exists",
+              ] as const);
+              const value = optionalString(predicate.value, `${predicatePath}.value`);
+              const values =
+                predicate.values === undefined
+                  ? undefined
+                  : stringListAt(predicate.values, `${predicatePath}.values`);
+              if (
+                (operator === "exists" && (value !== undefined || values !== undefined)) ||
+                (["equals", "not_equals"].includes(operator) &&
+                  (value === undefined || values !== undefined)) ||
+                (["in", "not_in"].includes(operator) &&
+                  (values === undefined || values.length === 0 || value !== undefined))
+              ) {
+                fail(
+                  predicatePath,
+                  `operator ${operator} has an invalid value shape`,
+                  "use value for equals/not_equals, values for in/not_in, and neither for exists",
+                  "invalid_trigger_predicate",
+                );
+              }
+              return Object.freeze({
+                field,
+                operator,
+                ...(value === undefined ? {} : { value }),
+                ...(values === undefined ? {} : { values: Object.freeze(values) }),
+              });
+            });
+      return Object.freeze({
+        predicates: Object.freeze(predicates),
+        source: idAt(trigger.source, `${triggerPath}.source`),
+      });
     }),
   });
 }
@@ -511,8 +716,13 @@ function parseStep(value: unknown, flowIndex: number, index: number): StepDefini
     "skill",
     "capabilities",
     "retry",
+    "results",
+    "outcome",
+    "effectCapability",
+    "effectTarget",
+    "effectPayloadDigest",
   ]);
-  const kind = enumAt(record.kind, `${path}.kind`, ["agent", "effect"] as const);
+  const kind = enumAt(record.kind, `${path}.kind`, ["agent", "deterministic", "effect"] as const);
   const retryRecord = objectAt(record.retry, `${path}.retry`, ["maxAttempts", "backoffMs"]);
   const maxAttempts = integerAt(retryRecord.maxAttempts, `${path}.retry.maxAttempts`);
   const backoffMs = integerAt(retryRecord.backoffMs, `${path}.retry.backoffMs`);
@@ -532,6 +742,97 @@ function parseStep(value: unknown, flowIndex: number, index: number): StepDefini
     );
   const agentProfile = optionalString(record.agentProfile, `${path}.agentProfile`);
   const skill = optionalString(record.skill, `${path}.skill`);
+  const deterministicOutcome = optionalString(record.outcome, `${path}.outcome`);
+  const effectCapability = optionalString(record.effectCapability, `${path}.effectCapability`);
+  const effectTarget = optionalString(record.effectTarget, `${path}.effectTarget`);
+  const effectPayloadDigest = optionalString(
+    record.effectPayloadDigest,
+    `${path}.effectPayloadDigest`,
+  );
+  const resultContracts =
+    record.results === undefined
+      ? []
+      : listAt(record.results, `${path}.results`).map((entry, child) => {
+          const resultPath = `${path}.results[${child}]`;
+          const result = objectAt(entry, resultPath, [
+            "outcome",
+            "requiredData",
+            "requiredArtifactCount",
+            "dataTypes",
+          ]);
+          const requiredArtifactCount =
+            optionalInteger(result.requiredArtifactCount, `${resultPath}.requiredArtifactCount`) ??
+            0;
+          if (requiredArtifactCount < 0) {
+            fail(
+              `${resultPath}.requiredArtifactCount`,
+              "artifact count cannot be negative",
+              "use zero or greater",
+              "invalid_result_contract",
+            );
+          }
+          const dataTypes =
+            result.dataTypes === undefined
+              ? {}
+              : Object.fromEntries(
+                  Object.entries(
+                    objectAt(
+                      result.dataTypes,
+                      `${resultPath}.dataTypes`,
+                      Object.keys(result.dataTypes as object),
+                    ),
+                  ).map(([key, value]) => [
+                    key,
+                    enumAt(value, `${resultPath}.dataTypes.${key}`, [
+                      "boolean",
+                      "number",
+                      "string",
+                      "unknown",
+                    ] as const),
+                  ]),
+                );
+          return Object.freeze({
+            dataTypes: Object.freeze(dataTypes),
+            outcome: stringAt(result.outcome, `${resultPath}.outcome`),
+            requiredArtifactCount,
+            requiredData:
+              result.requiredData === undefined
+                ? Object.freeze([] as string[])
+                : Object.freeze(stringListAt(result.requiredData, `${resultPath}.requiredData`)),
+          });
+        });
+  if (kind === "deterministic" && deterministicOutcome === undefined) {
+    fail(
+      `${path}.outcome`,
+      "deterministic step requires an outcome",
+      "declare its fixed outcome",
+      "missing_value",
+    );
+  }
+  if (
+    kind === "effect" &&
+    (effectCapability === undefined ||
+      effectTarget === undefined ||
+      effectPayloadDigest === undefined)
+  ) {
+    fail(
+      path,
+      "effect step requires effectCapability, effectTarget, and effectPayloadDigest",
+      "declare the deterministic effect intent data",
+      "missing_value",
+    );
+  }
+  if (
+    effectPayloadDigest !== undefined &&
+    !/^(?:sha256:)?[a-f0-9]{64}$/.test(effectPayloadDigest)
+  ) {
+    fail(
+      `${path}.effectPayloadDigest`,
+      "effect payload digest is not SHA-256",
+      "pin 64 lowercase hexadecimal characters, optionally prefixed with sha256:",
+      "invalid_digest",
+    );
+  }
   if (kind === "agent" && agentProfile === undefined) {
     fail(
       `${path}.agentProfile`,
@@ -543,8 +844,15 @@ function parseStep(value: unknown, flowIndex: number, index: number): StepDefini
   return Object.freeze({
     ...(agentProfile === undefined ? {} : { agentProfile }),
     capabilities: Object.freeze(stringListAt(record.capabilities, `${path}.capabilities`)),
+    ...(deterministicOutcome === undefined ? {} : { deterministicOutcome }),
+    ...(effectCapability === undefined ? {} : { effectCapability }),
+    ...(effectPayloadDigest === undefined
+      ? {}
+      : { effectPayloadDigest: effectPayloadDigest.replace(/^sha256:/, "") }),
+    ...(effectTarget === undefined ? {} : { effectTarget }),
     id: idAt(record.id, `${path}.id`),
     kind,
+    resultContracts: Object.freeze(resultContracts),
     retry: Object.freeze({ backoffMs, maxAttempts }),
     ...(skill === undefined ? {} : { skill }),
   });
@@ -552,7 +860,16 @@ function parseStep(value: unknown, flowIndex: number, index: number): StepDefini
 
 function parseGate(value: unknown, flowIndex: number, index: number): GateDefinition {
   const path = `$.flows[${flowIndex}].gates[${index}]`;
-  const record = objectAt(value, path, ["id", "kind", "accepted"]);
+  const record = objectAt(value, path, [
+    "id",
+    "kind",
+    "accepted",
+    "timeoutMs",
+    "timeoutOutcome",
+    "requiredArtifactCount",
+    "requiredArtifactSteps",
+    "requiredOutcome",
+  ]);
   const accepted = stringListAt(record.accepted, `${path}.accepted`);
   if (accepted.length === 0)
     fail(
@@ -561,21 +878,61 @@ function parseGate(value: unknown, flowIndex: number, index: number): GateDefini
       "declare at least one accepted event, operator command, or signal",
       "invalid_gate",
     );
+  const timeoutMs = optionalInteger(record.timeoutMs, `${path}.timeoutMs`);
+  const timeoutOutcome = optionalString(record.timeoutOutcome, `${path}.timeoutOutcome`);
+  const requiredArtifactCount =
+    optionalInteger(record.requiredArtifactCount, `${path}.requiredArtifactCount`) ?? 0;
+  const requiredArtifactSteps =
+    record.requiredArtifactSteps === undefined
+      ? []
+      : stringListAt(record.requiredArtifactSteps, `${path}.requiredArtifactSteps`);
+  const requiredOutcome = optionalString(record.requiredOutcome, `${path}.requiredOutcome`);
+  if (timeoutMs !== undefined && (timeoutMs < 1 || timeoutOutcome === undefined)) {
+    fail(
+      path,
+      "gate timeout requires positive timeoutMs and timeoutOutcome",
+      "declare both timeout fields",
+      "invalid_gate",
+    );
+  }
+  if (requiredArtifactCount < 0) {
+    fail(
+      `${path}.requiredArtifactCount`,
+      "artifact count cannot be negative",
+      "use zero or greater",
+      "invalid_gate",
+    );
+  }
   return Object.freeze({
     accepted: Object.freeze(accepted),
     id: idAt(record.id, `${path}.id`),
     kind: enumAt(record.kind, `${path}.kind`, ["approval", "event", "signal"] as const),
+    requiredArtifactCount,
+    requiredArtifactSteps: Object.freeze(requiredArtifactSteps),
+    ...(requiredOutcome === undefined ? {} : { requiredOutcome }),
+    ...(timeoutMs === undefined ? {} : { timeoutMs }),
+    ...(timeoutOutcome === undefined ? {} : { timeoutOutcome }),
   });
 }
 
 function parseState(value: unknown, flowIndex: number, index: number): StateDefinition {
   const path = `$.flows[${flowIndex}].states[${index}]`;
-  const record = objectAt(value, path, ["id", "step", "gate", "terminal"]);
+  const record = objectAt(value, path, ["id", "step", "gate", "terminal", "outcome"]);
   const step = optionalString(record.step, `${path}.step`);
   const gate = optionalString(record.gate, `${path}.gate`);
   const terminal = optionalEnum(record.terminal, `${path}.terminal`, [
     "success",
     "failure",
+  ] as const);
+  const terminalOutcome = optionalEnum(record.outcome, `${path}.outcome`, [
+    "not_actionable",
+    "needs_reproduction",
+    "unable_to_reproduce",
+    "unable_to_fix",
+    "failed",
+    "waiting",
+    "completed",
+    "cancelled",
   ] as const);
   const choices = [step, gate, terminal].filter((entry) => entry !== undefined).length;
   if (choices !== 1) {
@@ -591,6 +948,11 @@ function parseState(value: unknown, flowIndex: number, index: number): StateDefi
     id: idAt(record.id, `${path}.id`),
     ...(step === undefined ? {} : { step }),
     ...(terminal === undefined ? {} : { terminal }),
+    ...(terminalOutcome === undefined
+      ? terminal === undefined
+        ? {}
+        : { terminalOutcome: terminal === "success" ? ("completed" as const) : ("failed" as const) }
+      : { terminalOutcome }),
   });
 }
 
@@ -617,10 +979,23 @@ function validateDefinition(definition: FactoryDefinition): void {
     requireCapabilityOwner(capability.id, `$.capabilities[${index}].id`);
   });
   const profileById = new Map(definition.agentProfiles.map((profile) => [profile.id, profile]));
+  const githubSourceByRepository = new Map<string, number>();
 
   definition.sources.forEach((source, index) => {
     if (source.repository !== undefined && !repositories.has(source.repository)) {
       missingRef(`$.sources[${index}].repository`, "repository", source.repository);
+    }
+    if (source.type === "github" && source.repository !== undefined) {
+      const previous = githubSourceByRepository.get(source.repository);
+      if (previous !== undefined) {
+        fail(
+          `$.sources[${index}].repository`,
+          `GitHub source duplicates repository identity from $.sources[${previous}]`,
+          "declare at most one GitHub source per repository",
+          "ambiguous_source_identity",
+        );
+      }
+      githubSourceByRepository.set(source.repository, index);
     }
   });
   definition.agentProfiles.forEach((profile, index) => {
@@ -674,11 +1049,52 @@ function validateDefinition(definition: FactoryDefinition): void {
     const states = uniqueIds(flow.states, `${path}.states`);
     const steps = uniqueIds(flow.steps, `${path}.steps`);
     const gates = uniqueIds(flow.gates, `${path}.gates`);
+    if (
+      !["repository", "subject", "flow", "agent-profile", "repository-and-subject"].includes(
+        flow.concurrency.key,
+      )
+    ) {
+      fail(
+        `${path}.concurrency.key`,
+        `unsupported concurrency scope ${JSON.stringify(flow.concurrency.key)}`,
+        "use repository, subject, flow, agent-profile, or repository-and-subject",
+        "invalid_concurrency_scope",
+      );
+    }
+    if (flow.concurrency.key === "agent-profile") {
+      const flowProfiles = new Set(
+        flow.steps.flatMap((step) => (step.agentProfile === undefined ? [] : [step.agentProfile])),
+      );
+      if (flowProfiles.size > 1) {
+        fail(
+          `${path}.concurrency.key`,
+          "agent-profile concurrency is a run-level policy and the flow uses multiple profiles",
+          "use one agent profile or select another concurrency scope",
+          "ambiguous_agent_profile_scope",
+        );
+      }
+    }
     if (!states.has(flow.initialState))
       missingRef(`${path}.initialState`, "state", flow.initialState);
     flow.triggers.forEach((trigger, index) => {
       if (!sources.has(trigger.source))
         missingRef(`${path}.triggers[${index}].source`, "source", trigger.source);
+    });
+    flow.artifactHandoffs.forEach((edge, index) => {
+      if (!steps.has(edge.fromStep)) {
+        missingRef(`${path}.artifactHandoffs[${index}].fromStep`, "step", edge.fromStep);
+      }
+      if (!steps.has(edge.toStep)) {
+        missingRef(`${path}.artifactHandoffs[${index}].toStep`, "step", edge.toStep);
+      }
+      if (edge.fromStep === edge.toStep) {
+        fail(
+          `${path}.artifactHandoffs[${index}]`,
+          "artifact handoff cannot target its source step",
+          "declare a downstream consumer step",
+          "invalid_artifact_handoff",
+        );
+      }
     });
     flow.steps.forEach((step, index) => {
       if (step.agentProfile !== undefined && !profiles.has(step.agentProfile)) {
@@ -689,6 +1105,58 @@ function validateDefinition(definition: FactoryDefinition): void {
       }
       const profile =
         step.agentProfile === undefined ? undefined : profileById.get(step.agentProfile);
+      const resultOutcomes = uniqueIds(
+        step.resultContracts.map((contract) => ({ id: contract.outcome })),
+        `${path}.steps[${index}].results`,
+      );
+      if (step.kind !== "deterministic" && resultOutcomes.size === 0) {
+        fail(
+          `${path}.steps[${index}].results`,
+          `${step.kind} step has no declared result contracts`,
+          "declare every accepted result outcome and its required data fields",
+          "missing_result_contract",
+        );
+      }
+      if (
+        step.kind === "deterministic" &&
+        step.deterministicOutcome !== undefined &&
+        step.resultContracts.length > 0
+      ) {
+        fail(
+          `${path}.steps[${index}].results`,
+          "deterministic steps cannot accept external results",
+          "remove results and keep the fixed outcome",
+          "invalid_result_contract",
+        );
+      }
+      if (
+        step.kind === "effect" &&
+        (step.effectCapability === undefined || !step.capabilities.includes(step.effectCapability))
+      ) {
+        fail(
+          `${path}.steps[${index}].effectCapability`,
+          "effect capability must be listed in step capabilities",
+          "add the declared effect capability to capabilities",
+          "undeclared_capability",
+        );
+      }
+      if (step.kind === "effect" && step.effectCapability !== undefined) {
+        const permission = definition.effectPermissions.find(
+          (entry) => entry.capability === step.effectCapability,
+        );
+        if (
+          permission === undefined ||
+          step.effectTarget === undefined ||
+          !permission.targets.includes(step.effectTarget)
+        ) {
+          fail(
+            `${path}.steps[${index}].effectTarget`,
+            "effect target is not allowed by the matching permission",
+            "use a declared permission target",
+            "undeclared_permission",
+          );
+        }
+      }
       if (
         step.skill !== undefined &&
         profile !== undefined &&
@@ -709,9 +1177,11 @@ function validateDefinition(definition: FactoryDefinition): void {
           `${path}.steps[${index}].capabilities[${child}]`,
         );
         const allowedForKind =
-          step.kind === "agent"
-            ? owner === "execution" || owner === "agent-runtime"
-            : owner === "effects" || owner === "git-publisher";
+          step.kind === "deterministic"
+            ? false
+            : step.kind === "agent"
+              ? owner === "execution" || owner === "agent-runtime"
+              : owner === "effects" || owner === "git-publisher";
         if (!allowedForKind) {
           fail(
             `${path}.steps[${index}].capabilities[${child}]`,
@@ -741,6 +1211,14 @@ function validateDefinition(definition: FactoryDefinition): void {
           );
         }
       });
+      if (step.kind === "deterministic" && step.capabilities.length > 0) {
+        fail(
+          `${path}.steps[${index}].capabilities`,
+          "deterministic steps cannot invoke capabilities",
+          "use an empty capability list",
+          "invalid_deterministic_step",
+        );
+      }
     });
     flow.states.forEach((state, index) => {
       if (state.step !== undefined && !steps.has(state.step))
@@ -774,7 +1252,23 @@ function validateDefinition(definition: FactoryDefinition): void {
       if (!states.has(transition.to))
         missingRef(`${path}.transitions[${index}].to`, "state", transition.to);
       const fromState = flow.states.find((state) => state.id === transition.from);
+      if (transition.mode === "signal" && fromState?.gate === undefined) {
+        fail(
+          `${path}.transitions[${index}].mode`,
+          "signal transition originates from a state without a gate",
+          "use immediate mode for step outcomes or add an explicit gate state",
+          "invalid_signal_transition",
+        );
+      }
       if (fromState?.gate !== undefined) {
+        if (transition.mode !== "signal") {
+          fail(
+            `${path}.transitions[${index}].mode`,
+            "gate transition must declare signal mode",
+            "set mode: signal on every transition from a gate-backed state",
+            "invalid_gate_transition_mode",
+          );
+        }
         const gate = flow.gates.find((entry) => entry.id === fromState.gate);
         if (gate !== undefined && !gate.accepted.includes(transition.on)) {
           fail(
@@ -782,6 +1276,21 @@ function validateDefinition(definition: FactoryDefinition): void {
             `gate ${JSON.stringify(gate.id)} does not accept ${JSON.stringify(transition.on)}`,
             "add the input kind to the gate accepted list or use a declared kind",
             "invalid_gate_transition",
+          );
+        }
+      }
+      if (fromState?.step !== undefined) {
+        const step = flow.steps.find((entry) => entry.id === fromState.step);
+        const declared =
+          step?.kind === "deterministic"
+            ? step.deterministicOutcome === transition.on
+            : step?.resultContracts.some((contract) => contract.outcome === transition.on);
+        if (!declared) {
+          fail(
+            `${path}.transitions[${index}].on`,
+            `outcome ${JSON.stringify(transition.on)} is not declared by step ${JSON.stringify(fromState.step)}`,
+            "add a matching result contract or use a declared outcome",
+            "invalid_result_reference",
           );
         }
       }
@@ -815,6 +1324,15 @@ function validateDefinition(definition: FactoryDefinition): void {
       const gateIndex = flow.gates.findIndex((gate) => gate.id === state.gate);
       const gate = flow.gates[gateIndex];
       if (gate === undefined) return;
+      gate.requiredArtifactSteps.forEach((stepId, artifactIndex) => {
+        if (!steps.has(stepId)) {
+          missingRef(
+            `${path}.gates[${gateIndex}].requiredArtifactSteps[${artifactIndex}]`,
+            "step",
+            stepId,
+          );
+        }
+      });
       gate.accepted.forEach((accepted, acceptedIndex) => {
         if (
           !flow.transitions.some(
@@ -829,6 +1347,19 @@ function validateDefinition(definition: FactoryDefinition): void {
           );
         }
       });
+      if (
+        gate.timeoutOutcome !== undefined &&
+        !flow.transitions.some(
+          (transition) => transition.from === state.id && transition.on === gate.timeoutOutcome,
+        )
+      ) {
+        fail(
+          `${path}.gates[${gateIndex}].timeoutOutcome`,
+          `timeout outcome ${JSON.stringify(gate.timeoutOutcome)} has no transition`,
+          "add exactly one transition for the timeout outcome",
+          "invalid_gate_transition",
+        );
+      }
     });
     validateReachability(flow, flowIndex);
     validateSynchronousCycles(flow, flowIndex);
@@ -909,6 +1440,48 @@ function moduleEventsFor(flow: FlowDefinition): string[] {
   if (flow.steps.some((step) => step.kind === "effect")) {
     events.add("EffectFinished.v1");
     events.add("EffectRequested.v1");
+  }
+  if (flow.steps.some((step) => step.skill !== undefined)) events.add("SkillRevisionPinned.v1");
+  return [...events].sort();
+}
+
+function moduleCallsForV2(flow: FlowDefinition): string[] {
+  const calls = new Set([
+    "definitions.getActiveDefinition",
+    "definitions.getExecutionPlanV2",
+    "runs.applyOperatorCommandV2",
+    "runs.driveRun",
+    "runs.signalRun",
+    "runs.startRunV3",
+  ]);
+  if (flow.triggers.length > 0) calls.add("intake.acceptSourceEventV2");
+  if (flow.steps.some((step) => step.kind === "agent")) calls.add("execution.requestAttempt");
+  if (flow.steps.some((step) => step.kind === "effect")) calls.add("effects.requestEffectV2");
+  if (flow.steps.some((step) => step.skill !== undefined)) calls.add("assets.resolveSkill");
+  return [...calls].sort();
+}
+
+function moduleEventsForV2(flow: FlowDefinition): string[] {
+  const events = new Set([
+    "DefinitionPublished.v1",
+    "FactoryEventAccepted.v2",
+    "RunFinished.v1",
+    "RunFinished.v2",
+    "RunFinished.v3",
+    "RunStateChanged.v1",
+    "RunStateChanged.v2",
+    "RunStateChanged.v3",
+  ]);
+  if (flow.steps.some((step) => step.kind === "agent")) {
+    events.add("ArtifactStored.v1");
+    events.add("AttemptFinished.v1");
+    events.add("StepRequested.v1");
+    events.add("StepRequested.v2");
+  }
+  if (flow.steps.some((step) => step.kind === "effect")) {
+    events.add("EffectFinished.v2");
+    events.add("EffectRequested.v1");
+    events.add("EffectRequested.v2");
   }
   if (flow.steps.some((step) => step.skill !== undefined)) events.add("SkillRevisionPinned.v1");
   return [...events].sort();
@@ -1005,6 +1578,10 @@ function stringListAt(value: unknown, path: string): string[] {
 
 function optionalString(value: unknown, path: string): string | undefined {
   return value === undefined ? undefined : stringAt(value, path);
+}
+
+function optionalInteger(value: unknown, path: string): number | undefined {
+  return value === undefined ? undefined : integerAt(value, path);
 }
 
 function enumAt<const T extends readonly [string, ...string[]]>(

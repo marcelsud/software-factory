@@ -536,7 +536,7 @@ describe("foundation", () => {
   });
 
   test("[G13] invalid graph and permission cases fail at exact actionable paths", () => {
-    const finalTransition = "      - from: publish\n        to: done\n        on: applied\n";
+    const finalTransition = "      - { from: publish, to: done, on: applied }\n";
     const wrongAgentOwner = replaceRequired(
       factorySource,
       "    capabilities: [repository.read]",
@@ -547,7 +547,11 @@ describe("foundation", () => {
       "    description: Publish the verified outcome to the issue",
       "    description: Publish the verified outcome to the issue\n  - id: unknown.capability\n    description: No trusted owner",
     );
-    const deadEnd = replaceRequired(factorySource, finalTransition, "");
+    const deadEnd = replaceRequired(
+      factorySource,
+      "      - { id: done, terminal: success, outcome: completed }\n",
+      "      - { id: done, step: publish }\n",
+    );
     const incompleteGate = replaceRequired(
       factorySource,
       "accepted: [operator.approve, operator.reject]",
@@ -559,7 +563,7 @@ describe("foundation", () => {
       replaceRequired(
         factorySource,
         finalTransition,
-        `${finalTransition}      - from: verify\n        to: fix\n        on: retry\n`,
+        `${finalTransition}      - { from: verify, to: fix, on: retry }\n`,
       ),
       replaceRequired(
         factorySource,
@@ -578,18 +582,18 @@ describe("foundation", () => {
       replaceRequired(factorySource, "version: 1", "version: 1\nunknownRootKey: true"),
       replaceRequired(
         factorySource,
-        "      - id: diagnose\n        step: diagnose",
-        "      - id: reproduce\n        step: diagnose",
+        "      - { id: diagnose, step: diagnose }\n",
+        "      - { id: reproduce, step: diagnose }\n",
       ),
       replaceRequired(
         factorySource,
-        "to: diagnose\n        on: reproduced",
-        "to: no-change\n        on: reproduced",
+        "      - { from: reproduce, to: diagnose, on: reproduced }\n",
+        "      - { from: reproduce, to: not-actionable, on: reproduced }\n",
       ),
       replaceRequired(
         factorySource,
         finalTransition,
-        `${finalTransition}      - from: done\n        to: done\n        on: again\n`,
+        `${finalTransition}      - { from: done, to: done, on: again }\n`,
       ),
     ];
     expect(diagnosticFor(wrongAgentOwner)?.code).toBe("invalid_capability_owner");

@@ -71,11 +71,20 @@ flows:
     initialState: reproduce
     triggers:
       - source: github-issues
+        predicates:
+          - { field: eventType, operator: in, values: [issue.opened, issue.edited, issue.reopened] }
       - source: manual-triage
+        predicates: []
       - source: scheduled-triage
+        predicates: []
     concurrency:
       key: repository-and-subject
       limit: 1
+    artifactHandoffs:
+      - { fromStep: reproduce, toStep: diagnose }
+      - { fromStep: diagnose, toStep: verify }
+      - { fromStep: verify, toStep: fix }
+      - { fromStep: fix, toStep: publish }
     steps:
       - id: reproduce
         kind: agent
@@ -83,83 +92,83 @@ flows:
         skill: reproduce
         capabilities: [repository.read]
         retry: { maxAttempts: 2, backoffMs: 1000 }
+        results:
+          - { outcome: reproduced, requiredData: [], requiredArtifactCount: 1 }
+          - { outcome: not_actionable, requiredData: [] }
+          - { outcome: needs_reproduction, requiredData: [] }
+          - { outcome: unable_to_reproduce, requiredData: [] }
       - id: diagnose
         kind: agent
         agentProfile: triage-agent
         skill: diagnose
         capabilities: [repository.read]
         retry: { maxAttempts: 2, backoffMs: 1000 }
-      - id: fix
-        kind: agent
-        agentProfile: triage-agent
-        skill: fix
-        capabilities: [repository.read]
-        retry: { maxAttempts: 2, backoffMs: 1000 }
+        results:
+          - { outcome: diagnosed, requiredData: [], requiredArtifactCount: 1 }
+          - { outcome: unable_to_fix, requiredData: [] }
       - id: verify
         kind: agent
         agentProfile: triage-agent
         skill: verify
         capabilities: [repository.read]
         retry: { maxAttempts: 2, backoffMs: 1000 }
+        results:
+          - { outcome: verified, requiredData: [], requiredArtifactCount: 1 }
+          - { outcome: failed, requiredData: [] }
+      - id: fix
+        kind: agent
+        agentProfile: triage-agent
+        skill: fix
+        capabilities: [repository.read]
+        retry: { maxAttempts: 2, backoffMs: 1000 }
+        results:
+          - { outcome: fixed, requiredData: [], requiredArtifactCount: 1 }
+          - { outcome: unable_to_fix, requiredData: [] }
       - id: publish
         kind: effect
         capabilities: [repository.write, issue.comment]
+        effectCapability: repository.write
+        effectTarget: factory
+        effectPayloadDigest: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
         retry: { maxAttempts: 2, backoffMs: 2000 }
+        results:
+          - { outcome: applied, requiredData: [] }
+          - { outcome: rejected, requiredData: [] }
     gates:
       - id: approve-fix
         kind: approval
         accepted: [operator.approve, operator.reject]
+        timeoutMs: 86400000
+        timeoutOutcome: operator.reject
+        requiredArtifactCount: 1
+        requiredArtifactSteps: [verify]
+        requiredOutcome: verified
     states:
-      - id: reproduce
-        step: reproduce
-      - id: diagnose
-        step: diagnose
-      - id: approve
-        gate: approve-fix
-      - id: fix
-        step: fix
-      - id: verify
-        step: verify
-      - id: publish
-        step: publish
-      - id: no-change
-        terminal: success
-      - id: rejected
-        terminal: failure
-      - id: verification-failed
-        terminal: failure
-      - id: done
-        terminal: success
+      - { id: reproduce, step: reproduce }
+      - { id: diagnose, step: diagnose }
+      - { id: verify, step: verify }
+      - { id: approve, gate: approve-fix }
+      - { id: fix, step: fix }
+      - { id: publish, step: publish }
+      - { id: not-actionable, terminal: success, outcome: not_actionable }
+      - { id: needs-reproduction, terminal: failure, outcome: needs_reproduction }
+      - { id: unable-to-reproduce, terminal: failure, outcome: unable_to_reproduce }
+      - { id: unable-to-fix, terminal: failure, outcome: unable_to_fix }
+      - { id: rejected, terminal: failure, outcome: failed }
+      - { id: verification-failed, terminal: failure, outcome: failed }
+      - { id: done, terminal: success, outcome: completed }
     transitions:
-      - from: reproduce
-        to: diagnose
-        on: reproduced
-      - from: reproduce
-        to: no-change
-        on: cannot-reproduce
-      - from: diagnose
-        to: approve
-        on: fix-proposed
-      - from: diagnose
-        to: no-change
-        on: no-fix
-      - from: approve
-        to: fix
-        on: operator.approve
-        mode: signal
-      - from: approve
-        to: rejected
-        on: operator.reject
-        mode: signal
-      - from: fix
-        to: verify
-        on: fixed
-      - from: verify
-        to: publish
-        on: verified
-      - from: verify
-        to: verification-failed
-        on: failed
-      - from: publish
-        to: done
-        on: applied
+      - { from: reproduce, to: diagnose, on: reproduced }
+      - { from: reproduce, to: not-actionable, on: not_actionable }
+      - { from: reproduce, to: needs-reproduction, on: needs_reproduction }
+      - { from: reproduce, to: unable-to-reproduce, on: unable_to_reproduce }
+      - { from: diagnose, to: verify, on: diagnosed }
+      - { from: diagnose, to: unable-to-fix, on: unable_to_fix }
+      - { from: verify, to: approve, on: verified }
+      - { from: verify, to: verification-failed, on: failed }
+      - { from: approve, to: fix, on: operator.approve, mode: signal }
+      - { from: approve, to: rejected, on: operator.reject, mode: signal }
+      - { from: fix, to: publish, on: fixed }
+      - { from: fix, to: unable-to-fix, on: unable_to_fix }
+      - { from: publish, to: done, on: applied }
+      - { from: publish, to: rejected, on: rejected }

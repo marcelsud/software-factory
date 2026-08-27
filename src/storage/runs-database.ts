@@ -87,8 +87,41 @@ export interface WorkflowSignalRow {
   signal_kind: string;
 }
 
+export interface RunEngineStateRow {
+  artifact_outputs_json: string;
+  attempt_count: number;
+  engine_phase: string;
+  paused_from_phase: string | null;
+  last_outcome: string | null;
+  outcome: string;
+  pending_json: string | null;
+  repository: string;
+  retry_delay_ms: number | null;
+  state_generation: number;
+  run_id: string;
+  subject: string;
+  terminal_published: number;
+}
+
+export interface RunAdmissionRow {
+  limit_value: number;
+  requested_at: string;
+  run_id: string;
+  scope_key: string;
+  status: string;
+}
+
+export interface RunAdmissionSlotRow {
+  run_id: string;
+  scope_key: string;
+  slot_number: number;
+}
+
 export interface RunsDatabase {
   operator_commands: OperatorCommandRow;
+  run_admission_slots: RunAdmissionSlotRow;
+  run_admissions: RunAdmissionRow;
+  run_engine_state: RunEngineStateRow;
   run_identities: RunIdentityRow;
   run_audit: RunAuditRow;
   run_gates: RunGateRow;
@@ -175,6 +208,49 @@ export const runsMigrations = {
         );
       `,
     },
+    {
+      name: "003_engine_state_and_admission",
+      sql: `
+        CREATE TABLE IF NOT EXISTS run_engine_state (
+          run_id TEXT PRIMARY KEY,
+          repository TEXT NOT NULL,
+          subject TEXT NOT NULL,
+          outcome TEXT NOT NULL,
+          engine_phase TEXT NOT NULL,
+          attempt_count INTEGER NOT NULL,
+          state_generation INTEGER NOT NULL DEFAULT 0,
+          paused_from_phase TEXT,
+          retry_delay_ms INTEGER,
+          last_outcome TEXT,
+          artifact_outputs_json TEXT NOT NULL,
+          pending_json TEXT,
+          terminal_published INTEGER NOT NULL DEFAULT 0,
+          FOREIGN KEY (run_id) REFERENCES runs(run_id)
+        );
+        CREATE TABLE IF NOT EXISTS run_admissions (
+          run_id TEXT PRIMARY KEY,
+          scope_key TEXT NOT NULL,
+          limit_value INTEGER NOT NULL,
+          requested_at TEXT NOT NULL,
+          status TEXT NOT NULL,
+          FOREIGN KEY (run_id) REFERENCES runs(run_id)
+        );
+        CREATE INDEX IF NOT EXISTS run_admissions_scope_fairness
+          ON run_admissions(scope_key, status, requested_at, run_id);
+      `,
+    },
+    {
+      name: "004_atomic_admission_and_generations",
+      sql: `
+        CREATE TABLE IF NOT EXISTS run_admission_slots (
+          scope_key TEXT NOT NULL,
+          slot_number INTEGER NOT NULL,
+          run_id TEXT NOT NULL UNIQUE,
+          PRIMARY KEY (scope_key, slot_number),
+          FOREIGN KEY (run_id) REFERENCES runs(run_id)
+        );
+      `,
+    },
   ],
   postgres: [
     {
@@ -250,6 +326,44 @@ export const runsMigrations = {
           correlation_token TEXT NOT NULL,
           recorded_at TEXT NOT NULL,
           payload_json TEXT NOT NULL
+        );
+      `,
+    },
+    {
+      name: "003_engine_state_and_admission",
+      sql: `
+        CREATE TABLE IF NOT EXISTS chimpbase_runs.run_engine_state (
+          run_id TEXT PRIMARY KEY REFERENCES chimpbase_runs.runs(run_id),
+          repository TEXT NOT NULL,
+          subject TEXT NOT NULL,
+          outcome TEXT NOT NULL,
+          engine_phase TEXT NOT NULL,
+          attempt_count INTEGER NOT NULL,
+          state_generation INTEGER NOT NULL DEFAULT 0,
+          paused_from_phase TEXT,
+          retry_delay_ms INTEGER,
+          last_outcome TEXT,
+          artifact_outputs_json TEXT NOT NULL,
+          pending_json TEXT,
+          terminal_published INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS chimpbase_runs.run_admissions (
+          run_id TEXT PRIMARY KEY REFERENCES chimpbase_runs.runs(run_id),
+          scope_key TEXT NOT NULL,
+          limit_value INTEGER NOT NULL,
+          requested_at TEXT NOT NULL,
+          status TEXT NOT NULL
+        );
+      `,
+    },
+    {
+      name: "004_atomic_admission_and_generations",
+      sql: `
+        CREATE TABLE IF NOT EXISTS chimpbase_runs.run_admission_slots (
+          scope_key TEXT NOT NULL,
+          slot_number INTEGER NOT NULL,
+          run_id TEXT NOT NULL UNIQUE REFERENCES chimpbase_runs.runs(run_id),
+          PRIMARY KEY (scope_key, slot_number)
         );
       `,
     },

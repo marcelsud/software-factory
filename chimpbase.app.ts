@@ -10,9 +10,15 @@ import {
   unavailableGitHubReadTransport,
 } from "./src/modules/intake/implementation.ts";
 import { operationsImplementation } from "./src/modules/operations/implementation.ts";
-import { runsImplementation } from "./src/modules/runs/implementation.ts";
+import {
+  createRunsImplementation,
+  FACTORY_RUNS_V2_WORKFLOW_DIGEST,
+  type RunsImplementationDependencies,
+} from "./src/modules/runs/implementation.ts";
 
-export type FactoryAppDependencies = IntakeImplementationDependencies;
+export type FactoryAppDependencies = IntakeImplementationDependencies &
+  RunsImplementationDependencies;
+export { FACTORY_RUNS_V2_WORKFLOW_DIGEST };
 
 export function createSoftwareFactoryApp(dependencies?: FactoryAppDependencies) {
   return defineChimpbaseApp({
@@ -24,7 +30,7 @@ export function createSoftwareFactoryApp(dependencies?: FactoryAppDependencies) 
       executionImplementation,
       createIntakeImplementation(dependencies ?? { readTransport: unavailableGitHubReadTransport }),
       operationsImplementation,
-      runsImplementation,
+      createRunsImplementation(dependencies),
     ],
     worker: { maxAttempts: 5, retryDelayMs: 1_000 },
   });
