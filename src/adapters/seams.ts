@@ -1,4 +1,4 @@
-import type { AgentRequest, AgentResult } from "../contracts/index.ts";
+import type { AgentRequest, AgentRequestV2, AgentResult } from "../contracts/index.ts";
 
 export interface GitHubRepositoryRecord {
   readonly fullName: string;
@@ -91,7 +91,7 @@ export interface GitHubReadTransport {
 }
 
 export interface AgentRuntime {
-  run(request: AgentRequest, signal: AbortSignal): Promise<AgentResult>;
+  run(request: AgentRequest | AgentRequestV2, signal: AbortSignal): Promise<AgentResult>;
   cancel(attemptId: string): Promise<void>;
 }
 

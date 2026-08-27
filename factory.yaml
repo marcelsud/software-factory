@@ -30,6 +30,10 @@ sources:
 capabilities:
   - id: repository.read
     description: Read the pinned repository revision
+  - id: repository.patch
+    description: Modify files in an isolated worktree
+  - id: process.test
+    description: Run declared verification commands
   - id: repository.write
     description: Publish a verified fix revision
   - id: issue.comment
@@ -67,7 +71,7 @@ agentProfiles:
       timeoutMs: 900000
       maxOutputBytes: 1048576
     skills: [reproduce, diagnose, fix, verify]
-    capabilities: [repository.read]
+    capabilities: [repository.read, repository.patch, process.test]
   - id: verification-agent
     model: trusted-composition-verifier
     command: [/__factory_agent_bin__, /workspace/src/adapters/json-stdio-agent.mjs, --verify]
@@ -76,7 +80,7 @@ agentProfiles:
       timeoutMs: 600000
       maxOutputBytes: 524288
     skills: [verify]
-    capabilities: [repository.read]
+    capabilities: [repository.read, process.test]
 
 flows:
   - id: issue-triage
@@ -122,7 +126,7 @@ flows:
         kind: agent
         agentProfile: verification-agent
         skill: verify
-        capabilities: [repository.read]
+        capabilities: [repository.read, process.test]
         retry: { maxAttempts: 2, backoffMs: 1000 }
         results:
           - { outcome: verified, requiredData: [], requiredArtifactCount: 1 }
@@ -131,7 +135,7 @@ flows:
         kind: agent
         agentProfile: triage-agent
         skill: fix
-        capabilities: [repository.read]
+        capabilities: [repository.read, repository.patch, process.test]
         retry: { maxAttempts: 2, backoffMs: 1000 }
         results:
           - { outcome: fixed, requiredData: [], requiredArtifactCount: 1 }

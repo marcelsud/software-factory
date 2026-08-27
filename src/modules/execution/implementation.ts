@@ -5,6 +5,7 @@ import { action, worker } from "chimpbase/runtime";
 import type { Kysely } from "kysely";
 
 import type { AgentRuntime } from "../../adapters/seams.ts";
+import { assertVerifiedSkillBundle } from "../../assets/skill-bundle.ts";
 import {
   type AgentRequest,
   type AgentRequestV2,
@@ -81,7 +82,10 @@ async function attemptFromRow(
   let result: unknown;
   if (resultRow !== undefined) {
     const stored = JSON.parse(resultRow.result_json) as unknown;
-    result = requestRecord?.protocol_version === 2 ? parseAgentResult(stored).outcome : stored;
+    result =
+      requestRecord?.protocol_version === 2 || requestRecord?.protocol_version === 3
+        ? parseAgentResult(stored).outcome
+        : stored;
   }
   return stepAttemptV2.parse({
     agentProfileDigest: row.agent_profile_digest,
@@ -446,6 +450,19 @@ export function createExecutionImplementation(
           if (envelope === null) throw new Error(`artifact_not_found: ${materialization.digest}`);
           if (envelope.artifact.runId !== request.runId)
             throw new Error(`artifact_run_mismatch: ${materialization.digest}`);
+          if (payload.protocolVersion === 3) {
+            const selectedSkill = (request as AgentRequestV2).skills[0];
+            const artifactKind =
+              "kind" in envelope.artifact && typeof envelope.artifact.kind === "string"
+                ? envelope.artifact.kind
+                : undefined;
+            if (
+              selectedSkill !== undefined &&
+              artifactKind !== undefined &&
+              !selectedSkill.inputArtifactKinds.some((kind) => kind === artifactKind)
+            )
+              continue;
+          }
           artifactsWithBytes.push({
             ...materialization,
             contentBase64: envelope.contentBase64,
@@ -723,6 +740,17 @@ export function createExecutionImplementation(
       },
       async requestAttemptV3(ctx, rawInput) {
         const input = parseAgentRequestV2(rawInput);
+        if (input.skills.length > 1)
+          throw new Error("invalid_pin: V3 attempts select at most one skill");
+        for (const bundle of input.skills) {
+          const verified = assertVerifiedSkillBundle(bundle);
+          if (
+            verified.capabilities.some(
+              (capability) => !input.agentProfile.capabilities.includes(capability),
+            )
+          )
+            throw new Error("invalid_pin: skill capabilities exceed the agent profile grant");
+        }
         const db = ctx.db.kysely() as unknown as Kysely<ExecutionDatabase>;
         const requestJson = canonicalJson(input);
         const existing = await db

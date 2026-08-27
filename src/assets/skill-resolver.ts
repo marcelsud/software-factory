@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
-import { lstat, readFile, realpath } from "node:fs/promises";
+import { constants } from "node:fs";
+import { open, realpath } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 
 import { parseDocument } from "yaml";
-
 import type { PinnedSkillBundleV2, SkillResultSchema } from "../contracts/index.ts";
+import { assertVerifiedSkillBundle } from "./skill-bundle.ts";
 
 const ID = /^[a-z][a-z0-9._-]*$/u;
 const RESULT_PROPERTY = /^[a-z][A-Za-z0-9._-]*$/u;
@@ -257,14 +258,29 @@ export class SkillResolver {
       const absolute = resolve(directory, path);
       if (!absolute.startsWith(`${directory}${sep}`))
         throw new Error(`skill_root_escape: ${requested}`);
-      const status = await lstat(absolute);
-      if (!status.isFile() || status.isSymbolicLink())
-        throw new Error(`skill_symlink_forbidden: ${requested}`);
-      const canonical = await realpath(absolute);
-      if (canonical !== absolute) throw new Error(`skill_symlink_forbidden: ${requested}`);
-      if (status.size > this.#options.maxFileBytes)
-        throw new Error(`skill_file_too_large: ${requested}`);
-      const bytes = await readFile(absolute);
+      const handle = await open(absolute, constants.O_RDONLY | constants.O_NOFOLLOW).catch(
+        (error: NodeJS.ErrnoException) => {
+          if (error.code === "ELOOP") throw new Error(`skill_symlink_forbidden: ${requested}`);
+          throw error;
+        },
+      );
+      const bytes = await (async () => {
+        try {
+          const canonical = await realpath(`/proc/self/fd/${handle.fd}`);
+          if (canonical !== absolute || !canonical.startsWith(`${directory}${sep}`))
+            throw new Error(`skill_symlink_forbidden: ${requested}`);
+          const status = await handle.stat();
+          if (!status.isFile()) throw new Error(`skill_symlink_forbidden: ${requested}`);
+          if (status.size > this.#options.maxFileBytes)
+            throw new Error(`skill_file_too_large: ${requested}`);
+          const loaded = await handle.readFile();
+          if (loaded.byteLength !== status.size || loaded.byteLength > this.#options.maxFileBytes)
+            throw new Error(`skill_file_changed: ${requested}`);
+          return loaded;
+        } finally {
+          await handle.close();
+        }
+      })();
       totalBytes += bytes.byteLength;
       if (totalBytes > this.#options.maxTotalBytes)
         throw new Error("skill_too_large: total bytes exceeded");
@@ -287,6 +303,7 @@ export class SkillResolver {
         if (!declared.includes(directive))
           throw new Error(`undeclared_skill_include: ${directive}`);
       }
+      for (const directive of directives) await visit(directive, declared);
       if (normalized.endsWith(".include.yaml")) {
         const descriptor = dataRecord(parseYaml(bytes, normalized), normalized, ["includes"]);
         const includes = uniqueStringList(descriptor.includes, `${normalized}.includes`).sort();
@@ -326,8 +343,9 @@ export class SkillResolver {
       resultSchema: parsed.resultSchema,
       version: parsed.version,
     };
+    const verifiedBundle = assertVerifiedSkillBundle(bundle);
     return {
-      bundle,
+      bundle: verifiedBundle,
       inspection: {
         capabilities: bundle.capabilities,
         compatibility: bundle.compatibility,

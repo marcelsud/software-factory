@@ -285,6 +285,16 @@ export const CAPABILITY_PRESETS = {
   release: ["repository.read", "repository.patch", "process.test", "repository.release"],
 } as const;
 
+export const capabilityPresetV2 = v.enum(["read-only", "patch", "verify", "test", "release"]);
+
+export const CAPABILITY_PRESETS_V2 = {
+  "read-only": ["repository.read"],
+  patch: ["repository.read", "repository.patch"],
+  verify: ["repository.read", "process.test"],
+  test: ["repository.read", "repository.patch", "process.test"],
+  release: ["repository.read", "repository.patch", "process.test", "repository.release"],
+} as const;
+
 export const agentMaterialization = v.object({
   contentBase64: v.string().optional(),
   digest,
@@ -338,6 +348,30 @@ export const strictAgentProfile = v.object({
   skills: v.array(v.string()),
 });
 
+export const strictAgentProfileV2 = v.object({
+  capabilities: v.array(v.string()),
+  capabilityPreset: capabilityPresetV2,
+  command: v.array(v.string()),
+  digest,
+  environment: v.record(v.string()),
+  instructions: v.string(),
+  limits: v.object({
+    cpuSeconds: v.integer(),
+    maxFileBytes: v.integer(),
+    maxInputBytes: v.integer(),
+    maxLogBytes: v.integer(),
+    maxOutputBytes: v.integer(),
+    maxPatchBytes: v.integer(),
+    maxPids: v.integer(),
+    maxWorkspaceBytes: v.integer(),
+    maxWorkspaceFiles: v.integer(),
+    memoryBytes: v.integer(),
+    timeoutMs: v.integer(),
+  }),
+  model: v.string(),
+  skills: v.array(v.string()),
+});
+
 export const agentRequest = v.object({
   agentProfile: strictAgentProfile,
   attemptId: identifier,
@@ -364,7 +398,7 @@ export const agentRequest = v.object({
 });
 
 export const agentRequestV2 = v.object({
-  agentProfile: strictAgentProfile,
+  agentProfile: strictAgentProfileV2,
   attemptId: identifier,
   budget: v.object({
     maxDurationMs: v.integer(),
@@ -466,6 +500,10 @@ function isCapabilityPreset(value: string): value is keyof typeof CAPABILITY_PRE
   return Object.hasOwn(CAPABILITY_PRESETS, value);
 }
 
+function isCapabilityPresetV2(value: string): value is keyof typeof CAPABILITY_PRESETS_V2 {
+  return Object.hasOwn(CAPABILITY_PRESETS_V2, value);
+}
+
 export function parseAgentRequest(value: unknown): Infer<typeof agentRequest> {
   const request = agentRequest.parse(value);
   const preset = request.agentProfile.capabilityPreset;
@@ -526,8 +564,22 @@ export function parseAgentRequest(value: unknown): Infer<typeof agentRequest> {
 
 export function parseAgentRequestV2(value: unknown): Infer<typeof agentRequestV2> {
   const request = agentRequestV2.parse(value);
+  const preset = request.agentProfile.capabilityPreset;
+  if (!isCapabilityPresetV2(preset))
+    throw new Error("agent request V2 capability preset is invalid");
+  const expected = CAPABILITY_PRESETS_V2[preset];
+  if (
+    request.agentProfile.capabilities.length !== expected.length ||
+    request.agentProfile.capabilities.some((capability, index) => capability !== expected[index])
+  )
+    throw new Error("agent request capabilities do not match the pinned V2 preset");
   parseAgentRequest({
     ...request,
+    agentProfile: {
+      ...request.agentProfile,
+      capabilities: ["repository.read"],
+      capabilityPreset: "read-only",
+    },
     skills: request.skills.map(({ digest: bundleDigest, files, id, instructions }) => ({
       digest: `strict:${bundleDigest}`,
       files,

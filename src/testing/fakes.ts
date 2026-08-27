@@ -15,7 +15,9 @@ import type {
 
 export { MemoryArtifactByteDriver } from "../adapters/artifact-byte-driver.ts";
 
-import type { AgentRequest, AgentResult } from "../contracts/index.ts";
+import type { AgentRequest, AgentRequestV2, AgentResult } from "../contracts/index.ts";
+
+type AnyAgentRequest = AgentRequest | AgentRequestV2;
 
 export interface FakeGitHubReadTransportScript {
   readonly comments?: ReadonlyArray<Error | GitHubPage<GitHubIssueCommentRecord>>;
@@ -112,14 +114,16 @@ function unlimitedRate(): GitHubRateLimitRecord {
 
 export class FakeAgentRuntime implements AgentRuntime {
   readonly cancelledAttempts: string[] = [];
-  readonly requests: AgentRequest[] = [];
-  readonly #result: AgentResult | ((request: AgentRequest) => AgentResult);
+  readonly requests: AnyAgentRequest[] = [];
+  readonly #result: AgentResult | ((request: AnyAgentRequest) => AgentResult);
 
-  constructor(result: AgentResult | ((request: AgentRequest) => AgentResult) = fakeDomainResult) {
+  constructor(
+    result: AgentResult | ((request: AnyAgentRequest) => AgentResult) = fakeDomainResult,
+  ) {
     this.#result = result;
   }
 
-  async run(request: AgentRequest, signal: AbortSignal): Promise<AgentResult> {
+  async run(request: AnyAgentRequest, signal: AbortSignal): Promise<AgentResult> {
     this.requests.push(request);
     if (signal.aborted) return fakeInfrastructureResult(request, "cancel");
     if (typeof this.#result === "function") return this.#result(request);
@@ -131,7 +135,7 @@ export class FakeAgentRuntime implements AgentRuntime {
   }
 }
 
-function fakeDomainResult(request: AgentRequest): AgentResult {
+function fakeDomainResult(request: AnyAgentRequest): AgentResult {
   const emptyDigest = createHash("sha256").update("").digest("hex");
   return {
     attemptId: request.attemptId,
@@ -156,7 +160,7 @@ function fakeDomainResult(request: AgentRequest): AgentResult {
 }
 
 function fakeInfrastructureResult(
-  request: AgentRequest,
+  request: AnyAgentRequest,
   category: "cancel" | "adapter",
 ): AgentResult {
   const result = fakeDomainResult(request);

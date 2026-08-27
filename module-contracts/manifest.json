@@ -2482,6 +2482,7 @@
         ],
         "tables": [
           "artifact_blobs",
+          "artifact_blobs_v2",
           "artifacts",
           "artifacts_v2",
           "skill_bundles",
@@ -5650,6 +5651,7 @@
                     "enum": [
                       "read-only",
                       "patch",
+                      "verify",
                       "test",
                       "release"
                     ]
@@ -6993,6 +6995,7 @@
                     "enum": [
                       "read-only",
                       "patch",
+                      "verify",
                       "test",
                       "release"
                     ]
@@ -15898,6 +15901,7 @@
                 "enum": [
                   "read-only",
                   "patch",
+                  "verify",
                   "test",
                   "release"
                 ]
@@ -17241,6 +17245,7 @@
                 "enum": [
                   "read-only",
                   "patch",
+                  "verify",
                   "test",
                   "release"
                 ]

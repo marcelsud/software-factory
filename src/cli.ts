@@ -556,7 +556,10 @@ async function loadDefinition(
   dependencies: CliDependencies,
 ): Promise<FactoryDefinition> {
   const source = await dependencies.readText(config);
-  return compileFactoryDefinition(source, { sourceName: config }).definition;
+  return compileFactoryDefinition(source, {
+    allowUnpinnedSkills: true,
+    sourceName: config,
+  }).definition;
 }
 
 async function activateCheckedDefinition(

@@ -16,8 +16,9 @@ import {
 import type { AgentRuntime } from "../src/adapters/seams.ts";
 import { type ResolvedSkill, SkillResolver } from "../src/assets/skill-resolver.ts";
 import { runCli } from "../src/cli.ts";
+import { compileFactoryDefinition } from "../src/compiler.ts";
 import {
-  type AgentRequest,
+  type AgentRequestV2,
   type AgentResult,
   MODULE_RESOURCES,
   RESOURCE_OWNERS,
@@ -95,11 +96,19 @@ async function storePrivate(
   return artifactDigest;
 }
 
-function executionRequest(attemptId: string, skill: ResolvedSkill["bundle"]): AgentRequest {
+function executionRequest(attemptId: string, skill: ResolvedSkill["bundle"]): AgentRequestV2 {
+  const patches = skill.capabilities.includes("repository.patch");
+  const tests = skill.capabilities.includes("process.test");
+  const capabilities = patches
+    ? ["repository.read", "repository.patch", "process.test"]
+    : tests
+      ? ["repository.read", "process.test"]
+      : ["repository.read"];
+  const capabilityPreset = patches ? "test" : tests ? "verify" : "read-only";
   return {
     agentProfile: {
-      capabilities: ["repository.read"],
-      capabilityPreset: "read-only",
+      capabilities,
+      capabilityPreset,
       command: ["/bin/false"],
       digest: "profile",
       environment: {},
@@ -222,6 +231,12 @@ describe("assets", () => {
       "skill.yaml",
     ]);
     expect(inspection.resultSchema.properties.passed?.type).toBe("boolean");
+    const source = await readFile(join(process.cwd(), "factory.yaml"), "utf8");
+    const plan = compileFactoryDefinition(source).plansV2["issue-triage"];
+    const verifyStep = plan?.steps.find(({ id }) => id === "verify");
+    const fixStep = plan?.steps.find(({ id }) => id === "fix");
+    expect(verifyStep?.capabilities).toEqual(["repository.read", "process.test"]);
+    expect(fixStep?.capabilities).toEqual(["repository.read", "repository.patch", "process.test"]);
   });
 
   test("[G4] unsafe and incompatible skill fixtures fail before execution", async () => {
@@ -290,6 +305,11 @@ describe("assets", () => {
     await expect(new SkillResolver({ roots: [cycle.root] }).resolve(cycle.skill)).rejects.toThrow(
       "skill_include_cycle",
     );
+    const markdownCycle = await skillFixture("g4-markdown-cycle");
+    await writeFile(join(markdownCycle.skill, "guidance.md"), "{{include:guidance.md}}\n");
+    await expect(
+      new SkillResolver({ roots: [markdownCycle.root] }).resolve(markdownCycle.skill),
+    ).rejects.toThrow("skill_include_cycle");
   });
 
   test("[G5] generated module artifacts assign strict assets to one owner", () => {
@@ -413,6 +433,51 @@ describe("assets", () => {
     } finally {
       await compatibilityHost.close();
     }
+    const durablePath = join(root, "strict-durable.sqlite");
+    const strictBytes = Buffer.from("strict durable bytes");
+    const strictDigest = digest(strictBytes);
+    const strictHost = await createChimpbase({
+      app: createSoftwareFactoryApp({ readTransport: unavailableGitHubReadTransport }),
+      projectDir: process.cwd(),
+      storage: { engine: "sqlite", path: durablePath },
+      subscriptions: { dispatch: "async" },
+    });
+    await strictHost.executeAction("assets/storeArtifactV2@v1", {
+      artifact: {
+        attemptId: "durable-attempt",
+        classification: "private",
+        createdAt: now,
+        digest: strictDigest,
+        kind: "metadata",
+        mediaType: "text/plain",
+        name: "durable.txt",
+        redaction: "raw-private",
+        retention: "retained",
+        runId: "durable-run",
+        size: strictBytes.byteLength,
+      },
+      contentBase64: strictBytes.toString("base64"),
+    });
+    await strictHost.close();
+    const restartedStrictHost = await createChimpbase({
+      app: createSoftwareFactoryApp({ readTransport: unavailableGitHubReadTransport }),
+      projectDir: process.cwd(),
+      storage: { engine: "sqlite", path: durablePath },
+      subscriptions: { dispatch: "async" },
+    });
+    try {
+      const durable = (
+        await restartedStrictHost.executeAction("assets/getArtifactV2@v1", {
+          allowedDigests: [strictDigest],
+          attemptId: "reader",
+          digest: strictDigest,
+          runId: "durable-run",
+        })
+      ).result as { contentBase64: string };
+      expect(Buffer.from(durable.contentBase64, "base64")).toEqual(strictBytes);
+    } finally {
+      await restartedStrictHost.close();
+    }
   });
 
   test("[G7] attempts receive only explicitly declared artifact digests", async () => {
@@ -441,6 +506,51 @@ describe("assets", () => {
       ).rejects.toThrow("artifact_access_denied");
     } finally {
       await host.close();
+    }
+    const seenInputs: string[][] = [];
+    const delegate = fakeAgentRuntime({
+      verify: { evidence: "filtered", passed: true, testResults: [] },
+    });
+    const filteringRuntime: AgentRuntime = {
+      async cancel(attemptId) {
+        await delegate.cancel(attemptId);
+      },
+      async run(request, signal) {
+        seenInputs.push(request.inputArtifacts.map(({ digest: inputDigest }) => inputDigest));
+        return await delegate.run(request, signal);
+      },
+    };
+    const { host: filteringHost } = await boot(new MemoryArtifactByteDriver(), filteringRuntime);
+    try {
+      const reportDigest = await storePrivate(
+        filteringHost,
+        "allowed report",
+        "filter-run",
+        "producer",
+        "report.md",
+      );
+      const logDigest = await storePrivate(
+        filteringHost,
+        "disallowed log",
+        "filter-run",
+        "producer",
+        "log",
+      );
+      const verify = await resolveFixture("g7-verify", "verify");
+      await filteringHost.executeAction("execution/requestAttemptV3@v1", {
+        ...executionRequest("g7-filter", verify.bundle),
+        inputArtifacts: [reportDigest, logDigest].map((inputDigest) => ({
+          digest: inputDigest,
+          kind: "artifact",
+          path: `${inputDigest}.bin`,
+          size: 0,
+        })),
+        runId: "filter-run",
+      });
+      await filteringHost.drain({ maxDurationMs: 5_000 });
+      expect(seenInputs).toEqual([[reportDigest]]);
+    } finally {
+      await filteringHost.close();
     }
   });
 
@@ -499,6 +609,10 @@ describe("assets", () => {
         ).result as { outcome: string; result?: AgentResult };
         expect(attempt.outcome).toBe("succeeded");
         expect(attempt.result?.failure).toBeUndefined();
+        const predecessor = (
+          await host.executeAction("execution/getAttemptV2@v1", { attemptId: `g9-${id}` })
+        ).result as { result?: { data: Record<string, unknown> } };
+        expect(predecessor.result?.data).toEqual(reports[id]);
       }
     } finally {
       await host.close();
@@ -576,6 +690,30 @@ describe("assets", () => {
       await expect(
         host.executeAction("assets/verifySkillBundleV2@v1", { bundle: corrupted }),
       ).rejects.toThrow("digest_mismatch");
+      const mutableInstructions = { ...valid.bundle, instructions: "mutated after pin" };
+      await expect(
+        host.executeAction("assets/verifySkillBundleV2@v1", {
+          bundle: mutableInstructions,
+        }),
+      ).rejects.toThrow("invalid_skill_bundle");
+      await expect(
+        host.executeAction(
+          "execution/requestAttemptV3@v1",
+          executionRequest("g13-mutable", mutableInstructions),
+        ),
+      ).rejects.toThrow("invalid_skill_bundle");
+      const fix = await resolveFixture("g13-fix", "fix");
+      const multiSkill = executionRequest("g13-multi", valid.bundle);
+      await expect(
+        host.executeAction("execution/requestAttemptV3@v1", {
+          ...multiSkill,
+          agentProfile: {
+            ...multiSkill.agentProfile,
+            skills: [valid.bundle.id, fix.bundle.id],
+          },
+          skills: [valid.bundle, fix.bundle],
+        }),
+      ).rejects.toThrow("at most one skill");
     } finally {
       await host.close();
     }
@@ -593,6 +731,37 @@ describe("assets", () => {
     expect(await memory.get(value)).toEqual(bytes);
     await expect(local.put(value, Buffer.from("wrong"))).rejects.toThrow("digest_mismatch");
     await expect(memory.put(value, Buffer.from("wrong"))).rejects.toThrow("digest_mismatch");
+    const { host } = await boot();
+    try {
+      const contentBase64 = bytes.toString("base64");
+      for (const name of ["one.patch", "two.patch"]) {
+        await host.executeAction("assets/storeArtifactV2@v1", {
+          artifact: {
+            attemptId: "same-bytes-attempt",
+            classification: "private",
+            createdAt: now,
+            digest: value,
+            kind: "patch",
+            mediaType: "application/octet-stream",
+            name,
+            redaction: "raw-private",
+            retention: "retained",
+            runId: "same-bytes-run",
+            size: bytes.byteLength,
+          },
+          contentBase64,
+        });
+      }
+      const records = (
+        await host.executeAction("assets/listRunArtifactsV2@v1", {
+          runId: "same-bytes-run",
+        })
+      ).result as Array<{ digest: string; name: string }>;
+      expect(records).toHaveLength(2);
+      expect(records.map(({ name }) => name).sort()).toEqual(["one.patch", "two.patch"]);
+    } finally {
+      await host.close();
+    }
   });
 
   test("[G15] an allowed digest still cannot cross run ownership", async () => {
@@ -617,7 +786,7 @@ describe("assets", () => {
     try {
       const rawDigest = await storePrivate(
         host,
-        "Authorization: Bearer abcdefghijklmnopqrstuvwxyz",
+        "github_pat_abcdefghijklmnopqrstuvwxyz1234567890",
         "run-a",
         "attempt-a",
         "log",
@@ -737,6 +906,17 @@ describe("assets", () => {
       "revision: sha256:0266a4341e7cb8e3065b55798793298899412b82e1200942773882b35dd1aa48",
       "revision: unpinned",
     );
+    const { host: definitionsHost } = await boot();
+    try {
+      await expect(
+        definitionsHost.executeAction("definitions/compileDefinition@v1", {
+          source: unpinnedSource,
+          sourceName: "unpinned.yaml",
+        }),
+      ).rejects.toThrow("explicit unpinned marker");
+    } finally {
+      await definitionsHost.close();
+    }
     const activationConfig = join(activationRoot, "factory.yaml");
     await writeFile(activationConfig, unpinnedSource);
     const actions: Array<{ args: unknown; name: string }> = [];

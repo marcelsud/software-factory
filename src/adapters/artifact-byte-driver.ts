@@ -30,7 +30,8 @@ async function syncDirectory(path: string): Promise<void> {
 
 async function atomicWrite(path: string, bytes: Uint8Array): Promise<void> {
   const directory = dirname(path);
-  await mkdir(directory, { recursive: true });
+  const created = await mkdir(directory, { recursive: true });
+  if (created !== undefined) await syncDirectory(dirname(created));
   const temporary = join(directory, `.${randomUUID()}.tmp`);
   const handle = await open(temporary, "wx", 0o600);
   try {

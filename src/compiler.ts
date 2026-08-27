@@ -30,6 +30,7 @@ export class DefinitionCompileError extends Error {
 }
 
 export interface CompileOptions {
+  readonly allowUnpinnedSkills?: boolean;
   readonly skillRoots?: readonly string[];
   readonly sourceName?: string;
 }
@@ -200,7 +201,9 @@ export function compileFactoryDefinition(
     );
   }
 
-  const definition = deepFreeze(parseDefinition(raw, options.skillRoots ?? ["skills"]));
+  const definition = deepFreeze(
+    parseDefinition(raw, options.skillRoots ?? ["skills"], options.allowUnpinnedSkills === true),
+  );
   validateDefinition(definition);
   const normalizedJson = canonicalJson(definition);
   const definitionDigest = sha256(normalizedJson);
@@ -401,7 +404,11 @@ function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
-function parseDefinition(value: unknown, skillRoots: readonly string[]): FactoryDefinition {
+function parseDefinition(
+  value: unknown,
+  skillRoots: readonly string[],
+  allowUnpinnedSkills: boolean,
+): FactoryDefinition {
   const record = objectAt(value, "$", [
     "version",
     "repositories",
@@ -427,7 +434,7 @@ function parseDefinition(value: unknown, skillRoots: readonly string[]): Factory
     flows: listAt(record.flows, "$.flows").map(parseFlow),
     repositories: listAt(record.repositories, "$.repositories").map(parseRepository),
     skills: listAt(record.skills, "$.skills").map((entry, index) =>
-      parseSkill(entry, index, skillRoots),
+      parseSkill(entry, index, skillRoots, allowUnpinnedSkills),
     ),
     sources: listAt(record.sources, "$.sources").map(parseSource),
     version: 1,
@@ -513,13 +520,21 @@ function parsePermission(
   });
 }
 
-function parseSkill(value: unknown, index: number, skillRoots: readonly string[]): SkillDefinition {
+function parseSkill(
+  value: unknown,
+  index: number,
+  skillRoots: readonly string[],
+  allowUnpinnedSkills: boolean,
+): SkillDefinition {
   const path = `$.skills[${index}]`;
   const record = objectAt(value, path, ["id", "path", "revision"]);
   const skillPath = stringAt(record.path, `${path}.path`);
   const normalized = posix.normalize(skillPath.replaceAll("\\", "/"));
   const revision = stringAt(record.revision, `${path}.revision`);
-  if (revision !== "unpinned" && !/^sha256:[a-f0-9]{64}$/.test(revision)) {
+  if (
+    (!allowUnpinnedSkills || revision !== "unpinned") &&
+    !/^sha256:[a-f0-9]{64}$/.test(revision)
+  ) {
     fail(
       `${path}.revision`,
       `skill revision ${JSON.stringify(revision)} is neither a SHA-256 digest nor the explicit unpinned marker`,

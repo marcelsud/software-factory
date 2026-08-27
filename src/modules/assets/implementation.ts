@@ -4,15 +4,15 @@ import type { Kysely } from "kysely";
 
 import { MemoryArtifactByteDriver } from "../../adapters/artifact-byte-driver.ts";
 import type { ArtifactByteDriver } from "../../adapters/seams.ts";
+import { assertVerifiedSkillBundle as assertStrictBundle } from "../../assets/skill-bundle.ts";
 import {
   type ArtifactV2,
   artifact,
   artifactV2,
-  canonicalSkillBundleDigest,
   type PinnedSkillBundle,
   type PinnedSkillBundleV2,
   pinnedSkillBundle,
-  pinnedSkillBundleV2,
+  redactSecrets,
   type SkillRevisionV2,
   skillRevisionV2,
 } from "../../contracts/index.ts";
@@ -34,14 +34,6 @@ const ARTIFACT_LIMITS: Readonly<Record<ArtifactV2["kind"], number>> = {
   reproduction: 16 * 1024 * 1024,
   metadata: 1024 * 1024,
 };
-const SKILL_CAPABILITIES = new Set(["process.test", "repository.patch", "repository.read"]);
-const SECRET_PATTERNS = [
-  /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/gu,
-  /\bgh[pousr]_[A-Za-z0-9_]{20,}\b/gu,
-  /\bAKIA[A-Z0-9]{16}\b/gu,
-  /\bBearer\s+[A-Za-z0-9._~+/-]+=*\b/giu,
-  /\b(?:api[_-]?key|password|secret|token)\s*[:=]\s*["']?[^\s"']{8,}["']?/giu,
-] as const;
 
 export interface AssetsImplementationDependencies {
   readonly artifactByteDriver?: ArtifactByteDriver;
@@ -108,47 +100,6 @@ function assertLegacyDigestAndSize(digest: string, size: number, bytes: Uint8Arr
     throw new Error("digest_mismatch: artifact size does not match content");
 }
 
-function assertStrictBundle(value: unknown): PinnedSkillBundleV2 {
-  const bundle = pinnedSkillBundleV2.parse(value);
-  if (
-    bundle.version !== 1 ||
-    bundle.compatibility !== 1 ||
-    bundle.resultSchema.additionalProperties ||
-    bundle.files.length === 0 ||
-    bundle.files.length > 64 ||
-    !bundle.files.some((file) => file.path === "skill.yaml") ||
-    new Set(bundle.capabilities).size !== bundle.capabilities.length ||
-    bundle.capabilities.some((capability) => !SKILL_CAPABILITIES.has(capability))
-  )
-    throw new Error("invalid_skill_bundle");
-  if (canonicalSkillBundleDigest(bundle) !== bundle.digest) throw new Error("digest_mismatch");
-  const paths = new Set<string>();
-  for (const file of bundle.files) {
-    if (
-      file.kind !== "skill" ||
-      file.path.startsWith("/") ||
-      file.path.includes("\\") ||
-      file.path.split("/").includes("..") ||
-      paths.has(file.path)
-    )
-      throw new Error(`invalid_skill_bundle: unsafe or duplicate path ${file.path}`);
-    paths.add(file.path);
-    if (file.contentBase64 === undefined)
-      throw new Error(`invalid_skill_bundle: missing bytes for ${file.path}`);
-    const bytes = Buffer.from(file.contentBase64, "base64");
-    if (Buffer.from(bytes).toString("base64") !== file.contentBase64)
-      throw new Error(`invalid_skill_bundle: non-canonical base64 for ${file.path}`);
-    assertDigestAndSize(file.digest, file.size, bytes);
-  }
-  const instruction = bundle.files.find((file) => file.path === bundle.instructionPath);
-  if (
-    instruction?.contentBase64 === undefined ||
-    Buffer.from(instruction.contentBase64, "base64").toString("utf8") !== bundle.instructions
-  )
-    throw new Error("invalid_skill_bundle: instructions do not match the canonical entry");
-  return bundle;
-}
-
 function revisionFromBundle(bundle: PinnedSkillBundleV2, source: string): SkillRevisionV2 {
   return skillRevisionV2.parse({
     capabilities: bundle.capabilities,
@@ -163,10 +114,6 @@ function revisionFromBundle(bundle: PinnedSkillBundleV2, source: string): SkillR
   });
 }
 
-function metadataMatches(left: ArtifactV2, right: ArtifactV2): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
-}
-
 function redactPublicText(bytes: Uint8Array): Uint8Array {
   if (bytes.byteLength > PUBLIC_TEXT_LIMIT) throw new Error("artifact_too_large: public candidate");
   let text: string;
@@ -175,10 +122,8 @@ function redactPublicText(bytes: Uint8Array): Uint8Array {
   } catch {
     throw new Error("artifact_not_publishable: binary artifact");
   }
-  for (const pattern of SECRET_PATTERNS) text = text.replace(pattern, "[REDACTED]");
-  return Buffer.from(text, "utf8");
+  return Buffer.from(redactSecrets(text), "utf8");
 }
-
 async function legacyBytes(
   db: Kysely<AssetsDatabase>,
   driver: ArtifactByteDriver,
@@ -198,6 +143,29 @@ async function legacyBytes(
   return bytes;
 }
 
+function artifactRecordId(metadata: ArtifactV2): string {
+  return createHash("sha256").update(JSON.stringify(metadata), "utf8").digest("hex");
+}
+
+async function strictBytes(
+  db: Kysely<AssetsDatabase>,
+  driver: ArtifactByteDriver,
+  digest: string,
+): Promise<Uint8Array | null> {
+  const current = await driver.get(digest);
+  if (current !== null) return current;
+  const fallback = await db
+    .selectFrom("artifact_blobs_v2")
+    .select("content_base64")
+    .where("digest", "=", digest)
+    .executeTakeFirst();
+  if (fallback === undefined) return null;
+  const bytes = Buffer.from(fallback.content_base64, "base64");
+  assertDigestAndSize(digest, bytes.byteLength, bytes);
+  await driver.put(digest, bytes);
+  return bytes;
+}
+
 export function createAssetsImplementation(dependencies: AssetsImplementationDependencies = {}) {
   const byteDriver = dependencies.artifactByteDriver ?? new MemoryArtifactByteDriver();
   return defineChimpbaseModuleImplementation({
@@ -208,6 +176,7 @@ export function createAssetsImplementation(dependencies: AssetsImplementationDep
       kvPrefixes: ["artifact-bytes", "artifact-materializations"],
       tables: [
         "artifact_blobs",
+        "artifact_blobs_v2",
         "artifacts",
         "artifacts_v2",
         "skill_bundles",
@@ -344,20 +313,25 @@ export function createAssetsImplementation(dependencies: AssetsImplementationDep
             throw new Error(
               "digest_mismatch: immutable artifact digest already has different metadata",
             );
-          return stored;
+        } else {
+          await db
+            .insertInto("artifacts")
+            .values({
+              classification: metadata.classification,
+              digest: metadata.digest,
+              media_type: metadata.mediaType,
+              name: metadata.name,
+              run_id: metadata.runId,
+              size: metadata.size,
+            })
+            .execute();
         }
         await db
-          .insertInto("artifacts")
-          .values({
-            classification: metadata.classification,
-            digest: metadata.digest,
-            media_type: metadata.mediaType,
-            name: metadata.name,
-            run_id: metadata.runId,
-            size: metadata.size,
-          })
+          .insertInto("artifact_blobs")
+          .values({ content_base64: input.contentBase64, digest: metadata.digest })
+          .onConflict((conflict) => conflict.column("digest").doNothing())
           .execute();
-        ctx.publish(assets.events.artifactStoredV1, metadata);
+        if (existing === undefined) ctx.publish(assets.events.artifactStoredV1, metadata);
         return metadata;
       },
       async getArtifact(ctx, input) {
@@ -430,35 +404,38 @@ export function createAssetsImplementation(dependencies: AssetsImplementationDep
           throw new Error("artifact_conflict: invalid private artifact redaction");
         }
         await byteDriver.put(metadata.digest, bytes);
+        await db
+          .insertInto("artifact_blobs_v2")
+          .values({ content_base64: input.contentBase64, digest: metadata.digest })
+          .onConflict((conflict) => conflict.column("digest").doNothing())
+          .execute();
+        const recordId = artifactRecordId(metadata);
         const existing = await db
           .selectFrom("artifacts_v2")
-          .selectAll()
-          .where("digest", "=", metadata.digest)
-          .where("run_id", "=", metadata.runId)
+          .select("record_id")
+          .where("record_id", "=", recordId)
           .executeTakeFirst();
-        if (existing !== undefined) {
-          const stored = artifactV2FromRow(existing);
-          if (!metadataMatches(stored, metadata)) throw new Error("artifact_conflict");
-          return stored;
+        if (existing === undefined) {
+          await db
+            .insertInto("artifacts_v2")
+            .values({
+              attempt_id: metadata.attemptId ?? null,
+              classification: metadata.classification,
+              created_at: metadata.createdAt,
+              digest: metadata.digest,
+              kind: metadata.kind,
+              media_type: metadata.mediaType,
+              name: metadata.name,
+              record_id: recordId,
+              redaction: metadata.redaction,
+              retention: metadata.retention,
+              run_id: metadata.runId,
+              size: metadata.size,
+              source_digest: metadata.sourceDigest ?? null,
+            })
+            .execute();
+          ctx.publish(assets.events.artifactStoredV2, metadata);
         }
-        await db
-          .insertInto("artifacts_v2")
-          .values({
-            attempt_id: metadata.attemptId ?? null,
-            classification: metadata.classification,
-            created_at: metadata.createdAt,
-            digest: metadata.digest,
-            kind: metadata.kind,
-            media_type: metadata.mediaType,
-            name: metadata.name,
-            redaction: metadata.redaction,
-            retention: metadata.retention,
-            run_id: metadata.runId,
-            size: metadata.size,
-            source_digest: metadata.sourceDigest ?? null,
-          })
-          .execute();
-        ctx.publish(assets.events.artifactStoredV2, metadata);
         return metadata;
       },
       async getArtifactV2(ctx, input) {
@@ -471,7 +448,7 @@ export function createAssetsImplementation(dependencies: AssetsImplementationDep
           .where("run_id", "=", input.runId)
           .executeTakeFirst();
         if (row !== undefined) {
-          const bytes = await byteDriver.get(input.digest);
+          const bytes = await strictBytes(db, byteDriver, input.digest);
           if (bytes === null || bytes.byteLength !== row.size)
             throw new Error(`artifact_corrupt: ${input.digest}`);
           return {
@@ -529,7 +506,7 @@ export function createAssetsImplementation(dependencies: AssetsImplementationDep
           .where("run_id", "=", input.runId)
           .executeTakeFirst();
         if (strict !== undefined) {
-          const bytes = await byteDriver.get(input.digest);
+          const bytes = await strictBytes(db, byteDriver, input.digest);
           if (bytes === null || bytes.byteLength !== strict.size)
             throw new Error(`artifact_corrupt: ${input.digest}`);
           return {
@@ -597,7 +574,7 @@ export function createAssetsImplementation(dependencies: AssetsImplementationDep
         if (source === undefined || source.attempt_id !== input.attemptId)
           throw new Error("artifact_access_denied");
         if (source.classification !== "private") throw new Error("artifact_not_publishable");
-        const raw = await byteDriver.get(source.digest);
+        const raw = await strictBytes(db, byteDriver, source.digest);
         if (raw === null || raw.byteLength !== source.size)
           throw new Error(`artifact_corrupt: ${source.digest}`);
         const scanned = redactPublicText(raw);
@@ -620,16 +597,19 @@ export function createAssetsImplementation(dependencies: AssetsImplementationDep
           sourceDigest: source.digest,
         });
         await byteDriver.put(digest, redacted);
+        const contentBase64 = Buffer.from(redacted).toString("base64");
+        await db
+          .insertInto("artifact_blobs_v2")
+          .values({ content_base64: contentBase64, digest })
+          .onConflict((conflict) => conflict.column("digest").doNothing())
+          .execute();
+        const recordId = artifactRecordId(metadata);
         const existing = await db
           .selectFrom("artifacts_v2")
-          .selectAll()
-          .where("digest", "=", digest)
-          .where("run_id", "=", input.runId)
+          .select("record_id")
+          .where("record_id", "=", recordId)
           .executeTakeFirst();
-        if (existing !== undefined) {
-          const stored = artifactV2FromRow(existing);
-          if (!metadataMatches(stored, metadata)) throw new Error("artifact_conflict");
-        } else {
+        if (existing === undefined) {
           await db
             .insertInto("artifacts_v2")
             .values({
@@ -640,6 +620,7 @@ export function createAssetsImplementation(dependencies: AssetsImplementationDep
               kind: metadata.kind,
               media_type: metadata.mediaType,
               name: metadata.name,
+              record_id: recordId,
               redaction: metadata.redaction,
               retention: metadata.retention,
               run_id: metadata.runId,
@@ -651,7 +632,7 @@ export function createAssetsImplementation(dependencies: AssetsImplementationDep
         }
         return {
           artifact: metadata,
-          contentBase64: Buffer.from(redacted).toString("base64"),
+          contentBase64,
         };
       },
     },

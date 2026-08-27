@@ -14,6 +14,11 @@ export interface ArtifactBlobRow {
   digest: string;
 }
 
+export interface ArtifactBlobV2Row {
+  content_base64: string;
+  digest: string;
+}
+
 export interface ArtifactRow {
   classification: string;
   digest: string;
@@ -34,6 +39,7 @@ export interface ArtifactV2Row {
   attempt_id: string | null;
   classification: string;
   created_at: string;
+  record_id: string;
   digest: string;
   kind: string;
   media_type: string;
@@ -48,6 +54,7 @@ export interface ArtifactV2Row {
 export interface AssetsDatabase {
   artifacts: ArtifactRow;
   artifact_blobs: ArtifactBlobRow;
+  artifact_blobs_v2: ArtifactBlobV2Row;
   skill_bundles: SkillBundleRow;
   skill_revisions: SkillRevisionRow;
   artifacts_v2: ArtifactV2Row;
@@ -110,6 +117,7 @@ export const assetsMigrations = {
         CREATE INDEX IF NOT EXISTS skill_revisions_v2_id_digest
           ON skill_revisions_v2(id, digest);
         CREATE TABLE IF NOT EXISTS artifacts_v2 (
+          record_id TEXT PRIMARY KEY,
           digest TEXT NOT NULL,
           run_id TEXT NOT NULL,
           attempt_id TEXT,
@@ -121,8 +129,11 @@ export const assetsMigrations = {
           retention TEXT NOT NULL,
           redaction TEXT NOT NULL,
           created_at TEXT NOT NULL,
-          source_digest TEXT,
-          PRIMARY KEY (digest, run_id)
+          source_digest TEXT
+        );
+        CREATE TABLE IF NOT EXISTS artifact_blobs_v2 (
+          digest TEXT PRIMARY KEY,
+          content_base64 TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS artifacts_v2_run_digest
           ON artifacts_v2(run_id, digest);
@@ -181,6 +192,7 @@ export const assetsMigrations = {
           bundle_json TEXT NOT NULL
         );
         CREATE TABLE IF NOT EXISTS chimpbase_assets.artifacts_v2 (
+          record_id TEXT PRIMARY KEY,
           digest TEXT NOT NULL,
           run_id TEXT NOT NULL,
           attempt_id TEXT,
@@ -192,8 +204,11 @@ export const assetsMigrations = {
           retention TEXT NOT NULL,
           redaction TEXT NOT NULL,
           created_at TEXT NOT NULL,
-          source_digest TEXT,
-          PRIMARY KEY (digest, run_id)
+          source_digest TEXT
+        );
+        CREATE TABLE IF NOT EXISTS chimpbase_assets.artifact_blobs_v2 (
+          digest TEXT PRIMARY KEY,
+          content_base64 TEXT NOT NULL
         );
       `,
     },

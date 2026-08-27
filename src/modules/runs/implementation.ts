@@ -11,6 +11,7 @@ import type { Kysely } from "kysely";
 import {
   type AttemptFinished,
   CAPABILITY_PRESETS,
+  CAPABILITY_PRESETS_V2,
   type ExecutionPlanV2,
   type FactoryEvent,
   isDataRecord,
@@ -693,7 +694,22 @@ async function scheduleRetry(
   return { delayMs, engine: nextEngine, row: nextRow };
 }
 
-function capabilityPresetFor(capabilities: readonly string[]): keyof typeof CAPABILITY_PRESETS {
+function capabilityPresetFor(capabilities: readonly string[]): keyof typeof CAPABILITY_PRESETS_V2 {
+  for (const [preset, expected] of Object.entries(CAPABILITY_PRESETS_V2) as Array<
+    [keyof typeof CAPABILITY_PRESETS_V2, readonly string[]]
+  >) {
+    if (
+      capabilities.length === expected.length &&
+      expected.every((capability) => capabilities.includes(capability))
+    )
+      return preset;
+  }
+  throw new Error("invalid_revision_pin: agent capabilities do not match an execution preset");
+}
+
+function legacyCapabilityPresetFor(
+  capabilities: readonly string[],
+): keyof typeof CAPABILITY_PRESETS {
   for (const [preset, expected] of Object.entries(CAPABILITY_PRESETS) as Array<
     [keyof typeof CAPABILITY_PRESETS, readonly string[]]
   >) {
@@ -703,7 +719,7 @@ function capabilityPresetFor(capabilities: readonly string[]): keyof typeof CAPA
     )
       return preset;
   }
-  throw new Error("invalid_revision_pin: agent capabilities do not match an execution preset");
+  throw new Error("invalid_revision_pin: legacy capabilities do not match an execution preset");
 }
 
 function validResult(
@@ -2129,8 +2145,18 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
                     );
                 }
               }
+              if (
+                selectedStrictBundle?.capabilities.some(
+                  (capability) =>
+                    !step.capabilities.includes(capability) ||
+                    !profile.capabilities.includes(capability),
+                ) === true
+              )
+                throw new Error(
+                  `invalid_revision_pin: skill capabilities exceed grants for ${step.skill}`,
+                );
               const strictProfile = {
-                capabilities: [...CAPABILITY_PRESETS[capabilityPreset]],
+                capabilities: [...CAPABILITY_PRESETS_V2[capabilityPreset]],
                 capabilityPreset,
                 command: profile.command,
                 digest: profile.digest,
@@ -2178,8 +2204,14 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
                 },
               };
               if (selectedLegacyBundle !== null) {
+                const legacyPreset = legacyCapabilityPresetFor(step.capabilities);
                 await ctx.call(execution.calls.requestAttemptV2, {
                   ...attemptRequest,
+                  agentProfile: {
+                    ...strictProfile,
+                    capabilities: [...CAPABILITY_PRESETS[legacyPreset]],
+                    capabilityPreset: legacyPreset,
+                  },
                   skills: [selectedLegacyBundle],
                 });
               } else {
