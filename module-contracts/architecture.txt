@@ -90,6 +90,7 @@ operations v1
   call: operations/listRunsV2@v1
   call: operations/rebuildProjections@v1
   call: operations/recordOperatorCommandRejection@v1
+  call: operations/refreshWorkerHeartbeat@v1
   call: operations/showRun@v1
   call: operations/showRunV2@v1
   consumes: assets/artifactStored@v2 as project-artifact-v2

@@ -4,7 +4,7 @@ import {
   defineChimpbaseModuleImplementation,
   defineChimpbaseModuleSubscription,
 } from "chimpbase/core";
-import { cron, type Infer, onStart, v } from "chimpbase/runtime";
+import { cron, type Infer, v } from "chimpbase/runtime";
 import type { Kysely } from "kysely";
 import {
   effectReceipt,
@@ -594,7 +594,7 @@ async function booleanProbe(probe: Probe | undefined): Promise<boolean> {
     return false;
   }
 }
-async function refreshWorkerHeartbeat(ctx: OperationsContext): Promise<void> {
+async function refreshWorkerHeartbeat(ctx: OperationsContext): Promise<{ updatedAt: string }> {
   const db = dbFrom(ctx);
   const newest = await db
     .selectFrom("event_projections")
@@ -609,11 +609,8 @@ async function refreshWorkerHeartbeat(ctx: OperationsContext): Promise<void> {
       conflict.column("id").doUpdateSet({ last_sequence: lastSequence, updated_at: updatedAt }),
     )
     .execute();
+  return { updatedAt };
 }
-
-const workerHeartbeatStart = onStart("operations.projection-heartbeat.start", async (ctx) => {
-  await refreshWorkerHeartbeat(ctx);
-});
 
 const workerHeartbeatCron = cron("projection-heartbeat", "* * * * *", async (ctx) => {
   await refreshWorkerHeartbeat(ctx);
@@ -774,7 +771,7 @@ export function createOperationsImplementation(
   return defineChimpbaseModuleImplementation({
     interface: implementationInterface,
     migrations: operationsMigrations,
-    registrations: [workerHeartbeatStart, workerHeartbeatCron],
+    registrations: [workerHeartbeatCron],
     subscriptions: createSubscriptions(),
     calls: {
       async listRuns(ctx, input) {
@@ -973,6 +970,10 @@ export function createOperationsImplementation(
           workerReady = await booleanProbe(dependencies.workerReady);
         } else {
           try {
+            const newest = await db
+              .selectFrom("event_projections")
+              .select(({ fn }) => fn.max<number>("sequence").as("sequence"))
+              .executeTakeFirst();
             const heartbeat = await db
               .selectFrom("health_projection")
               .select("updated_at")
@@ -981,9 +982,9 @@ export function createOperationsImplementation(
             const heartbeatAt =
               heartbeat === undefined ? Number.NaN : Date.parse(heartbeat.updated_at);
             workerReady =
-              heartbeat !== undefined &&
-              Number.isFinite(heartbeatAt) &&
-              checkedAt.getTime() - heartbeatAt <= 180_000;
+              heartbeat === undefined
+                ? newest?.sequence === null || newest?.sequence === undefined
+                : Number.isFinite(heartbeatAt) && checkedAt.getTime() - heartbeatAt <= 180_000;
           } catch {
             workerReady = false;
           }
@@ -1191,6 +1192,9 @@ export function createOperationsImplementation(
           .where("command_key", "=", input.commandKey)
           .executeTakeFirst();
         return row === undefined ? null : auditFromRow(row);
+      },
+      async refreshWorkerHeartbeat(ctx) {
+        return await refreshWorkerHeartbeat(ctx);
       },
       async rebuildProjections(ctx) {
         return await rebuild(dbFrom(ctx));

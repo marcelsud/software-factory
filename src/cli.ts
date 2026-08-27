@@ -43,6 +43,7 @@ export interface CliIo {
 interface CliHost {
   close(): Promise<void>;
   executeAction(name: string, args?: unknown): Promise<{ readonly result: unknown }>;
+  startWorker?(): Promise<() => Promise<void>>;
 }
 
 export interface CliDependencies {
@@ -209,6 +210,10 @@ const defaultDependencies: Required<CliDependencies> = {
     return {
       close: () => host.close(),
       executeAction: (name: string, args?: unknown) => host.executeAction(name, args),
+      async startWorker() {
+        const started = await host.start({ runWorker: true, serve: false });
+        return () => started.stop();
+      },
     };
   },
   async readStdin() {
@@ -513,6 +518,7 @@ async function daemonCommand(
     controller.abort(),
   );
   let host: CliHost | undefined;
+  let stopWorker: (() => Promise<void>) | undefined;
   try {
     host = await (dependencies.openHost ?? defaultDependencies.openHost)(
       composition.repositories,
@@ -522,6 +528,7 @@ async function daemonCommand(
       composition.localRepositories,
     );
     await activateCheckedDefinition(host, values.config, dependencies);
+    stopWorker = await host.startWorker?.();
     const intervalMs = positiveInteger(
       process.env.FACTORY_POLL_INTERVAL_MS ?? "30000",
       "FACTORY_POLL_INTERVAL_MS",
@@ -532,6 +539,7 @@ async function daemonCommand(
         repositories,
         (dependencies.now ?? defaultDependencies.now)().toISOString(),
       );
+      await host.executeAction("operations/refreshWorkerHeartbeat@v1", {});
       io.stdout(`polled ${repositories.length} repositories; accepted ${accepted}\n`);
       if (values.once || controller.signal.aborted) break;
       await (dependencies.sleep ?? defaultDependencies.sleep)(intervalMs, controller.signal);
@@ -543,6 +551,7 @@ async function daemonCommand(
   } finally {
     removeShutdown();
     controller.abort();
+    await stopWorker?.();
     await host?.close();
     await releaseLock();
   }

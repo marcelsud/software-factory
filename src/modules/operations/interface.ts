@@ -116,6 +116,12 @@ const calls = {
     errors: ["module_unavailable"],
     guarantees: ["returns the durable operations-owned command audit record"],
   },
+  refreshWorkerHeartbeat: {
+    input: v.object({}),
+    output: v.object({ updatedAt: v.string() }),
+    errors: ["module_unavailable"],
+    guarantees: ["refreshes only the operations-owned worker liveness heartbeat"],
+  },
   rebuildProjections: {
     input: v.object({}),
     output: operationsRebuildResult,

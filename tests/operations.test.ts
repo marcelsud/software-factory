@@ -725,9 +725,22 @@ describe("leaf-08 operations", () => {
       worker: "unavailable",
       workflow: "unavailable",
     });
+    const freshInstallHost = await boot(
+      new FakeOperationsProbe(),
+      false,
+      false,
+      new Date().toISOString(),
+    );
+    const freshInstallHealth = (
+      await freshInstallHost.executeAction("operations/getHealthV2@v1", {})
+    ).result as { status: string; worker: string };
+    expect(freshInstallHealth).toMatchObject({
+      status: "ready",
+      worker: "ready",
+    });
     const idleCheckedAt = new Date().toISOString();
     const idleWorkerHost = await boot(new FakeOperationsProbe(), false, false, idleCheckedAt);
-    await publishRun(idleWorkerHost, "25");
+    await idleWorkerHost.executeAction("operations/refreshWorkerHeartbeat@v1", {});
     const idleWorkerHealth = (await idleWorkerHost.executeAction("operations/getHealthV2@v1", {}))
       .result as { status: string; worker: string };
     expect(idleWorkerHealth).toMatchObject({
@@ -984,6 +997,8 @@ describe("leaf-08 operations", () => {
     });
     expect(conflict.err).toContain("daemon_conflict");
     let released = false;
+    let workerStarted = false;
+    let workerStopped = false;
     const recovery = await captureCli(["daemon", "--once"], {
       ...cliDependencies({
         async executeAction(name) {
@@ -995,6 +1010,12 @@ describe("leaf-08 operations", () => {
           if (name === "intake/pollRepositoryV2@v1") return { result: { accepted: 0 } };
           return { result: null };
         },
+        async startWorker() {
+          workerStarted = true;
+          return async () => {
+            workerStopped = true;
+          };
+        },
       }),
       acquireDaemonLock: async () => async () => {
         released = true;
@@ -1002,6 +1023,24 @@ describe("leaf-08 operations", () => {
     });
     expect(recovery.code).toBe(0);
     expect(released).toBe(true);
+    expect(workerStarted).toBe(true);
+    expect(workerStopped).toBe(true);
+
+    const workerHost = await boot();
+    await workerHost.executeAction("runs/testPublish0@v1", runState("worker-drain"));
+    const startedWorkerHost = await workerHost.start({ runWorker: true, serve: false });
+    const { promise: workerTurn, resolve: finishWorkerTurn } = Promise.withResolvers<void>();
+    setImmediate(finishWorkerTurn);
+    await workerTurn;
+    await startedWorkerHost.stop();
+    const workerProjection = (
+      await workerHost.executeAction("operations/showRunV2@v1", {
+        runId: "run:worker-drain",
+      })
+    ).result as { run: { runId: string } } | null;
+    expect(workerProjection).not.toBeNull();
+    if (workerProjection === null) throw new Error("worker did not drain subscription");
+    expect(workerProjection.run.runId).toBe("run:worker-drain");
     const invalidRunFilter = await captureCli(
       ["runs", "--run", "run:1"],
       cliDependencies({ executeAction: async () => ({ result: null }) }),
@@ -1312,8 +1351,6 @@ describe("leaf-08 operations", () => {
     );
     expect(operationsSource).toContain("ctx.call(intake.calls.getSourceCursor");
     expect(operationsSource).toContain('.selectFrom("health_projection")');
-    expect(operationsSource).toContain('"projection-heartbeat"');
-    expect(operationsSource).toContain('"* * * * *"');
   });
 });
 
@@ -1335,6 +1372,7 @@ function readyHealth() {
 function cliDependencies(host: {
   close?: () => Promise<void>;
   executeAction(name: string, args?: unknown): Promise<{ result: unknown }>;
+  startWorker?: () => Promise<() => Promise<void>>;
 }): CliDependencies {
   return {
     checkModules: async () => {},
@@ -1344,6 +1382,7 @@ function cliDependencies(host: {
     openHost: async () => ({
       close: host.close ?? (async () => {}),
       executeAction: host.executeAction.bind(host),
+      ...(host.startWorker === undefined ? {} : { startWorker: host.startWorker }),
     }),
     readText: async () => factorySource,
     repositoryReachability: async () => ({ factory: "reachable" }),

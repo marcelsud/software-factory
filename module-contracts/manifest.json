@@ -11312,6 +11312,33 @@
             "module_unavailable"
           ],
           "guarantees": [
+            "refreshes only the operations-owned worker liveness heartbeat"
+          ],
+          "id": "operations/refreshWorkerHeartbeat@v1",
+          "inputSchema": {
+            "properties": {},
+            "required": [],
+            "type": "object"
+          },
+          "name": "refreshWorkerHeartbeat",
+          "outputSchema": {
+            "properties": {
+              "updatedAt": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "updatedAt"
+            ],
+            "type": "object"
+          },
+          "version": 1
+        },
+        {
+          "errors": [
+            "module_unavailable"
+          ],
+          "guarantees": [
             "reads event-fed projections without querying another module's storage"
           ],
           "id": "operations/showRun@v1",
@@ -25122,6 +25149,27 @@
           "outcome",
           "requestedAt",
           "runId"
+        ],
+        "type": "object"
+      },
+      "provider": "operations"
+    },
+    {
+      "inputSchema": {
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "operations/refreshWorkerHeartbeat@v1",
+      "outputSchema": {
+        "properties": {
+          "updatedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "updatedAt"
         ],
         "type": "object"
       },
