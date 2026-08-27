@@ -1,0 +1,6 @@
+tests/
+gates/
+PLAN.md
+GATES.md
+factory.yaml
+.make-no-mistakes.yaml

@@ -1,0 +1,12 @@
+profile: pr-ship
+integrate: rebase
+default_branch: main
+review:
+  when: [pre-publish]
+  on: committed
+  seats: auto
+deliver:
+  kind: pr
+  merge: never
+ci:
+  empty: pass

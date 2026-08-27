@@ -1,0 +1,4644 @@
+{
+  "eventGraph": [],
+  "modules": [
+    {
+      "calls": [
+        {
+          "errors": [
+            "module_unavailable"
+          ],
+          "guarantees": [
+            "returns bytes only for the exact requested digest"
+          ],
+          "id": "assets/getArtifact@v1",
+          "inputSchema": {
+            "properties": {
+              "digest": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "digest"
+            ],
+            "type": "object"
+          },
+          "name": "getArtifact",
+          "outputSchema": {
+            "anyOf": [
+              {
+                "properties": {
+                  "artifact": {
+                    "properties": {
+                      "classification": {
+                        "enum": [
+                          "public",
+                          "private"
+                        ]
+                      },
+                      "digest": {
+                        "type": "string"
+                      },
+                      "mediaType": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "runId": {
+                        "type": "string"
+                      },
+                      "size": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "classification",
+                      "digest",
+                      "mediaType",
+                      "name",
+                      "runId",
+                      "size"
+                    ],
+                    "type": "object"
+                  },
+                  "contentBase64": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "artifact",
+                  "contentBase64"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "version": 1
+        },
+        {
+          "errors": [
+            "module_unavailable"
+          ],
+          "guarantees": [
+            "returns immutable artifact metadata ordered by digest"
+          ],
+          "id": "assets/listRunArtifacts@v1",
+          "inputSchema": {
+            "properties": {
+              "runId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "runId"
+            ],
+            "type": "object"
+          },
+          "name": "listRunArtifacts",
+          "outputSchema": {
+            "items": {
+              "properties": {
+                "classification": {
+                  "enum": [
+                    "public",
+                    "private"
+                  ]
+                },
+                "digest": {
+                  "type": "string"
+                },
+                "mediaType": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "runId": {
+                  "type": "string"
+                },
+                "size": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "classification",
+                "digest",
+                "mediaType",
+                "name",
+                "runId",
+                "size"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "version": 1
+        },
+        {
+          "errors": [
+            "module_unavailable",
+            "artifact_not_found",
+            "invalid_destination"
+          ],
+          "guarantees": [
+            "materializes only within the trusted composition-selected destination"
+          ],
+          "id": "assets/materializeArtifact@v1",
+          "inputSchema": {
+            "properties": {
+              "destination": {
+                "type": "string"
+              },
+              "digest": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "destination",
+              "digest"
+            ],
+            "type": "object"
+          },
+          "name": "materializeArtifact",
+          "outputSchema": {
+            "properties": {
+              "classification": {
+                "enum": [
+                  "public",
+                  "private"
+                ]
+              },
+              "digest": {
+                "type": "string"
+              },
+              "mediaType": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "runId": {
+                "type": "string"
+              },
+              "size": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "classification",
+              "digest",
+              "mediaType",
+              "name",
+              "runId",
+              "size"
+            ],
+            "type": "object"
+          },
+          "version": 1
+        },
+        {
+          "errors": [
+            "module_unavailable",
+            "artifact_too_large",
+            "digest_mismatch"
+          ],
+          "guarantees": [
+            "artifact bytes are immutable under their digest"
+          ],
+          "id": "assets/putArtifact@v1",
+          "inputSchema": {
+            "properties": {
+              "artifact": {
+                "properties": {
+                  "classification": {
+                    "enum": [
+                      "public",
+                      "private"
+                    ]
+                  },
+                  "digest": {
+                    "type": "string"
+                  },
+                  "mediaType": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "runId": {
+                    "type": "string"
+                  },
+                  "size": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "classification",
+                  "digest",
+                  "mediaType",
+                  "name",
+                  "runId",
+                  "size"
+                ],
+                "type": "object"
+              },
+              "contentBase64": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "artifact",
+              "contentBase64"
+            ],
+            "type": "object"
+          },
+          "name": "putArtifact",
+          "outputSchema": {
+            "properties": {
+              "classification": {
+                "enum": [
+                  "public",
+                  "private"
+                ]
+              },
+              "digest": {
+                "type": "string"
+              },
+              "mediaType": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "runId": {
+                "type": "string"
+              },
+              "size": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "classification",
+              "digest",
+              "mediaType",
+              "name",
+              "runId",
+              "size"
+            ],
+            "type": "object"
+          },
+          "version": 1
+        },
+        {
+          "errors": [
+            "module_unavailable",
+            "skill_not_found",
+            "skill_root_escape"
+          ],
+          "guarantees": [
+            "returns an immutable digest-pinned skill revision"
+          ],
+          "id": "assets/resolveSkill@v1",
+          "inputSchema": {
+            "properties": {
+              "reference": {
+                "type": "string"
+              },
+              "revision": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "reference",
+              "revision"
+            ],
+            "type": "object"
+          },
+          "name": "resolveSkill",
+          "outputSchema": {
+            "properties": {
+              "digest": {
+                "type": "string"
+              },
+              "reference": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "digest",
+              "reference"
+            ],
+            "type": "object"
+          },
+          "version": 1
+        }
+      ],
+      "dependencies": [],
+      "events": [
+        {
+          "id": "assets/artifactStored@v1",
+          "name": "artifactStored",
+          "payloadSchema": {
+            "properties": {
+              "classification": {
+                "enum": [
+                  "public",
+                  "private"
+                ]
+              },
+              "digest": {
+                "type": "string"
+              },
+              "mediaType": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "runId": {
+                "type": "string"
+              },
+              "size": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "classification",
+              "digest",
+              "mediaType",
+              "name",
+              "runId",
+              "size"
+            ],
+            "type": "object"
+          },
+          "version": 1
+        },
+        {
+          "id": "assets/skillRevisionPinned@v1",
+          "name": "skillRevisionPinned",
+          "payloadSchema": {
+            "properties": {
+              "digest": {
+                "type": "string"
+              },
+              "reference": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "digest",
+              "reference"
+            ],
+            "type": "object"
+          },
+          "version": 1
+        }
+      ],
+      "migrations": {
+        "postgres": [],
+        "sqlite": []
+      },
+      "name": "assets",
+      "resources": {},
+      "subscriptions": [],
+      "version": 1
+    },
+    {
+      "calls": [
+        {
+          "errors": [
+            "invalid_definition"
+          ],
+          "guarantees": [
+            "returns a byte-stable immutable revision for equivalent input"
+          ],
+          "id": "definitions/compileDefinition@v1",
+          "inputSchema": {
+            "properties": {
+              "source": {
+                "type": "string"
+              },
+              "sourceName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "source",
+              "sourceName"
+            ],
+            "type": "object"
+          },
+          "name": "compileDefinition",
+          "outputSchema": {
+            "properties": {
+              "definitionDigest": {
+                "type": "string"
+              },
+              "flowDigests": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "normalizedJson": {
+                "type": "string"
+              },
+              "sourceName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "definitionDigest",
+              "flowDigests",
+              "normalizedJson",
+              "sourceName"
+            ],
+            "type": "object"
+          },
+          "version": 1
+        },
+        {
+          "errors": [],
+          "guarantees": [
+            "returns the plan pinned to the requested definition and flow digests"
+          ],
+          "id": "definitions/getExecutionPlan@v1",
+          "inputSchema": {
+            "properties": {
+              "definitionDigest": {
+                "type": "string"
+              },
+              "flowId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "definitionDigest",
+              "flowId"
+            ],
+            "type": "object"
+          },
+          "name": "getExecutionPlan",
+          "outputSchema": {
+            "anyOf": [
+              {
+                "properties": {
+                  "agentProfileDigests": {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "type": "object"
+                  },
+                  "calls": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "definitionDigest": {
+                    "type": "string"
+                  },
+                  "events": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "flowDigest": {
+                    "type": "string"
+                  },
+                  "flowId": {
+                    "type": "string"
+                  },
+                  "normalizedJson": {
+                    "type": "string"
+                  },
+                  "skillRevisions": {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "type": "object"
+                  },
+                  "states": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "agentProfileDigests",
+                  "calls",
+                  "definitionDigest",
+                  "events",
+                  "flowDigest",
+                  "flowId",
+                  "normalizedJson",
+                  "skillRevisions",
+                  "states"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "version": 1
+        },
+        {
+          "errors": [],
+          "guarantees": [
+            "never mutates a published revision"
+          ],
+          "id": "definitions/resolveRevision@v1",
+          "inputSchema": {
+            "properties": {
+              "definitionDigest": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "definitionDigest"
+            ],
+            "type": "object"
+          },
+          "name": "resolveRevision",
+          "outputSchema": {
+            "anyOf": [
+              {
+                "properties": {
+                  "definitionDigest": {
+                    "type": "string"
+                  },
+                  "flowDigests": {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "type": "object"
+                  },
+                  "normalizedJson": {
+                    "type": "string"
+                  },
+                  "sourceName": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "definitionDigest",
+                  "flowDigests",
+                  "normalizedJson",
+                  "sourceName"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "version": 1
+        }
+      ],
+      "dependencies": [],
+      "events": [
+        {
+          "id": "definitions/definitionPublished@v1",
+          "name": "definitionPublished",
+          "payloadSchema": {
+            "properties": {
+              "definitionDigest": {
+                "type": "string"
+              },
+              "flowDigests": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "normalizedJson": {
+                "type": "string"
+              },
+              "sourceName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "definitionDigest",
+              "flowDigests",
+              "normalizedJson",
+              "sourceName"
+            ],
+            "type": "object"
+          },
+          "version": 1
+        }
+      ],
+      "migrations": {
+        "postgres": [],
+        "sqlite": []
+      },
+      "name": "definitions",
+      "resources": {},
+      "subscriptions": [],
+      "version": 1
+    },
+    {
+      "calls": [
+        {
+          "errors": [
+            "module_unavailable"
+          ],
+          "guarantees": [
+            "returns only committed receipts"
+          ],
+          "id": "effects/getReceipt@v1",
+          "inputSchema": {
+            "properties": {
+              "idempotencyKey": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "idempotencyKey"
+            ],
+            "type": "object"
+          },
+          "name": "getReceipt",
+          "outputSchema": {
+            "anyOf": [
+              {
+                "properties": {
+                  "effectId": {
+                    "type": "string"
+                  },
+                  "externalRevision": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "idempotencyKey": {
+                    "type": "string"
+                  },
+                  "outcome": {
+                    "enum": [
+                      "pending",
+                      "applied",
+                      "rejected",
+                      "ambiguous"
+                    ]
+                  },
+                  "recordedAt": {
+                    "type": "string"
+                  },
+                  "runId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "effectId",
+                  "externalRevision",
+                  "idempotencyKey",
+                  "outcome",
+                  "recordedAt",
+                  "runId"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "version": 1
+        },
+        {
+          "errors": [
+            "module_unavailable",
+            "receipt_not_found",
+            "reconciliation_failed"
+          ],
+          "guarantees": [
+            "does not repeat an externally confirmed write"
+          ],
+          "id": "effects/reconcileEffect@v1",
+          "inputSchema": {
+            "properties": {
+              "idempotencyKey": {
+                "type": "string"
+              },
+              "observedAt": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "idempotencyKey",
+              "observedAt"
+            ],
+            "type": "object"
+          },
+          "name": "reconcileEffect",
+          "outputSchema": {
+            "properties": {
+              "effectId": {
+                "type": "string"
+              },
+              "externalRevision": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "idempotencyKey": {
+                "type": "string"
+              },
+              "outcome": {
+                "enum": [
+                  "pending",
+                  "applied",
+                  "rejected",
+                  "ambiguous"
+                ]
+              },
+              "recordedAt": {
+                "type": "string"
+              },
+              "runId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "effectId",
+              "externalRevision",
+              "idempotencyKey",
+              "outcome",
+              "recordedAt",
+              "runId"
+            ],
+            "type": "object"
+          },
+          "version": 1
+        },
+        {
+          "errors": [
+            "module_unavailable",
+            "effect_forbidden",
+            "stale_external_revision"
+          ],
+          "guarantees": [
+            "checks declared permission before adapter invocation and is idempotent by intent key"
+          ],
+          "id": "effects/requestEffect@v1",
+          "inputSchema": {
+            "properties": {
+              "capability": {
+                "type": "string"
+              },
+              "correlationToken": {
+                "type": "string"
+              },
+              "expectedExternalRevision": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "idempotencyKey": {
+                "type": "string"
+              },
+              "payloadDigest": {
+                "type": "string"
+              },
+              "provenance": {
+                "type": "string"
+              },
+              "runId": {
+                "type": "string"
+              },
+              "target": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "capability",
+              "correlationToken",
+              "expectedExternalRevision",
+              "idempotencyKey",
+              "payloadDigest",
+              "provenance",
+              "runId",
+              "target"
+            ],
+            "type": "object"
+          },
+          "name": "requestEffect",
+          "outputSchema": {
+            "properties": {
+              "effectId": {
+                "type": "string"
+              },
+              "externalRevision": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "idempotencyKey": {
+                "type": "string"
+              },
+              "outcome": {
+                "enum": [
+                  "pending",
+                  "applied",
+                  "rejected",
+                  "ambiguous"
+                ]
+              },
+              "recordedAt": {
+                "type": "string"
+              },
+              "runId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "effectId",
+              "externalRevision",
+              "idempotencyKey",
+              "outcome",
+              "recordedAt",
+              "runId"
+            ],
+            "type": "object"
+          },
+          "version": 1
+        }
+      ],
+      "dependencies": [
+        "assets",
+        "definitions"
+      ],
+      "events": [
+        {
+          "id": "effects/effectFinished@v1",
+          "name": "effectFinished",
+          "payloadSchema": {
+            "properties": {
+              "effectId": {
+                "type": "string"
+              },
+              "externalRevision": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "idempotencyKey": {
+                "type": "string"
+              },
+              "outcome": {
+                "enum": [
+                  "pending",
+                  "applied",
+                  "rejected",
+                  "ambiguous"
+                ]
+              },
+              "recordedAt": {
+                "type": "string"
+              },
+              "runId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "effectId",
+              "externalRevision",
+              "idempotencyKey",
+              "outcome",
+              "recordedAt",
+              "runId"
+            ],
+            "type": "object"
+          },
+          "version": 1
+        }
+      ],
+      "migrations": {
+        "postgres": [],
+        "sqlite": []
+      },
+      "name": "effects",
+      "resources": {},
+      "subscriptions": [],
+      "version": 1
+    },
+    {
+      "calls": [
+        {
+          "errors": [
+            "module_unavailable"
+          ],
+          "guarantees": [
+            "returns committed attempt state"
+          ],
+          "id": "execution/getAttempt@v1",
+          "inputSchema": {
+            "properties": {
+              "attemptId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "attemptId"
+            ],
+            "type": "object"
+          },
+          "name": "getAttempt",
+          "outputSchema": {
+            "anyOf": [
+              {
+                "properties": {
+                  "attemptId": {
+                    "type": "string"
+                  },
+                  "correlationToken": {
+                    "type": "string"
+                  },
+                  "finishedAt": {
+                    "type": "string"
+                  },
+                  "outcome": {
+                    "enum": [
+                      "pending",
+                      "succeeded",
+                      "failed"
+                    ]
+                  },
+                  "runId": {
+                    "type": "string"
+                  },
+                  "startedAt": {
+                    "type": "string"
+                  },
+                  "stepId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "attemptId",
+                  "correlationToken",
+                  "outcome",
+                  "runId",
+                  "startedAt",
+                  "stepId"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "version": 1
+        },
+        {
+          "errors": [
+            "module_unavailable",
+            "attempt_exists",
+            "invalid_pin"
+          ],
+          "guarantees": [
+            "request is idempotent by attempt id and preserves the correlation token"
+          ],
+          "id": "execution/requestAttempt@v1",
+          "inputSchema": {
+            "properties": {
+              "agentProfileDigest": {
+                "type": "string"
+              },
+              "attemptId": {
+                "type": "string"
+              },
+              "correlationToken": {
+                "type": "string"
+              },
+              "inputArtifactDigests": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "runId": {
+                "type": "string"
+              },
+              "skillDigests": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "startedAt": {
+                "type": "string"
+              },
+              "stepId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "agentProfileDigest",
+              "attemptId",
+              "correlationToken",
+              "inputArtifactDigests",
+              "runId",
+              "skillDigests",
+              "startedAt",
+              "stepId"
+            ],
+            "type": "object"
+          },
+          "name": "requestAttempt",
+          "outputSchema": {
+            "properties": {
+              "attemptId": {
+                "type": "string"
+              },
+              "correlationToken": {
+                "type": "string"
+              },
+              "finishedAt": {
+                "type": "string"
+              },
+              "outcome": {
+                "enum": [
+                  "pending",
+                  "succeeded",
+                  "failed"
+                ]
+              },
+              "runId": {
+                "type": "string"
+              },
+              "startedAt": {
+                "type": "string"
+              },
+              "stepId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "attemptId",
+              "correlationToken",
+              "outcome",
+              "runId",
+              "startedAt",
+              "stepId"
+            ],
+            "type": "object"
+          },
+          "version": 1
+        }
+      ],
+      "dependencies": [
+        "assets"
+      ],
+      "events": [
+        {
+          "id": "execution/attemptFinished@v1",
+          "name": "attemptFinished",
+          "payloadSchema": {
+            "properties": {
+              "attemptId": {
+                "type": "string"
+              },
+              "correlationToken": {
+                "type": "string"
+              },
+              "finishedAt": {
+                "type": "string"
+              },
+              "outcome": {
+                "enum": [
+                  "pending",
+                  "succeeded",
+                  "failed"
+                ]
+              },
+              "runId": {
+                "type": "string"
+              },
+              "startedAt": {
+                "type": "string"
+              },
+              "stepId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "attemptId",
+              "correlationToken",
+              "outcome",
+              "runId",
+              "startedAt",
+              "stepId"
+            ],
+            "type": "object"
+          },
+          "version": 1
+        }
+      ],
+      "migrations": {
+        "postgres": [],
+        "sqlite": []
+      },
+      "name": "execution",
+      "resources": {},
+      "subscriptions": [],
+      "version": 1
+    },
+    {
+      "calls": [
+        {
+          "errors": [
+            "module_unavailable",
+            "duplicate_delivery",
+            "invalid_source_event"
+          ],
+          "guarantees": [
+            "acceptance is idempotent by source and delivery identity"
+          ],
+          "id": "intake/acceptSourceEvent@v1",
+          "inputSchema": {
+            "properties": {
+              "actor": {
+                "type": "string"
+              },
+              "correlationId": {
+                "type": "string"
+              },
+              "deliveryId": {
+                "type": "string"
+              },
+              "eventType": {
+                "type": "string"
+              },
+              "observedAt": {
+                "type": "string"
+              },
+              "occurredAt": {
+                "type": "string"
+              },
+              "payload": {},
+              "repository": {
+                "type": "string"
+              },
+              "sourceId": {
+                "type": "string"
+              },
+              "sourceRevision": {
+                "type": "string"
+              },
+              "subject": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "actor",
+              "correlationId",
+              "deliveryId",
+              "eventType",
+              "observedAt",
+              "occurredAt",
+              "payload",
+              "repository",
+              "sourceId",
+              "sourceRevision",
+              "subject"
+            ],
+            "type": "object"
+          },
+          "name": "acceptSourceEvent",
+          "outputSchema": {
+            "properties": {
+              "actor": {
+                "type": "string"
+              },
+              "correlationId": {
+                "type": "string"
+              },
+              "deliveryId": {
+                "type": "string"
+              },
+              "eventType": {
+                "type": "string"
+              },
+              "observedAt": {
+                "type": "string"
+              },
+              "occurredAt": {
+                "type": "string"
+              },
+              "payload": {},
+              "repository": {
+                "type": "string"
+              },
+              "sourceId": {
+                "type": "string"
+              },
+              "sourceRevision": {
+                "type": "string"
+              },
+              "subject": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "actor",
+              "correlationId",
+              "deliveryId",
+              "eventType",
+              "observedAt",
+              "occurredAt",
+              "payload",
+              "repository",
+              "sourceId",
+              "sourceRevision",
+              "subject"
+            ],
+            "type": "object"
+          },
+          "version": 1
+        },
+        {
+          "errors": [
+            "module_unavailable"
+          ],
+          "guarantees": [
+            "returns only a cursor advanced by committed event acceptance"
+          ],
+          "id": "intake/getSourceCursor@v1",
+          "inputSchema": {
+            "properties": {
+              "sourceId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "sourceId"
+            ],
+            "type": "object"
+          },
+          "name": "getSourceCursor",
+          "outputSchema": {
+            "anyOf": [
+              {
+                "properties": {
+                  "cursor": {
+                    "type": "string"
+                  },
+                  "sourceId": {
+                    "type": "string"
+                  },
+                  "updatedAt": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "cursor",
+                  "sourceId",
+                  "updatedAt"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "version": 1
+        },
+        {
+          "errors": [
+            "module_unavailable",
+            "source_not_found",
+            "transport_failure"
+          ],
+          "guarantees": [
+            "never advances a cursor past an uncommitted event"
+          ],
+          "id": "intake/pollRepository@v1",
+          "inputSchema": {
+            "properties": {
+              "observedAt": {
+                "type": "string"
+              },
+              "sourceId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "observedAt",
+              "sourceId"
+            ],
+            "type": "object"
+          },
+          "name": "pollRepository",
+          "outputSchema": {
+            "properties": {
+              "accepted": {
+                "type": "integer"
+              },
+              "cursor": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "cursor": {
+                        "type": "string"
+                      },
+                      "sourceId": {
+                        "type": "string"
+                      },
+                      "updatedAt": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "cursor",
+                      "sourceId",
+                      "updatedAt"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "accepted",
+              "cursor"
+            ],
+            "type": "object"
+          },
+          "version": 1
+        }
+      ],
+      "dependencies": [
+        "definitions"
+      ],
+      "events": [
+        {
+          "id": "intake/factoryEventAccepted@v1",
+          "name": "factoryEventAccepted",
+          "payloadSchema": {
+            "properties": {
+              "actor": {
+                "type": "string"
+              },
+              "correlationId": {
+                "type": "string"
+              },
+              "deliveryId": {
+                "type": "string"
+              },
+              "eventType": {
+                "type": "string"
+              },
+              "observedAt": {
+                "type": "string"
+              },
+              "occurredAt": {
+                "type": "string"
+              },
+              "payload": {},
+              "repository": {
+                "type": "string"
+              },
+              "sourceId": {
+                "type": "string"
+              },
+              "sourceRevision": {
+                "type": "string"
+              },
+              "subject": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "actor",
+              "correlationId",
+              "deliveryId",
+              "eventType",
+              "observedAt",
+              "occurredAt",
+              "payload",
+              "repository",
+              "sourceId",
+              "sourceRevision",
+              "subject"
+            ],
+            "type": "object"
+          },
+          "version": 1
+        }
+      ],
+      "migrations": {
+        "postgres": [],
+        "sqlite": []
+      },
+      "name": "intake",
+      "resources": {},
+      "subscriptions": [],
+      "version": 1
+    },
+    {
+      "calls": [
+        {
+          "errors": [
+            "module_unavailable"
+          ],
+          "guarantees": [
+            "reports readiness without changing domain state"
+          ],
+          "id": "operations/getHealth@v1",
+          "inputSchema": {
+            "properties": {},
+            "required": [],
+            "type": "object"
+          },
+          "name": "getHealth",
+          "outputSchema": {
+            "properties": {
+              "modules": {
+                "additionalProperties": {
+                  "enum": [
+                    "ready",
+                    "unavailable"
+                  ]
+                },
+                "type": "object"
+              },
+              "status": {
+                "enum": [
+                  "ready",
+                  "degraded"
+                ]
+              }
+            },
+            "required": [
+              "modules",
+              "status"
+            ],
+            "type": "object"
+          },
+          "version": 1
+        },
+        {
+          "errors": [
+            "module_unavailable",
+            "invalid_limit"
+          ],
+          "guarantees": [
+            "returns committed effect receipts in deterministic order"
+          ],
+          "id": "operations/listEffects@v1",
+          "inputSchema": {
+            "properties": {
+              "limit": {
+                "type": "integer"
+              },
+              "runId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "limit"
+            ],
+            "type": "object"
+          },
+          "name": "listEffects",
+          "outputSchema": {
+            "items": {
+              "properties": {
+                "effectId": {
+                  "type": "string"
+                },
+                "externalRevision": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "idempotencyKey": {
+                  "type": "string"
+                },
+                "outcome": {
+                  "enum": [
+                    "pending",
+                    "applied",
+                    "rejected",
+                    "ambiguous"
+                  ]
+                },
+                "recordedAt": {
+                  "type": "string"
+                },
+                "runId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "effectId",
+                "externalRevision",
+                "idempotencyKey",
+                "outcome",
+                "recordedAt",
+                "runId"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "version": 1
+        },
+        {
+          "errors": [
+            "module_unavailable",
+            "invalid_limit"
+          ],
+          "guarantees": [
+            "returns redaction-safe projection records in event order"
+          ],
+          "id": "operations/listEvents@v1",
+          "inputSchema": {
+            "properties": {
+              "after": {
+                "type": "string"
+              },
+              "limit": {
+                "type": "integer"
+              },
+              "runId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "limit"
+            ],
+            "type": "object"
+          },
+          "name": "listEvents",
+          "outputSchema": {
+            "items": {
+              "properties": {
+                "eventId": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "occurredAt": {
+                  "type": "string"
+                },
+                "payload": {}
+              },
+              "required": [
+                "eventId",
+                "kind",
+                "occurredAt",
+                "payload"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "version": 1
+        },
+        {
+          "errors": [
+            "module_unavailable",
+            "invalid_limit"
+          ],
+          "guarantees": [
+            "projection results are ordered deterministically"
+          ],
+          "id": "operations/listRuns@v1",
+          "inputSchema": {
+            "properties": {
+              "limit": {
+                "type": "integer"
+              },
+              "status": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "limit"
+            ],
+            "type": "object"
+          },
+          "name": "listRuns",
+          "outputSchema": {
+            "items": {
+              "properties": {
+                "agentProfileDigest": {
+                  "type": "string"
+                },
+                "definitionDigest": {
+                  "type": "string"
+                },
+                "factoryEventId": {
+                  "type": "string"
+                },
+                "finishedAt": {
+                  "type": "string"
+                },
+                "flowDigest": {
+                  "type": "string"
+                },
+                "flowId": {
+                  "type": "string"
+                },
+                "moduleManifestDigest": {
+                  "type": "string"
+                },
+                "runId": {
+                  "type": "string"
+                },
+                "skillDigests": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object"
+                },
+                "startedAt": {
+                  "type": "string"
+                },
+                "stateId": {
+                  "type": "string"
+                },
+                "status": {
+                  "enum": [
+                    "running",
+                    "waiting",
+                    "succeeded",
+                    "failed",
+                    "cancelled"
+                  ]
+                },
+                "workflowVersionDigest": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "agentProfileDigest",
+                "definitionDigest",
+                "factoryEventId",
+                "flowDigest",
+                "flowId",
+                "moduleManifestDigest",
+                "runId",
+                "skillDigests",
+                "startedAt",
+                "stateId",
+                "status",
+                "workflowVersionDigest"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "version": 1
+        },
+        {
+          "errors": [
+            "module_unavailable"
+          ],
+          "guarantees": [
+            "reads event-fed projections without querying another module's storage"
+          ],
+          "id": "operations/showRun@v1",
+          "inputSchema": {
+            "properties": {
+              "runId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "runId"
+            ],
+            "type": "object"
+          },
+          "name": "showRun",
+          "outputSchema": {
+            "anyOf": [
+              {
+                "properties": {
+                  "agentProfileDigest": {
+                    "type": "string"
+                  },
+                  "definitionDigest": {
+                    "type": "string"
+                  },
+                  "factoryEventId": {
+                    "type": "string"
+                  },
+                  "finishedAt": {
+                    "type": "string"
+                  },
+                  "flowDigest": {
+                    "type": "string"
+                  },
+                  "flowId": {
+                    "type": "string"
+                  },
+                  "moduleManifestDigest": {
+                    "type": "string"
+                  },
+                  "runId": {
+                    "type": "string"
+                  },
+                  "skillDigests": {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "type": "object"
+                  },
+                  "startedAt": {
+                    "type": "string"
+                  },
+                  "stateId": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "enum": [
+                      "running",
+                      "waiting",
+                      "succeeded",
+                      "failed",
+                      "cancelled"
+                    ]
+                  },
+                  "workflowVersionDigest": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "agentProfileDigest",
+                  "definitionDigest",
+                  "factoryEventId",
+                  "flowDigest",
+                  "flowId",
+                  "moduleManifestDigest",
+                  "runId",
+                  "skillDigests",
+                  "startedAt",
+                  "stateId",
+                  "status",
+                  "workflowVersionDigest"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "version": 1
+        }
+      ],
+      "dependencies": [
+        "assets",
+        "definitions",
+        "effects",
+        "execution",
+        "intake",
+        "runs"
+      ],
+      "events": [],
+      "migrations": {
+        "postgres": [],
+        "sqlite": []
+      },
+      "name": "operations",
+      "resources": {},
+      "subscriptions": [],
+      "version": 1
+    },
+    {
+      "calls": [
+        {
+          "errors": [
+            "module_unavailable",
+            "run_not_found",
+            "command_not_allowed"
+          ],
+          "guarantees": [
+            "command application is idempotent by command id"
+          ],
+          "id": "runs/applyOperatorCommand@v1",
+          "inputSchema": {
+            "properties": {
+              "commandId": {
+                "type": "string"
+              },
+              "issuedAt": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "approve",
+                  "reject",
+                  "cancel",
+                  "retry"
+                ]
+              },
+              "runId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "commandId",
+              "issuedAt",
+              "kind",
+              "runId"
+            ],
+            "type": "object"
+          },
+          "name": "applyOperatorCommand",
+          "outputSchema": {
+            "properties": {
+              "agentProfileDigest": {
+                "type": "string"
+              },
+              "definitionDigest": {
+                "type": "string"
+              },
+              "factoryEventId": {
+                "type": "string"
+              },
+              "finishedAt": {
+                "type": "string"
+              },
+              "flowDigest": {
+                "type": "string"
+              },
+              "flowId": {
+                "type": "string"
+              },
+              "moduleManifestDigest": {
+                "type": "string"
+              },
+              "runId": {
+                "type": "string"
+              },
+              "skillDigests": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "startedAt": {
+                "type": "string"
+              },
+              "stateId": {
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "running",
+                  "waiting",
+                  "succeeded",
+                  "failed",
+                  "cancelled"
+                ]
+              },
+              "workflowVersionDigest": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "agentProfileDigest",
+              "definitionDigest",
+              "factoryEventId",
+              "flowDigest",
+              "flowId",
+              "moduleManifestDigest",
+              "runId",
+              "skillDigests",
+              "startedAt",
+              "stateId",
+              "status",
+              "workflowVersionDigest"
+            ],
+            "type": "object"
+          },
+          "version": 1
+        },
+        {
+          "errors": [
+            "module_unavailable"
+          ],
+          "guarantees": [
+            "returns committed run state"
+          ],
+          "id": "runs/getRun@v1",
+          "inputSchema": {
+            "properties": {
+              "runId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "runId"
+            ],
+            "type": "object"
+          },
+          "name": "getRun",
+          "outputSchema": {
+            "anyOf": [
+              {
+                "properties": {
+                  "agentProfileDigest": {
+                    "type": "string"
+                  },
+                  "definitionDigest": {
+                    "type": "string"
+                  },
+                  "factoryEventId": {
+                    "type": "string"
+                  },
+                  "finishedAt": {
+                    "type": "string"
+                  },
+                  "flowDigest": {
+                    "type": "string"
+                  },
+                  "flowId": {
+                    "type": "string"
+                  },
+                  "moduleManifestDigest": {
+                    "type": "string"
+                  },
+                  "runId": {
+                    "type": "string"
+                  },
+                  "skillDigests": {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "type": "object"
+                  },
+                  "startedAt": {
+                    "type": "string"
+                  },
+                  "stateId": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "enum": [
+                      "running",
+                      "waiting",
+                      "succeeded",
+                      "failed",
+                      "cancelled"
+                    ]
+                  },
+                  "workflowVersionDigest": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "agentProfileDigest",
+                  "definitionDigest",
+                  "factoryEventId",
+                  "flowDigest",
+                  "flowId",
+                  "moduleManifestDigest",
+                  "runId",
+                  "skillDigests",
+                  "startedAt",
+                  "stateId",
+                  "status",
+                  "workflowVersionDigest"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "version": 1
+        },
+        {
+          "errors": [
+            "module_unavailable",
+            "run_exists",
+            "invalid_revision_pin"
+          ],
+          "guarantees": [
+            "all definition and execution pins are immutable after creation"
+          ],
+          "id": "runs/startRun@v1",
+          "inputSchema": {
+            "properties": {
+              "agentProfileDigest": {
+                "type": "string"
+              },
+              "definitionDigest": {
+                "type": "string"
+              },
+              "factoryEventId": {
+                "type": "string"
+              },
+              "flowDigest": {
+                "type": "string"
+              },
+              "flowId": {
+                "type": "string"
+              },
+              "moduleManifestDigest": {
+                "type": "string"
+              },
+              "runId": {
+                "type": "string"
+              },
+              "skillDigests": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "startedAt": {
+                "type": "string"
+              },
+              "workflowVersionDigest": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "agentProfileDigest",
+              "definitionDigest",
+              "factoryEventId",
+              "flowDigest",
+              "flowId",
+              "moduleManifestDigest",
+              "runId",
+              "skillDigests",
+              "startedAt",
+              "workflowVersionDigest"
+            ],
+            "type": "object"
+          },
+          "name": "startRun",
+          "outputSchema": {
+            "properties": {
+              "agentProfileDigest": {
+                "type": "string"
+              },
+              "definitionDigest": {
+                "type": "string"
+              },
+              "factoryEventId": {
+                "type": "string"
+              },
+              "finishedAt": {
+                "type": "string"
+              },
+              "flowDigest": {
+                "type": "string"
+              },
+              "flowId": {
+                "type": "string"
+              },
+              "moduleManifestDigest": {
+                "type": "string"
+              },
+              "runId": {
+                "type": "string"
+              },
+              "skillDigests": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "startedAt": {
+                "type": "string"
+              },
+              "stateId": {
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "running",
+                  "waiting",
+                  "succeeded",
+                  "failed",
+                  "cancelled"
+                ]
+              },
+              "workflowVersionDigest": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "agentProfileDigest",
+              "definitionDigest",
+              "factoryEventId",
+              "flowDigest",
+              "flowId",
+              "moduleManifestDigest",
+              "runId",
+              "skillDigests",
+              "startedAt",
+              "stateId",
+              "status",
+              "workflowVersionDigest"
+            ],
+            "type": "object"
+          },
+          "version": 1
+        }
+      ],
+      "dependencies": [
+        "assets",
+        "definitions",
+        "effects",
+        "execution"
+      ],
+      "events": [
+        {
+          "id": "runs/effectRequested@v1",
+          "name": "effectRequested",
+          "payloadSchema": {
+            "properties": {
+              "capability": {
+                "type": "string"
+              },
+              "correlationToken": {
+                "type": "string"
+              },
+              "expectedExternalRevision": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "idempotencyKey": {
+                "type": "string"
+              },
+              "payloadDigest": {
+                "type": "string"
+              },
+              "provenance": {
+                "type": "string"
+              },
+              "runId": {
+                "type": "string"
+              },
+              "target": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "capability",
+              "correlationToken",
+              "expectedExternalRevision",
+              "idempotencyKey",
+              "payloadDigest",
+              "provenance",
+              "runId",
+              "target"
+            ],
+            "type": "object"
+          },
+          "version": 1
+        },
+        {
+          "id": "runs/runFinished@v1",
+          "name": "runFinished",
+          "payloadSchema": {
+            "properties": {
+              "agentProfileDigest": {
+                "type": "string"
+              },
+              "definitionDigest": {
+                "type": "string"
+              },
+              "factoryEventId": {
+                "type": "string"
+              },
+              "finishedAt": {
+                "type": "string"
+              },
+              "flowDigest": {
+                "type": "string"
+              },
+              "flowId": {
+                "type": "string"
+              },
+              "moduleManifestDigest": {
+                "type": "string"
+              },
+              "runId": {
+                "type": "string"
+              },
+              "skillDigests": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "startedAt": {
+                "type": "string"
+              },
+              "stateId": {
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "running",
+                  "waiting",
+                  "succeeded",
+                  "failed",
+                  "cancelled"
+                ]
+              },
+              "workflowVersionDigest": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "agentProfileDigest",
+              "definitionDigest",
+              "factoryEventId",
+              "flowDigest",
+              "flowId",
+              "moduleManifestDigest",
+              "runId",
+              "skillDigests",
+              "startedAt",
+              "stateId",
+              "status",
+              "workflowVersionDigest"
+            ],
+            "type": "object"
+          },
+          "version": 1
+        },
+        {
+          "id": "runs/runStateChanged@v1",
+          "name": "runStateChanged",
+          "payloadSchema": {
+            "properties": {
+              "agentProfileDigest": {
+                "type": "string"
+              },
+              "definitionDigest": {
+                "type": "string"
+              },
+              "factoryEventId": {
+                "type": "string"
+              },
+              "finishedAt": {
+                "type": "string"
+              },
+              "flowDigest": {
+                "type": "string"
+              },
+              "flowId": {
+                "type": "string"
+              },
+              "moduleManifestDigest": {
+                "type": "string"
+              },
+              "runId": {
+                "type": "string"
+              },
+              "skillDigests": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "startedAt": {
+                "type": "string"
+              },
+              "stateId": {
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "running",
+                  "waiting",
+                  "succeeded",
+                  "failed",
+                  "cancelled"
+                ]
+              },
+              "workflowVersionDigest": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "agentProfileDigest",
+              "definitionDigest",
+              "factoryEventId",
+              "flowDigest",
+              "flowId",
+              "moduleManifestDigest",
+              "runId",
+              "skillDigests",
+              "startedAt",
+              "stateId",
+              "status",
+              "workflowVersionDigest"
+            ],
+            "type": "object"
+          },
+          "version": 1
+        },
+        {
+          "id": "runs/stepRequested@v1",
+          "name": "stepRequested",
+          "payloadSchema": {
+            "properties": {
+              "correlationToken": {
+                "type": "string"
+              },
+              "runId": {
+                "type": "string"
+              },
+              "stepId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "correlationToken",
+              "runId",
+              "stepId"
+            ],
+            "type": "object"
+          },
+          "version": 1
+        }
+      ],
+      "migrations": {
+        "postgres": [],
+        "sqlite": []
+      },
+      "name": "runs",
+      "resources": {},
+      "subscriptions": [],
+      "version": 1
+    }
+  ],
+  "pactInteractions": [
+    {
+      "inputSchema": {
+        "properties": {
+          "digest": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "digest"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "assets/getArtifact@v1",
+      "outputSchema": {
+        "anyOf": [
+          {
+            "properties": {
+              "artifact": {
+                "properties": {
+                  "classification": {
+                    "enum": [
+                      "public",
+                      "private"
+                    ]
+                  },
+                  "digest": {
+                    "type": "string"
+                  },
+                  "mediaType": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "runId": {
+                    "type": "string"
+                  },
+                  "size": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "classification",
+                  "digest",
+                  "mediaType",
+                  "name",
+                  "runId",
+                  "size"
+                ],
+                "type": "object"
+              },
+              "contentBase64": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "artifact",
+              "contentBase64"
+            ],
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "provider": "assets"
+    },
+    {
+      "inputSchema": {
+        "properties": {
+          "runId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "runId"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "assets/listRunArtifacts@v1",
+      "outputSchema": {
+        "items": {
+          "properties": {
+            "classification": {
+              "enum": [
+                "public",
+                "private"
+              ]
+            },
+            "digest": {
+              "type": "string"
+            },
+            "mediaType": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "runId": {
+              "type": "string"
+            },
+            "size": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "classification",
+            "digest",
+            "mediaType",
+            "name",
+            "runId",
+            "size"
+          ],
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "provider": "assets"
+    },
+    {
+      "inputSchema": {
+        "properties": {
+          "destination": {
+            "type": "string"
+          },
+          "digest": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "destination",
+          "digest"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "assets/materializeArtifact@v1",
+      "outputSchema": {
+        "properties": {
+          "classification": {
+            "enum": [
+              "public",
+              "private"
+            ]
+          },
+          "digest": {
+            "type": "string"
+          },
+          "mediaType": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "classification",
+          "digest",
+          "mediaType",
+          "name",
+          "runId",
+          "size"
+        ],
+        "type": "object"
+      },
+      "provider": "assets"
+    },
+    {
+      "inputSchema": {
+        "properties": {
+          "artifact": {
+            "properties": {
+              "classification": {
+                "enum": [
+                  "public",
+                  "private"
+                ]
+              },
+              "digest": {
+                "type": "string"
+              },
+              "mediaType": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "runId": {
+                "type": "string"
+              },
+              "size": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "classification",
+              "digest",
+              "mediaType",
+              "name",
+              "runId",
+              "size"
+            ],
+            "type": "object"
+          },
+          "contentBase64": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "artifact",
+          "contentBase64"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "assets/putArtifact@v1",
+      "outputSchema": {
+        "properties": {
+          "classification": {
+            "enum": [
+              "public",
+              "private"
+            ]
+          },
+          "digest": {
+            "type": "string"
+          },
+          "mediaType": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "classification",
+          "digest",
+          "mediaType",
+          "name",
+          "runId",
+          "size"
+        ],
+        "type": "object"
+      },
+      "provider": "assets"
+    },
+    {
+      "inputSchema": {
+        "properties": {
+          "reference": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reference",
+          "revision"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "assets/resolveSkill@v1",
+      "outputSchema": {
+        "properties": {
+          "digest": {
+            "type": "string"
+          },
+          "reference": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "digest",
+          "reference"
+        ],
+        "type": "object"
+      },
+      "provider": "assets"
+    },
+    {
+      "kind": "event",
+      "name": "artifactStored",
+      "payloadSchema": {
+        "properties": {
+          "classification": {
+            "enum": [
+              "public",
+              "private"
+            ]
+          },
+          "digest": {
+            "type": "string"
+          },
+          "mediaType": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "classification",
+          "digest",
+          "mediaType",
+          "name",
+          "runId",
+          "size"
+        ],
+        "type": "object"
+      },
+      "provider": "assets",
+      "version": 1
+    },
+    {
+      "kind": "event",
+      "name": "skillRevisionPinned",
+      "payloadSchema": {
+        "properties": {
+          "digest": {
+            "type": "string"
+          },
+          "reference": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "digest",
+          "reference"
+        ],
+        "type": "object"
+      },
+      "provider": "assets",
+      "version": 1
+    },
+    {
+      "inputSchema": {
+        "properties": {
+          "source": {
+            "type": "string"
+          },
+          "sourceName": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "sourceName"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "definitions/compileDefinition@v1",
+      "outputSchema": {
+        "properties": {
+          "definitionDigest": {
+            "type": "string"
+          },
+          "flowDigests": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "normalizedJson": {
+            "type": "string"
+          },
+          "sourceName": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "definitionDigest",
+          "flowDigests",
+          "normalizedJson",
+          "sourceName"
+        ],
+        "type": "object"
+      },
+      "provider": "definitions"
+    },
+    {
+      "inputSchema": {
+        "properties": {
+          "definitionDigest": {
+            "type": "string"
+          },
+          "flowId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "definitionDigest",
+          "flowId"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "definitions/getExecutionPlan@v1",
+      "outputSchema": {
+        "anyOf": [
+          {
+            "properties": {
+              "agentProfileDigests": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "calls": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "definitionDigest": {
+                "type": "string"
+              },
+              "events": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "flowDigest": {
+                "type": "string"
+              },
+              "flowId": {
+                "type": "string"
+              },
+              "normalizedJson": {
+                "type": "string"
+              },
+              "skillRevisions": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "states": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "agentProfileDigests",
+              "calls",
+              "definitionDigest",
+              "events",
+              "flowDigest",
+              "flowId",
+              "normalizedJson",
+              "skillRevisions",
+              "states"
+            ],
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "provider": "definitions"
+    },
+    {
+      "inputSchema": {
+        "properties": {
+          "definitionDigest": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "definitionDigest"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "definitions/resolveRevision@v1",
+      "outputSchema": {
+        "anyOf": [
+          {
+            "properties": {
+              "definitionDigest": {
+                "type": "string"
+              },
+              "flowDigests": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "normalizedJson": {
+                "type": "string"
+              },
+              "sourceName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "definitionDigest",
+              "flowDigests",
+              "normalizedJson",
+              "sourceName"
+            ],
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "provider": "definitions"
+    },
+    {
+      "kind": "event",
+      "name": "definitionPublished",
+      "payloadSchema": {
+        "properties": {
+          "definitionDigest": {
+            "type": "string"
+          },
+          "flowDigests": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "normalizedJson": {
+            "type": "string"
+          },
+          "sourceName": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "definitionDigest",
+          "flowDigests",
+          "normalizedJson",
+          "sourceName"
+        ],
+        "type": "object"
+      },
+      "provider": "definitions",
+      "version": 1
+    },
+    {
+      "inputSchema": {
+        "properties": {
+          "idempotencyKey": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "idempotencyKey"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "effects/getReceipt@v1",
+      "outputSchema": {
+        "anyOf": [
+          {
+            "properties": {
+              "effectId": {
+                "type": "string"
+              },
+              "externalRevision": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "idempotencyKey": {
+                "type": "string"
+              },
+              "outcome": {
+                "enum": [
+                  "pending",
+                  "applied",
+                  "rejected",
+                  "ambiguous"
+                ]
+              },
+              "recordedAt": {
+                "type": "string"
+              },
+              "runId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "effectId",
+              "externalRevision",
+              "idempotencyKey",
+              "outcome",
+              "recordedAt",
+              "runId"
+            ],
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "provider": "effects"
+    },
+    {
+      "inputSchema": {
+        "properties": {
+          "idempotencyKey": {
+            "type": "string"
+          },
+          "observedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "idempotencyKey",
+          "observedAt"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "effects/reconcileEffect@v1",
+      "outputSchema": {
+        "properties": {
+          "effectId": {
+            "type": "string"
+          },
+          "externalRevision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "idempotencyKey": {
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "pending",
+              "applied",
+              "rejected",
+              "ambiguous"
+            ]
+          },
+          "recordedAt": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "effectId",
+          "externalRevision",
+          "idempotencyKey",
+          "outcome",
+          "recordedAt",
+          "runId"
+        ],
+        "type": "object"
+      },
+      "provider": "effects"
+    },
+    {
+      "inputSchema": {
+        "properties": {
+          "capability": {
+            "type": "string"
+          },
+          "correlationToken": {
+            "type": "string"
+          },
+          "expectedExternalRevision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "idempotencyKey": {
+            "type": "string"
+          },
+          "payloadDigest": {
+            "type": "string"
+          },
+          "provenance": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "capability",
+          "correlationToken",
+          "expectedExternalRevision",
+          "idempotencyKey",
+          "payloadDigest",
+          "provenance",
+          "runId",
+          "target"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "effects/requestEffect@v1",
+      "outputSchema": {
+        "properties": {
+          "effectId": {
+            "type": "string"
+          },
+          "externalRevision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "idempotencyKey": {
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "pending",
+              "applied",
+              "rejected",
+              "ambiguous"
+            ]
+          },
+          "recordedAt": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "effectId",
+          "externalRevision",
+          "idempotencyKey",
+          "outcome",
+          "recordedAt",
+          "runId"
+        ],
+        "type": "object"
+      },
+      "provider": "effects"
+    },
+    {
+      "kind": "event",
+      "name": "effectFinished",
+      "payloadSchema": {
+        "properties": {
+          "effectId": {
+            "type": "string"
+          },
+          "externalRevision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "idempotencyKey": {
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "pending",
+              "applied",
+              "rejected",
+              "ambiguous"
+            ]
+          },
+          "recordedAt": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "effectId",
+          "externalRevision",
+          "idempotencyKey",
+          "outcome",
+          "recordedAt",
+          "runId"
+        ],
+        "type": "object"
+      },
+      "provider": "effects",
+      "version": 1
+    },
+    {
+      "inputSchema": {
+        "properties": {
+          "attemptId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "attemptId"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "execution/getAttempt@v1",
+      "outputSchema": {
+        "anyOf": [
+          {
+            "properties": {
+              "attemptId": {
+                "type": "string"
+              },
+              "correlationToken": {
+                "type": "string"
+              },
+              "finishedAt": {
+                "type": "string"
+              },
+              "outcome": {
+                "enum": [
+                  "pending",
+                  "succeeded",
+                  "failed"
+                ]
+              },
+              "runId": {
+                "type": "string"
+              },
+              "startedAt": {
+                "type": "string"
+              },
+              "stepId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "attemptId",
+              "correlationToken",
+              "outcome",
+              "runId",
+              "startedAt",
+              "stepId"
+            ],
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "provider": "execution"
+    },
+    {
+      "inputSchema": {
+        "properties": {
+          "agentProfileDigest": {
+            "type": "string"
+          },
+          "attemptId": {
+            "type": "string"
+          },
+          "correlationToken": {
+            "type": "string"
+          },
+          "inputArtifactDigests": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "skillDigests": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "stepId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "agentProfileDigest",
+          "attemptId",
+          "correlationToken",
+          "inputArtifactDigests",
+          "runId",
+          "skillDigests",
+          "startedAt",
+          "stepId"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "execution/requestAttempt@v1",
+      "outputSchema": {
+        "properties": {
+          "attemptId": {
+            "type": "string"
+          },
+          "correlationToken": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "pending",
+              "succeeded",
+              "failed"
+            ]
+          },
+          "runId": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "stepId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "attemptId",
+          "correlationToken",
+          "outcome",
+          "runId",
+          "startedAt",
+          "stepId"
+        ],
+        "type": "object"
+      },
+      "provider": "execution"
+    },
+    {
+      "kind": "event",
+      "name": "attemptFinished",
+      "payloadSchema": {
+        "properties": {
+          "attemptId": {
+            "type": "string"
+          },
+          "correlationToken": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "pending",
+              "succeeded",
+              "failed"
+            ]
+          },
+          "runId": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "stepId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "attemptId",
+          "correlationToken",
+          "outcome",
+          "runId",
+          "startedAt",
+          "stepId"
+        ],
+        "type": "object"
+      },
+      "provider": "execution",
+      "version": 1
+    },
+    {
+      "inputSchema": {
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "correlationId": {
+            "type": "string"
+          },
+          "deliveryId": {
+            "type": "string"
+          },
+          "eventType": {
+            "type": "string"
+          },
+          "observedAt": {
+            "type": "string"
+          },
+          "occurredAt": {
+            "type": "string"
+          },
+          "payload": {},
+          "repository": {
+            "type": "string"
+          },
+          "sourceId": {
+            "type": "string"
+          },
+          "sourceRevision": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "actor",
+          "correlationId",
+          "deliveryId",
+          "eventType",
+          "observedAt",
+          "occurredAt",
+          "payload",
+          "repository",
+          "sourceId",
+          "sourceRevision",
+          "subject"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "intake/acceptSourceEvent@v1",
+      "outputSchema": {
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "correlationId": {
+            "type": "string"
+          },
+          "deliveryId": {
+            "type": "string"
+          },
+          "eventType": {
+            "type": "string"
+          },
+          "observedAt": {
+            "type": "string"
+          },
+          "occurredAt": {
+            "type": "string"
+          },
+          "payload": {},
+          "repository": {
+            "type": "string"
+          },
+          "sourceId": {
+            "type": "string"
+          },
+          "sourceRevision": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "actor",
+          "correlationId",
+          "deliveryId",
+          "eventType",
+          "observedAt",
+          "occurredAt",
+          "payload",
+          "repository",
+          "sourceId",
+          "sourceRevision",
+          "subject"
+        ],
+        "type": "object"
+      },
+      "provider": "intake"
+    },
+    {
+      "inputSchema": {
+        "properties": {
+          "sourceId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "sourceId"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "intake/getSourceCursor@v1",
+      "outputSchema": {
+        "anyOf": [
+          {
+            "properties": {
+              "cursor": {
+                "type": "string"
+              },
+              "sourceId": {
+                "type": "string"
+              },
+              "updatedAt": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "cursor",
+              "sourceId",
+              "updatedAt"
+            ],
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "provider": "intake"
+    },
+    {
+      "inputSchema": {
+        "properties": {
+          "observedAt": {
+            "type": "string"
+          },
+          "sourceId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "observedAt",
+          "sourceId"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "intake/pollRepository@v1",
+      "outputSchema": {
+        "properties": {
+          "accepted": {
+            "type": "integer"
+          },
+          "cursor": {
+            "anyOf": [
+              {
+                "properties": {
+                  "cursor": {
+                    "type": "string"
+                  },
+                  "sourceId": {
+                    "type": "string"
+                  },
+                  "updatedAt": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "cursor",
+                  "sourceId",
+                  "updatedAt"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "accepted",
+          "cursor"
+        ],
+        "type": "object"
+      },
+      "provider": "intake"
+    },
+    {
+      "kind": "event",
+      "name": "factoryEventAccepted",
+      "payloadSchema": {
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "correlationId": {
+            "type": "string"
+          },
+          "deliveryId": {
+            "type": "string"
+          },
+          "eventType": {
+            "type": "string"
+          },
+          "observedAt": {
+            "type": "string"
+          },
+          "occurredAt": {
+            "type": "string"
+          },
+          "payload": {},
+          "repository": {
+            "type": "string"
+          },
+          "sourceId": {
+            "type": "string"
+          },
+          "sourceRevision": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "actor",
+          "correlationId",
+          "deliveryId",
+          "eventType",
+          "observedAt",
+          "occurredAt",
+          "payload",
+          "repository",
+          "sourceId",
+          "sourceRevision",
+          "subject"
+        ],
+        "type": "object"
+      },
+      "provider": "intake",
+      "version": 1
+    },
+    {
+      "inputSchema": {
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "operations/getHealth@v1",
+      "outputSchema": {
+        "properties": {
+          "modules": {
+            "additionalProperties": {
+              "enum": [
+                "ready",
+                "unavailable"
+              ]
+            },
+            "type": "object"
+          },
+          "status": {
+            "enum": [
+              "ready",
+              "degraded"
+            ]
+          }
+        },
+        "required": [
+          "modules",
+          "status"
+        ],
+        "type": "object"
+      },
+      "provider": "operations"
+    },
+    {
+      "inputSchema": {
+        "properties": {
+          "limit": {
+            "type": "integer"
+          },
+          "runId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "limit"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "operations/listEffects@v1",
+      "outputSchema": {
+        "items": {
+          "properties": {
+            "effectId": {
+              "type": "string"
+            },
+            "externalRevision": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "idempotencyKey": {
+              "type": "string"
+            },
+            "outcome": {
+              "enum": [
+                "pending",
+                "applied",
+                "rejected",
+                "ambiguous"
+              ]
+            },
+            "recordedAt": {
+              "type": "string"
+            },
+            "runId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "effectId",
+            "externalRevision",
+            "idempotencyKey",
+            "outcome",
+            "recordedAt",
+            "runId"
+          ],
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "provider": "operations"
+    },
+    {
+      "inputSchema": {
+        "properties": {
+          "after": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "runId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "limit"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "operations/listEvents@v1",
+      "outputSchema": {
+        "items": {
+          "properties": {
+            "eventId": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string"
+            },
+            "occurredAt": {
+              "type": "string"
+            },
+            "payload": {}
+          },
+          "required": [
+            "eventId",
+            "kind",
+            "occurredAt",
+            "payload"
+          ],
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "provider": "operations"
+    },
+    {
+      "inputSchema": {
+        "properties": {
+          "limit": {
+            "type": "integer"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "limit"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "operations/listRuns@v1",
+      "outputSchema": {
+        "items": {
+          "properties": {
+            "agentProfileDigest": {
+              "type": "string"
+            },
+            "definitionDigest": {
+              "type": "string"
+            },
+            "factoryEventId": {
+              "type": "string"
+            },
+            "finishedAt": {
+              "type": "string"
+            },
+            "flowDigest": {
+              "type": "string"
+            },
+            "flowId": {
+              "type": "string"
+            },
+            "moduleManifestDigest": {
+              "type": "string"
+            },
+            "runId": {
+              "type": "string"
+            },
+            "skillDigests": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "startedAt": {
+              "type": "string"
+            },
+            "stateId": {
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "running",
+                "waiting",
+                "succeeded",
+                "failed",
+                "cancelled"
+              ]
+            },
+            "workflowVersionDigest": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "agentProfileDigest",
+            "definitionDigest",
+            "factoryEventId",
+            "flowDigest",
+            "flowId",
+            "moduleManifestDigest",
+            "runId",
+            "skillDigests",
+            "startedAt",
+            "stateId",
+            "status",
+            "workflowVersionDigest"
+          ],
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "provider": "operations"
+    },
+    {
+      "inputSchema": {
+        "properties": {
+          "runId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "runId"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "operations/showRun@v1",
+      "outputSchema": {
+        "anyOf": [
+          {
+            "properties": {
+              "agentProfileDigest": {
+                "type": "string"
+              },
+              "definitionDigest": {
+                "type": "string"
+              },
+              "factoryEventId": {
+                "type": "string"
+              },
+              "finishedAt": {
+                "type": "string"
+              },
+              "flowDigest": {
+                "type": "string"
+              },
+              "flowId": {
+                "type": "string"
+              },
+              "moduleManifestDigest": {
+                "type": "string"
+              },
+              "runId": {
+                "type": "string"
+              },
+              "skillDigests": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "startedAt": {
+                "type": "string"
+              },
+              "stateId": {
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "running",
+                  "waiting",
+                  "succeeded",
+                  "failed",
+                  "cancelled"
+                ]
+              },
+              "workflowVersionDigest": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "agentProfileDigest",
+              "definitionDigest",
+              "factoryEventId",
+              "flowDigest",
+              "flowId",
+              "moduleManifestDigest",
+              "runId",
+              "skillDigests",
+              "startedAt",
+              "stateId",
+              "status",
+              "workflowVersionDigest"
+            ],
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "provider": "operations"
+    },
+    {
+      "inputSchema": {
+        "properties": {
+          "commandId": {
+            "type": "string"
+          },
+          "issuedAt": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "approve",
+              "reject",
+              "cancel",
+              "retry"
+            ]
+          },
+          "runId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "commandId",
+          "issuedAt",
+          "kind",
+          "runId"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "runs/applyOperatorCommand@v1",
+      "outputSchema": {
+        "properties": {
+          "agentProfileDigest": {
+            "type": "string"
+          },
+          "definitionDigest": {
+            "type": "string"
+          },
+          "factoryEventId": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": "string"
+          },
+          "flowDigest": {
+            "type": "string"
+          },
+          "flowId": {
+            "type": "string"
+          },
+          "moduleManifestDigest": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "skillDigests": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "stateId": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "running",
+              "waiting",
+              "succeeded",
+              "failed",
+              "cancelled"
+            ]
+          },
+          "workflowVersionDigest": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "agentProfileDigest",
+          "definitionDigest",
+          "factoryEventId",
+          "flowDigest",
+          "flowId",
+          "moduleManifestDigest",
+          "runId",
+          "skillDigests",
+          "startedAt",
+          "stateId",
+          "status",
+          "workflowVersionDigest"
+        ],
+        "type": "object"
+      },
+      "provider": "runs"
+    },
+    {
+      "inputSchema": {
+        "properties": {
+          "runId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "runId"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "runs/getRun@v1",
+      "outputSchema": {
+        "anyOf": [
+          {
+            "properties": {
+              "agentProfileDigest": {
+                "type": "string"
+              },
+              "definitionDigest": {
+                "type": "string"
+              },
+              "factoryEventId": {
+                "type": "string"
+              },
+              "finishedAt": {
+                "type": "string"
+              },
+              "flowDigest": {
+                "type": "string"
+              },
+              "flowId": {
+                "type": "string"
+              },
+              "moduleManifestDigest": {
+                "type": "string"
+              },
+              "runId": {
+                "type": "string"
+              },
+              "skillDigests": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "startedAt": {
+                "type": "string"
+              },
+              "stateId": {
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "running",
+                  "waiting",
+                  "succeeded",
+                  "failed",
+                  "cancelled"
+                ]
+              },
+              "workflowVersionDigest": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "agentProfileDigest",
+              "definitionDigest",
+              "factoryEventId",
+              "flowDigest",
+              "flowId",
+              "moduleManifestDigest",
+              "runId",
+              "skillDigests",
+              "startedAt",
+              "stateId",
+              "status",
+              "workflowVersionDigest"
+            ],
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "provider": "runs"
+    },
+    {
+      "inputSchema": {
+        "properties": {
+          "agentProfileDigest": {
+            "type": "string"
+          },
+          "definitionDigest": {
+            "type": "string"
+          },
+          "factoryEventId": {
+            "type": "string"
+          },
+          "flowDigest": {
+            "type": "string"
+          },
+          "flowId": {
+            "type": "string"
+          },
+          "moduleManifestDigest": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "skillDigests": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "workflowVersionDigest": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "agentProfileDigest",
+          "definitionDigest",
+          "factoryEventId",
+          "flowDigest",
+          "flowId",
+          "moduleManifestDigest",
+          "runId",
+          "skillDigests",
+          "startedAt",
+          "workflowVersionDigest"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "runs/startRun@v1",
+      "outputSchema": {
+        "properties": {
+          "agentProfileDigest": {
+            "type": "string"
+          },
+          "definitionDigest": {
+            "type": "string"
+          },
+          "factoryEventId": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": "string"
+          },
+          "flowDigest": {
+            "type": "string"
+          },
+          "flowId": {
+            "type": "string"
+          },
+          "moduleManifestDigest": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "skillDigests": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "stateId": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "running",
+              "waiting",
+              "succeeded",
+              "failed",
+              "cancelled"
+            ]
+          },
+          "workflowVersionDigest": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "agentProfileDigest",
+          "definitionDigest",
+          "factoryEventId",
+          "flowDigest",
+          "flowId",
+          "moduleManifestDigest",
+          "runId",
+          "skillDigests",
+          "startedAt",
+          "stateId",
+          "status",
+          "workflowVersionDigest"
+        ],
+        "type": "object"
+      },
+      "provider": "runs"
+    },
+    {
+      "kind": "event",
+      "name": "effectRequested",
+      "payloadSchema": {
+        "properties": {
+          "capability": {
+            "type": "string"
+          },
+          "correlationToken": {
+            "type": "string"
+          },
+          "expectedExternalRevision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "idempotencyKey": {
+            "type": "string"
+          },
+          "payloadDigest": {
+            "type": "string"
+          },
+          "provenance": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "capability",
+          "correlationToken",
+          "expectedExternalRevision",
+          "idempotencyKey",
+          "payloadDigest",
+          "provenance",
+          "runId",
+          "target"
+        ],
+        "type": "object"
+      },
+      "provider": "runs",
+      "version": 1
+    },
+    {
+      "kind": "event",
+      "name": "runFinished",
+      "payloadSchema": {
+        "properties": {
+          "agentProfileDigest": {
+            "type": "string"
+          },
+          "definitionDigest": {
+            "type": "string"
+          },
+          "factoryEventId": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": "string"
+          },
+          "flowDigest": {
+            "type": "string"
+          },
+          "flowId": {
+            "type": "string"
+          },
+          "moduleManifestDigest": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "skillDigests": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "stateId": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "running",
+              "waiting",
+              "succeeded",
+              "failed",
+              "cancelled"
+            ]
+          },
+          "workflowVersionDigest": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "agentProfileDigest",
+          "definitionDigest",
+          "factoryEventId",
+          "flowDigest",
+          "flowId",
+          "moduleManifestDigest",
+          "runId",
+          "skillDigests",
+          "startedAt",
+          "stateId",
+          "status",
+          "workflowVersionDigest"
+        ],
+        "type": "object"
+      },
+      "provider": "runs",
+      "version": 1
+    },
+    {
+      "kind": "event",
+      "name": "runStateChanged",
+      "payloadSchema": {
+        "properties": {
+          "agentProfileDigest": {
+            "type": "string"
+          },
+          "definitionDigest": {
+            "type": "string"
+          },
+          "factoryEventId": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": "string"
+          },
+          "flowDigest": {
+            "type": "string"
+          },
+          "flowId": {
+            "type": "string"
+          },
+          "moduleManifestDigest": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "skillDigests": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "stateId": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "running",
+              "waiting",
+              "succeeded",
+              "failed",
+              "cancelled"
+            ]
+          },
+          "workflowVersionDigest": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "agentProfileDigest",
+          "definitionDigest",
+          "factoryEventId",
+          "flowDigest",
+          "flowId",
+          "moduleManifestDigest",
+          "runId",
+          "skillDigests",
+          "startedAt",
+          "stateId",
+          "status",
+          "workflowVersionDigest"
+        ],
+        "type": "object"
+      },
+      "provider": "runs",
+      "version": 1
+    },
+    {
+      "kind": "event",
+      "name": "stepRequested",
+      "payloadSchema": {
+        "properties": {
+          "correlationToken": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "stepId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "correlationToken",
+          "runId",
+          "stepId"
+        ],
+        "type": "object"
+      },
+      "provider": "runs",
+      "version": 1
+    }
+  ],
+  "schemaVersion": 1,
+  "synchronousGraph": [
+    {
+      "source": "effects",
+      "target": "assets"
+    },
+    {
+      "source": "effects",
+      "target": "definitions"
+    },
+    {
+      "source": "execution",
+      "target": "assets"
+    },
+    {
+      "source": "intake",
+      "target": "definitions"
+    },
+    {
+      "source": "operations",
+      "target": "assets"
+    },
+    {
+      "source": "operations",
+      "target": "definitions"
+    },
+    {
+      "source": "operations",
+      "target": "effects"
+    },
+    {
+      "source": "operations",
+      "target": "execution"
+    },
+    {
+      "source": "operations",
+      "target": "intake"
+    },
+    {
+      "source": "operations",
+      "target": "runs"
+    },
+    {
+      "source": "runs",
+      "target": "assets"
+    },
+    {
+      "source": "runs",
+      "target": "definitions"
+    },
+    {
+      "source": "runs",
+      "target": "effects"
+    },
+    {
+      "source": "runs",
+      "target": "execution"
+    }
+  ]
+}

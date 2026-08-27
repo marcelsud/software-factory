@@ -1,0 +1,50 @@
+Chimpbase module architecture
+
+assets v1
+  depends: none
+  call: assets/getArtifact@v1
+  call: assets/listRunArtifacts@v1
+  call: assets/materializeArtifact@v1
+  call: assets/putArtifact@v1
+  call: assets/resolveSkill@v1
+  event: assets/artifactStored@v1
+  event: assets/skillRevisionPinned@v1
+definitions v1
+  depends: none
+  call: definitions/compileDefinition@v1
+  call: definitions/getExecutionPlan@v1
+  call: definitions/resolveRevision@v1
+  event: definitions/definitionPublished@v1
+effects v1
+  depends: assets, definitions
+  call: effects/getReceipt@v1
+  call: effects/reconcileEffect@v1
+  call: effects/requestEffect@v1
+  event: effects/effectFinished@v1
+execution v1
+  depends: assets
+  call: execution/getAttempt@v1
+  call: execution/requestAttempt@v1
+  event: execution/attemptFinished@v1
+intake v1
+  depends: definitions
+  call: intake/acceptSourceEvent@v1
+  call: intake/getSourceCursor@v1
+  call: intake/pollRepository@v1
+  event: intake/factoryEventAccepted@v1
+operations v1
+  depends: assets, definitions, effects, execution, intake, runs
+  call: operations/getHealth@v1
+  call: operations/listEffects@v1
+  call: operations/listEvents@v1
+  call: operations/listRuns@v1
+  call: operations/showRun@v1
+runs v1
+  depends: assets, definitions, effects, execution
+  call: runs/applyOperatorCommand@v1
+  call: runs/getRun@v1
+  call: runs/startRun@v1
+  event: runs/effectRequested@v1
+  event: runs/runFinished@v1
+  event: runs/runStateChanged@v1
+  event: runs/stepRequested@v1
