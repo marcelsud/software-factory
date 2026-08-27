@@ -744,6 +744,155 @@ export const effectOutcome = v.object({
   outcome: v.enum(["applied", "rejected", "ambiguous"]),
 });
 
+export const effectKindV3 = v.enum([
+  "add-label",
+  "remove-label",
+  "create-comment",
+  "update-comment",
+  "create-branch",
+  "delete-branch",
+  "push-verified-commit",
+  "create-pull-request",
+  "update-pull-request",
+]);
+
+const artifactCommentPayload = {
+  artifactDigests: v.string().array(),
+  issueNumber: v.integer(),
+};
+
+export const effectOperationV3 = v.union(
+  v.object({
+    kind: v.literal("add-label"),
+    payload: v.object({ issueNumber: v.integer(), label: v.string() }),
+  }),
+  v.object({
+    kind: v.literal("remove-label"),
+    payload: v.object({ issueNumber: v.integer(), label: v.string() }),
+  }),
+  v.object({ kind: v.literal("create-comment"), payload: v.object(artifactCommentPayload) }),
+  v.object({
+    kind: v.literal("update-comment"),
+    payload: v.object({ ...artifactCommentPayload, commentId: v.string() }),
+  }),
+  v.object({
+    kind: v.literal("create-branch"),
+    payload: v.object({ baseRevision: v.string(), branch: v.string() }),
+  }),
+  v.object({
+    kind: v.literal("delete-branch"),
+    payload: v.object({ branch: v.string(), headRevision: v.string() }),
+  }),
+  v.object({
+    kind: v.literal("push-verified-commit"),
+    payload: v.object({
+      baseRevision: v.string(),
+      branch: v.string(),
+      commitMessage: v.string(),
+      treeDigest: digest,
+      verified: v.literal(true),
+    }),
+  }),
+  v.object({
+    kind: v.literal("create-pull-request"),
+    payload: v.object({
+      artifactDigests: v.string().array(),
+      base: v.string(),
+      head: v.string(),
+      title: v.string(),
+    }),
+  }),
+  v.object({
+    kind: v.literal("update-pull-request"),
+    payload: v.object({
+      artifactDigests: v.string().array(),
+      pullRequestNumber: v.integer(),
+      title: v.string().optional(),
+    }),
+  }),
+);
+
+export const effectIntentV3 = v.object({
+  capability: v.string(),
+  correlationToken: identifier,
+  dryRun: v.boolean(),
+  expectedExternalRevision: v.string().nullable(),
+  idempotencyKey: identifier,
+  operation: effectOperationV3,
+  payloadDigest: digest,
+  provenance: v.object({
+    agentProfileId: identifier.nullable(),
+    definitionDigest: digest,
+    flowId: identifier,
+    requestedBy: v.enum(["operator", "runs"]),
+    runId: identifier,
+    stepId: identifier,
+  }),
+  requestedAt: isoTimestamp,
+  target: v.object({ repository: identifier, subject: v.string() }),
+});
+
+export const effectFailureCategoryV3 = v.enum([
+  "permission",
+  "rate_limit",
+  "conflict",
+  "ambiguous_network",
+  "validation",
+  "provider",
+  "unavailable",
+]);
+
+export const effectResultV3 = v.object({
+  externalId: v.string().nullable(),
+  externalRevision: v.string().nullable(),
+  externalUrl: v.string().nullable(),
+  failureCategory: effectFailureCategoryV3.nullable(),
+  outcome: v.enum(["applied", "already_applied", "conflict", "rejected", "failed"]),
+});
+
+export const effectReceiptV3 = v.object({
+  correlationToken: identifier,
+  effectId: identifier,
+  externalId: v.string().nullable(),
+  externalRevision: v.string().nullable(),
+  externalUrl: v.string().nullable(),
+  failureCategory: effectFailureCategoryV3.nullable(),
+  finishedAt: isoTimestamp.nullable(),
+  idempotencyKey: identifier,
+  outcome: v.enum(["applied", "already_applied", "conflict", "rejected", "failed"]).nullable(),
+  recordedAt: isoTimestamp,
+  runId: identifier,
+  status: v.enum(["queued", "finished"]),
+});
+
+export const effectFinishedV3 = v.object({
+  correlationToken: identifier,
+  effectId: identifier,
+  externalId: v.string().nullable(),
+  externalRevision: v.string().nullable(),
+  externalUrl: v.string().nullable(),
+  failureCategory: effectFailureCategoryV3.nullable(),
+  finishedAt: isoTimestamp,
+  idempotencyKey: identifier,
+  outcome: v.enum(["applied", "already_applied", "conflict", "rejected", "failed"]),
+  recordedAt: isoTimestamp,
+  runId: identifier,
+});
+
+export const effectDryRunV3 = v.object({
+  idempotencyKey: identifier,
+  operation: effectOperationV3,
+  payloadDigest: digest,
+  plannedAt: isoTimestamp,
+  target: v.object({ repository: identifier, subject: v.string() }),
+});
+
+export const effectBotCorrelationV3 = v.object({
+  externalId: v.string(),
+  idempotencyKey: identifier,
+  observedAt: isoTimestamp,
+});
+
 export const run = v.object({
   agentProfileDigests: v.record(digest),
   definitionDigest: digest,
@@ -942,6 +1091,14 @@ export type EffectReceipt = Infer<typeof effectReceipt>;
 export type EffectReceiptV2 = Infer<typeof effectReceiptV2>;
 export type EffectFinished = Infer<typeof effectFinished>;
 export type EffectFinishedV2 = Infer<typeof effectFinishedV2>;
+export type EffectOperationV3 = Infer<typeof effectOperationV3>;
+export type EffectIntentV3 = Infer<typeof effectIntentV3>;
+export type EffectResultV3 = Infer<typeof effectResultV3>;
+export type EffectReceiptV3 = Infer<typeof effectReceiptV3>;
+export type EffectFinishedV3 = Infer<typeof effectFinishedV3>;
+export type EffectDryRunV3 = Infer<typeof effectDryRunV3>;
+export type EffectBotCorrelationV3 = Infer<typeof effectBotCorrelationV3>;
+export type EffectFailureCategoryV3 = Infer<typeof effectFailureCategoryV3>;
 export type Run = Infer<typeof run>;
 export type RunV2 = Infer<typeof runV2>;
 export type RunV3 = Infer<typeof runV3>;

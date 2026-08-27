@@ -1,4 +1,10 @@
-import type { AgentRequest, AgentRequestV2, AgentResult } from "../contracts/index.ts";
+import type {
+  AgentRequest,
+  AgentRequestV2,
+  AgentResult,
+  EffectIntentV3,
+  EffectResultV3,
+} from "../contracts/index.ts";
 
 export interface GitHubRepositoryRecord {
   readonly fullName: string;
@@ -90,6 +96,18 @@ export interface GitHubReadTransport {
   }): Promise<GitHubReadPermissionDiagnostic>;
 }
 
+export interface GitHubWriteInput {
+  readonly body?: string;
+  readonly intent: EffectIntentV3;
+  readonly marker: string;
+}
+
+export interface GitHubWriteTransport {
+  apply(input: GitHubWriteInput): Promise<EffectResultV3>;
+  inspect(input: GitHubWriteInput): Promise<{ readonly revision: string | null }>;
+  probe(input: GitHubWriteInput): Promise<EffectResultV3 | null>;
+}
+
 export interface AgentRuntime {
   run(request: AgentRequest | AgentRequestV2, signal: AbortSignal): Promise<AgentResult>;
   cancel(attemptId: string): Promise<void>;
@@ -101,10 +119,23 @@ export interface GitPublication {
   readonly commitMessage: string;
   readonly repository: string;
   readonly treeDigest: string;
+  readonly verified?: boolean;
+}
+
+export interface GitBranchMutation {
+  readonly branch: string;
+  readonly kind: "create" | "delete";
+  readonly expectedRevision: string;
+  readonly marker: string;
+  readonly repository: string;
 }
 
 export interface GitPublisher {
+  createBranch?(input: GitBranchMutation): Promise<EffectResultV3>;
+  deleteBranch?(input: GitBranchMutation): Promise<EffectResultV3>;
+  probe?(input: GitBranchMutation | GitPublication): Promise<EffectResultV3 | null>;
   publish(publication: GitPublication): Promise<{ readonly revision: string }>;
+  pushVerifiedCommit?(publication: GitPublication): Promise<EffectResultV3>;
 }
 
 export interface ArtifactByteDriver {

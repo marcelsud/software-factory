@@ -5,7 +5,10 @@ import {
   createAssetsImplementation,
 } from "./src/modules/assets/implementation.ts";
 import { definitionsImplementation } from "./src/modules/definitions/implementation.ts";
-import { effectsImplementation } from "./src/modules/effects/implementation.ts";
+import {
+  createEffectsImplementation,
+  type EffectsImplementationDependencies,
+} from "./src/modules/effects/implementation.ts";
 import {
   createExecutionImplementation,
   type ExecutionImplementationDependencies,
@@ -23,6 +26,7 @@ import {
 } from "./src/modules/runs/implementation.ts";
 
 export type FactoryAppDependencies = AssetsImplementationDependencies &
+  EffectsImplementationDependencies &
   ExecutionImplementationDependencies &
   IntakeImplementationDependencies &
   RunsImplementationDependencies;
@@ -34,7 +38,7 @@ export function createSoftwareFactoryApp(dependencies?: FactoryAppDependencies) 
     modules: [
       createAssetsImplementation(dependencies),
       definitionsImplementation,
-      effectsImplementation,
+      createEffectsImplementation(dependencies),
       createExecutionImplementation(dependencies),
       createIntakeImplementation(dependencies ?? { readTransport: unavailableGitHubReadTransport }),
       operationsImplementation,

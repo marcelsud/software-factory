@@ -1,4 +1,5 @@
 version: 1
+dryRun: false
 
 repositories:
   - id: factory
@@ -38,12 +39,32 @@ capabilities:
     description: Publish a verified fix revision
   - id: issue.comment
     description: Publish the verified outcome to the issue
+  - id: issue.label
+    description: Add or remove an issue label
+  - id: pull-request.write
+    description: Create or update a pull request
 
 effectPermissions:
   - capability: repository.write
     targets: [factory]
+    flows: [issue-triage]
+    agentProfiles: [triage-agent]
+    effects: [create-branch, delete-branch, push-verified-commit]
   - capability: issue.comment
     targets: [factory]
+    flows: [issue-triage]
+    agentProfiles: [triage-agent]
+    effects: [create-comment, update-comment]
+  - capability: issue.label
+    targets: [factory]
+    flows: [issue-triage]
+    agentProfiles: [triage-agent]
+    effects: [add-label, remove-label]
+  - capability: pull-request.write
+    targets: [factory]
+    flows: [issue-triage]
+    agentProfiles: [triage-agent]
+    effects: [create-pull-request, update-pull-request]
 
 skills:
   - id: reproduce

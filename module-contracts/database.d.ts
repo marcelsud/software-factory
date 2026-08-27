@@ -20,10 +20,16 @@ export interface DefinitionsDatabase {
 }
 
 export interface EffectsDatabase {
+  "effect_bot_correlations_v3": Record<string, unknown>;
+  "effect_dry_runs_v3": Record<string, unknown>;
   "effect_intents": Record<string, unknown>;
+  "effect_intents_v3": Record<string, unknown>;
   "effect_preconditions": Record<string, unknown>;
+  "effect_preconditions_v3": Record<string, unknown>;
   "effect_receipts": Record<string, unknown>;
+  "effect_receipts_v3": Record<string, unknown>;
   "effect_reconciliation": Record<string, unknown>;
+  "effect_reconciliation_v3": Record<string, unknown>;
 }
 
 export interface ExecutionDatabase {

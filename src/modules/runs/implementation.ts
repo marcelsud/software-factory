@@ -12,6 +12,8 @@ import {
   type AttemptFinished,
   CAPABILITY_PRESETS,
   CAPABILITY_PRESETS_V2,
+  type EffectFinishedV2,
+  type EffectFinishedV3,
   type ExecutionPlanV2,
   type FactoryEvent,
   isDataRecord,
@@ -830,6 +832,91 @@ async function consumeAttemptFinished(
   return true;
 }
 
+type EffectCompletion = EffectFinishedV2 | EffectFinishedV3;
+
+async function consumeEffectFinished(
+  ctx: RunsContext,
+  outcome: EffectCompletion,
+): Promise<boolean> {
+  const db = runsDb(ctx);
+  const loaded = await loadRows(db, outcome.runId);
+  if (
+    loaded === null ||
+    isTerminal(loaded.row.status) ||
+    loaded.row.current_effect_key !== outcome.idempotencyKey ||
+    loaded.row.current_correlation_token !== outcome.correlationToken
+  )
+    return false;
+  const transitionOutcome =
+    outcome.outcome === "already_applied"
+      ? "applied"
+      : outcome.outcome === "conflict" || outcome.outcome === "failed"
+        ? "rejected"
+        : outcome.outcome;
+  if (loaded.engine === null) {
+    const failed = transitionOutcome === "rejected";
+    const ambiguous =
+      "failureCategory" in outcome && outcome.failureCategory === "ambiguous_network";
+    const updated = await appendAudit(
+      db,
+      loaded.row,
+      `effect.${outcome.outcome}`,
+      outcome.finishedAt,
+      outcome,
+      {
+        current_attempt_id: failed ? null : loaded.row.current_attempt_id,
+        current_correlation_token: failed ? null : loaded.row.current_correlation_token,
+        current_effect_key: ambiguous ? loaded.row.current_effect_key : null,
+        current_gate_id: failed ? null : loaded.row.current_gate_id,
+        current_gate_status: failed ? null : loaded.row.current_gate_status,
+        current_step_id: failed ? null : loaded.row.current_step_id,
+        finished_at: failed ? outcome.finishedAt : loaded.row.finished_at,
+        status: failed ? "failed" : ambiguous ? "waiting" : "running",
+      },
+    );
+    await publishProjection(ctx, updated);
+    if (failed) {
+      await ctx.workflow.signal(updated.workflow_id, "finish", {});
+      const projection = runFromRow(updated);
+      ctx.publish(runs.events.runFinishedV1, finishedV1(projection));
+      ctx.publish(runs.events.runFinishedV2, finishedV2(projection));
+    }
+    return true;
+  }
+  const identity = `effect:${outcome.idempotencyKey}:${outcome.finishedAt}`;
+  if (
+    !(await recordWorkflowSignal(
+      ctx,
+      loaded.row,
+      identity,
+      "effect.finished",
+      outcome.correlationToken,
+      outcome.finishedAt,
+      outcome,
+    ))
+  )
+    return false;
+  const row = await appendAudit(
+    db,
+    loaded.row,
+    `effect.${outcome.outcome}`,
+    outcome.finishedAt,
+    outcome,
+  );
+  await db
+    .updateTable("run_engine_state")
+    .set({
+      pending_json: JSON.stringify({
+        kind: "effect",
+        outcome: { ...outcome, outcome: transitionOutcome },
+      }),
+    })
+    .where("run_id", "=", row.run_id)
+    .execute();
+  await signalResume(ctx, row, identity, outcome.finishedAt, "effect.finished");
+  return true;
+}
+
 function createSubscriptions(dependencies: RunsImplementationDependencies) {
   const attemptFinishedStrict = defineChimpbaseModuleSubscription(
     execution.events.attemptFinishedV2,
@@ -868,73 +955,12 @@ function createSubscriptions(dependencies: RunsImplementationDependencies) {
   const effectFinished = defineChimpbaseModuleSubscription(
     effects.events.effectFinishedV2,
     "record-effect-outcome",
-    async (ctx, outcome) => {
-      const db = runsDb(ctx);
-      const loaded = await loadRows(db, outcome.runId);
-      if (
-        loaded === null ||
-        isTerminal(loaded.row.status) ||
-        loaded.row.current_effect_key !== outcome.idempotencyKey ||
-        loaded.row.current_correlation_token !== outcome.correlationToken
-      )
-        return false;
-      if (loaded.engine === null) {
-        const failed = outcome.outcome === "rejected";
-        const updated = await appendAudit(
-          db,
-          loaded.row,
-          `effect.${outcome.outcome}`,
-          outcome.finishedAt,
-          outcome,
-          {
-            current_attempt_id: failed ? null : loaded.row.current_attempt_id,
-            current_correlation_token: failed ? null : loaded.row.current_correlation_token,
-            current_effect_key:
-              outcome.outcome === "ambiguous" ? loaded.row.current_effect_key : null,
-            current_gate_id: failed ? null : loaded.row.current_gate_id,
-            current_gate_status: failed ? null : loaded.row.current_gate_status,
-            current_step_id: failed ? null : loaded.row.current_step_id,
-            finished_at: failed ? outcome.finishedAt : loaded.row.finished_at,
-            status: failed ? "failed" : outcome.outcome === "ambiguous" ? "waiting" : "running",
-          },
-        );
-        await publishProjection(ctx, updated);
-        if (failed) {
-          await ctx.workflow.signal(updated.workflow_id, "finish", {});
-          const projection = runFromRow(updated);
-          ctx.publish(runs.events.runFinishedV1, finishedV1(projection));
-          ctx.publish(runs.events.runFinishedV2, finishedV2(projection));
-        }
-        return true;
-      }
-      const identity = `effect:${outcome.idempotencyKey}:${outcome.finishedAt}`;
-      if (
-        !(await recordWorkflowSignal(
-          ctx,
-          loaded.row,
-          identity,
-          "effect.finished",
-          outcome.correlationToken,
-          outcome.finishedAt,
-          outcome,
-        ))
-      )
-        return false;
-      const row = await appendAudit(
-        db,
-        loaded.row,
-        `effect.${outcome.outcome}`,
-        outcome.finishedAt,
-        outcome,
-      );
-      await db
-        .updateTable("run_engine_state")
-        .set({ pending_json: JSON.stringify({ kind: "effect", outcome }) })
-        .where("run_id", "=", row.run_id)
-        .execute();
-      await signalResume(ctx, row, identity, outcome.finishedAt, "effect.finished");
-      return true;
-    },
+    consumeEffectFinished,
+  );
+  const effectFinishedStrict = defineChimpbaseModuleSubscription(
+    effects.events.effectFinishedV3,
+    "record-effect-outcome-v3",
+    consumeEffectFinished,
   );
 
   const acceptedEvent = defineChimpbaseModuleSubscription(
@@ -1024,7 +1050,13 @@ function createSubscriptions(dependencies: RunsImplementationDependencies) {
       return started;
     },
   );
-  return [attemptFinishedStrict, attemptFinishedLegacy, effectFinished, acceptedEvent] as const;
+  return [
+    attemptFinishedStrict,
+    attemptFinishedLegacy,
+    effectFinished,
+    effectFinishedStrict,
+    acceptedEvent,
+  ] as const;
 }
 
 export function createRunsImplementation(dependencies: RunsImplementationDependencies = {}) {
