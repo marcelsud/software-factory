@@ -4,6 +4,7 @@ assets v1
   depends: none
   call: assets/getArtifact@v1
   call: assets/getArtifactV2@v1
+  call: assets/getPublicArtifactV2@v1
   call: assets/getSkillBundle@v1
   call: assets/getSkillBundleV2@v1
   call: assets/listRunArtifacts@v1
@@ -80,9 +81,13 @@ intake v1
 operations v1
   depends: assets, definitions, effects, execution, intake, runs
   call: operations/applyOperatorCommand@v1
+  call: operations/exportReplayBundle@v1
   call: operations/getHealth@v1
   call: operations/getHealthV2@v1
   call: operations/getOperatorCommand@v1
+  call: operations/getReplayBundle@v1
+  call: operations/getTelemetrySnapshot@v1
+  call: operations/importReplayBundle@v1
   call: operations/listEffects@v1
   call: operations/listEffectsV2@v1
   call: operations/listEvents@v1

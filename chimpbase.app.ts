@@ -53,6 +53,7 @@ export function createSoftwareFactoryApp(dependencies?: FactoryAppDependencies) 
           dependencies?.githubWriteTransport !== undefined,
       }),
     ],
+    telemetry: { persist: { log: true, metric: true, trace: true } },
     worker: { maxAttempts: 5, retryDelayMs: 1_000 },
   });
 }

@@ -563,6 +563,23 @@ export function createAssetsImplementation(dependencies: AssetsImplementationDep
           .execute();
         return rows.map(artifactV2FromRow);
       },
+      async getPublicArtifactV2(ctx, input) {
+        const db = ctx.db.kysely() as unknown as Kysely<AssetsDatabase>;
+        const row = await db
+          .selectFrom("artifacts_v2")
+          .selectAll()
+          .where("digest", "=", input.digest)
+          .where("classification", "=", "public")
+          .executeTakeFirst();
+        if (row === undefined) return null;
+        const bytes = await strictBytes(db, byteDriver, row.digest);
+        if (bytes === null || bytes.byteLength !== row.size)
+          throw new Error(`artifact_corrupt: ${row.digest}`);
+        return {
+          artifact: artifactV2FromRow(row),
+          contentBase64: Buffer.from(bytes).toString("base64"),
+        };
+      },
       async publishArtifactV2(ctx, input) {
         const db = ctx.db.kysely() as unknown as Kysely<AssetsDatabase>;
         const source = await db

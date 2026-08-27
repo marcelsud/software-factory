@@ -7,3 +7,4 @@ export * from "./assets/skill-bundle.ts";
 export * from "./assets/skill-resolver.ts";
 export * from "./compiler.ts";
 export * from "./contracts/index.ts";
+export * from "./replay.ts";

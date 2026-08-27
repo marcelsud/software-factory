@@ -126,6 +126,12 @@ const calls = {
     errors: ["module_unavailable"],
     guarantees: ["returns run-owned strict artifact metadata in stable digest order"],
   },
+  getPublicArtifactV2: {
+    input: v.object({ digest: v.string() }),
+    output: artifactEnvelopeV2.nullable(),
+    errors: ["module_unavailable", "artifact_corrupt"],
+    guarantees: ["returns bytes only for an explicitly public immutable artifact"],
+  },
   publishArtifactV2: {
     input: v.object({
       attemptId: v.string(),

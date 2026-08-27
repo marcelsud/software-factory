@@ -1497,6 +1497,211 @@ export const operationsRebuildResult = v.object({
   runs: v.integer(),
   timeline: v.integer(),
 });
+export const factoryFailureCategory = v.enum([
+  "expected_product_outcome",
+  "result_invalid",
+  "policy_rejection",
+  "conflict",
+  "rate_limit",
+  "timeout",
+  "cancellation",
+  "adapter_failure",
+  "factory_defect",
+]);
+
+export const factoryTelemetryAttributes = v.object({
+  agentProfileDigest: digest.nullable(),
+  agentProfileDigests: v.string().nullable(),
+  artifactDigest: digest.nullable(),
+  attemptId: identifier.nullable(),
+  correlationId: identifier.nullable(),
+  correlationToken: identifier.nullable(),
+  definitionDigest: digest.nullable(),
+  effectKey: identifier.nullable(),
+  flowDigest: digest.nullable(),
+  flowId: identifier.nullable(),
+  gateId: identifier.nullable(),
+  moduleManifestDigest: digest.nullable(),
+  repository: v.string().nullable(),
+  runId: identifier.nullable(),
+  skillDigest: digest.nullable(),
+  skillDigests: v.string().nullable(),
+  stateId: identifier.nullable(),
+  stepId: identifier.nullable(),
+  subject: v.string().nullable(),
+});
+
+export const factoryTelemetryRecord = v.object({
+  attributes: factoryTelemetryAttributes,
+  failureCategory: factoryFailureCategory.nullable(),
+  metric: v
+    .object({
+      name: v.string(),
+      unit: v.string(),
+      value: v.number(),
+    })
+    .nullable(),
+  productOutcome: v.string().nullable(),
+  recordedAt: isoTimestamp,
+  schemaVersion: v.literal(1),
+  scope: v.object({
+    kind: v.enum(["action", "cron", "lifecycle", "queue", "route", "subscription", "workflow"]),
+    module: v.enum([
+      "assets",
+      "definitions",
+      "effects",
+      "execution",
+      "intake",
+      "operations",
+      "runs",
+    ]),
+    name: v.string(),
+  }),
+  signal: v.enum(["log", "metric", "trace"]),
+  truncation: v.object({
+    bytes: v.integer(),
+    items: v.integer(),
+    truncated: v.boolean(),
+  }),
+});
+
+export const operationsTelemetrySnapshot = v.object({
+  checkedAt: isoTimestamp,
+  correlationGaps: v.array(
+    v.object({
+      actual: v.string().nullable(),
+      eventId: identifier,
+      expected: v.string().nullable(),
+      kind: v.string(),
+      runId: identifier,
+    }),
+  ),
+  durationsMs: v.object({
+    attempts: v.array(v.integer()),
+    gateWait: v.array(v.integer()),
+    runs: v.array(v.integer()),
+  }),
+  effects: v.object({
+    applied: v.integer(),
+    failed: v.integer(),
+    requested: v.integer(),
+  }),
+  infrastructureFailures: v.record(v.integer()),
+  outcomes: v.record(v.integer()),
+  pollLagMs: v.integer().nullable(),
+  queueDepth: v.integer(),
+  retries: v.integer(),
+  schemaVersion: v.literal(1),
+  stuck: v.array(
+    v.object({
+      ageMs: v.integer(),
+      kind: v.enum(["effect", "running", "waiting"]),
+      runId: identifier,
+      since: isoTimestamp,
+    }),
+  ),
+  tokens: v.object({
+    costUsd: v.number(),
+    input: v.integer(),
+    output: v.integer(),
+  }),
+});
+
+export const replayRedactionPolicy = v.object({
+  maxBytes: v.integer(),
+  maxItems: v.integer(),
+  maxStringBytes: v.integer(),
+  privateRetention: v.enum(["ephemeral", "retained"]),
+  secretMarkers: v.array(v.string()),
+});
+
+export const replayPins = v.object({
+  agentProfileDigests: v.record(digest),
+  definitionDigest: digest,
+  flowDigest: digest,
+  moduleManifestDigest: digest,
+  skillDigests: v.record(digest),
+  workflowVersionDigest: digest,
+});
+
+export const replayEvent = v.object({
+  eventId: identifier,
+  kind: v.string(),
+  occurredAt: isoTimestamp,
+  payload: v.unknown(),
+  runId: identifier,
+  sequence: v.integer(),
+});
+
+export const replayTransition = v.object({
+  correlationToken: identifier.nullable(),
+  effectKey: identifier.nullable(),
+  sequence: v.integer(),
+  stateId: identifier,
+  status: v.string(),
+  stepId: identifier.nullable(),
+});
+
+export const replayResultDocument = v.object({
+  artifactDigests: v.array(digest),
+  result: v.unknown(),
+  runId: identifier,
+  skillDigest: digest,
+  skillId: identifier,
+  stepId: identifier,
+});
+
+export const replayArtifactDigest = v.object({
+  classification: v.literal("public"),
+  contentBase64: v.string(),
+  digest,
+  name: v.string(),
+  size: v.integer(),
+});
+
+export const replayFixtures = v.object({
+  agentResults: v.array(v.unknown()),
+  clock: v.array(isoTimestamp),
+  effectResults: v.array(v.unknown()),
+  githubReads: v.array(v.unknown()),
+  ids: v.array(identifier),
+});
+
+export const replayBundle = v.object({
+  artifactDigests: v.array(replayArtifactDigest),
+  bundleDigest: digest,
+  capabilities: v.array(v.string()),
+  createdAt: isoTimestamp,
+  events: v.array(replayEvent),
+  fixtures: replayFixtures,
+  infrastructure: v.literal("fake"),
+  pins: replayPins,
+  redactionPolicy: replayRedactionPolicy,
+  resultDocuments: v.array(replayResultDocument),
+  runId: identifier,
+  schemaVersion: v.literal(1),
+  transitions: v.array(replayTransition),
+  truncation: v.object({
+    bytes: v.integer(),
+    items: v.integer(),
+    strings: v.integer(),
+    truncated: v.boolean(),
+  }),
+});
+
+export const replayBundleEnvelope = v.object({
+  artifactDigest: digest,
+  bundle: replayBundle,
+});
+
+export const replayExportRequest = v.object({
+  capabilities: v.array(v.string()),
+  createdAt: isoTimestamp,
+  fixtures: replayFixtures,
+  redactionPolicy: replayRedactionPolicy,
+  runId: identifier,
+});
+
 export type PinnedSkillBundle = Infer<typeof pinnedSkillBundle>;
 export type PinnedSkillBundleV2 = Infer<typeof pinnedSkillBundleV2>;
 export type SkillResultSchema = Infer<typeof skillResultSchema>;
@@ -1564,3 +1769,17 @@ export type OperationsHealth = Infer<typeof operationsHealth>;
 export type OperatorCommandRequest = Infer<typeof operatorCommandRequest>;
 export type OperatorCommandAudit = Infer<typeof operatorCommandAudit>;
 export type OperationsRebuildResult = Infer<typeof operationsRebuildResult>;
+export type FactoryFailureCategory = Infer<typeof factoryFailureCategory>;
+export type FactoryTelemetryAttributes = Infer<typeof factoryTelemetryAttributes>;
+export type FactoryTelemetryRecord = Infer<typeof factoryTelemetryRecord>;
+export type OperationsTelemetrySnapshot = Infer<typeof operationsTelemetrySnapshot>;
+export type ReplayRedactionPolicy = Infer<typeof replayRedactionPolicy>;
+export type ReplayPins = Infer<typeof replayPins>;
+export type ReplayEvent = Infer<typeof replayEvent>;
+export type ReplayTransition = Infer<typeof replayTransition>;
+export type ReplayResultDocument = Infer<typeof replayResultDocument>;
+export type ReplayArtifactDigest = Infer<typeof replayArtifactDigest>;
+export type ReplayFixtures = Infer<typeof replayFixtures>;
+export type ReplayBundle = Infer<typeof replayBundle>;
+export type ReplayBundleEnvelope = Infer<typeof replayBundleEnvelope>;
+export type ReplayExportRequest = Infer<typeof replayExportRequest>;

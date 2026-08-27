@@ -12,7 +12,10 @@ import moduleApp, {
   createSoftwareFactoryApp,
   FACTORY_RUNS_V2_WORKFLOW_DIGEST,
 } from "../chimpbase.app.ts";
-import { LocalArtifactByteDriver } from "./adapters/artifact-byte-driver.ts";
+import {
+  LocalArtifactByteDriver,
+  MemoryArtifactByteDriver,
+} from "./adapters/artifact-byte-driver.ts";
 import { GitHubEventNormalizer } from "./adapters/github-event-normalizer.ts";
 import {
   FetchGitHubReadTransport,
@@ -34,6 +37,20 @@ import {
   type FactoryDefinition,
 } from "./compiler.ts";
 import { type FactoryEvent, factoryEvent, type OperationsHealth } from "./contracts/index.ts";
+import {
+  DeterministicReplayClock,
+  DeterministicReplayIds,
+  executeReplayBundle,
+  parseReplayBundle,
+  type TrustedReplayPins,
+  verifyReplayBundle,
+} from "./replay.ts";
+import {
+  FakeAgentRuntime,
+  FakeGitHubReadTransport,
+  FakeGitHubWriteTransport,
+  FakeGitPublisher,
+} from "./testing/fakes.ts";
 
 export interface CliIo {
   readonly stderr: (text: string) => void;
@@ -238,6 +255,7 @@ export async function runCli(
     if (command === "daemon") return await daemonCommand(rest, io, dependencies);
     if (command === "trigger") return await triggerCommand(rest, io, dependencies);
     if (command === "skills") return await skillsCommand(rest, io, dependencies);
+    if (command === "replay") return await replayCommand(rest, io, dependencies);
     if (
       command === "status" ||
       command === "runs" ||
@@ -262,7 +280,7 @@ export async function runCli(
       return 0;
     }
     io.stderr(
-      "Usage: factory validate|plan|skills|poll|daemon|trigger|status|runs|show|events|effects|pause|resume|retry|cancel|approve|reject|doctor|modules check\n",
+      "Usage: factory validate|plan|skills|poll|daemon|trigger|status|runs|show|events|effects|pause|resume|retry|cancel|approve|reject|doctor|replay|modules check\n",
     );
     return 2;
   } catch (error) {
@@ -276,6 +294,101 @@ export async function runCli(
     }
     io.stderr(`${error instanceof Error ? error.message : String(error)}\n`);
     return 1;
+  }
+}
+
+async function replayCommand(
+  argv: readonly string[],
+  io: CliIo,
+  dependencies: CliDependencies,
+): Promise<number> {
+  const { positionals, values } = parseArgs({
+    allowPositionals: true,
+    args: [...argv],
+    options: {
+      config: { type: "string", default: process.env.FACTORY_CONFIG ?? "factory.yaml" },
+      json: { type: "boolean", default: false },
+    },
+    strict: true,
+  });
+  if (positionals.length !== 1) throw new Error("replay requires exactly one bundle path");
+  const bundle = parseReplayBundle(await dependencies.readText(positionals[0] as string));
+  const definition = compileFactoryDefinition(await dependencies.readText(values.config), {
+    sourceName: values.config,
+  });
+  const plan = Object.values(definition.plansV3).find(
+    (candidate) => candidate.flowDigest === bundle.pins.flowDigest,
+  );
+  if (plan === undefined) throw new Error("digest_mismatch: flow");
+  const manifest = await readFile(new URL("../module-contracts/manifest.json", import.meta.url));
+  const allowedCapabilities = [
+    ...new Set([
+      ...Object.values(plan.agentProfiles).flatMap((profile) => profile.capabilities),
+      ...plan.effectPermissions.map((permission) => permission.capability),
+    ]),
+  ].sort();
+  const trusted: TrustedReplayPins = {
+    agentProfileDigests: plan.agentProfileDigests,
+    allowedCapabilities,
+    definitionDigest: definition.revision.definitionDigest,
+    flowDigest: plan.flowDigest,
+    moduleManifestDigest: createHash("sha256").update(manifest).digest("hex"),
+    skillDigests: plan.skillRevisions,
+    workflowVersionDigest: FACTORY_RUNS_V2_WORKFLOW_DIGEST,
+  };
+  verifyReplayBundle(bundle, trusted);
+
+  const ids = new DeterministicReplayIds(bundle.fixtures.ids);
+  const clock = new DeterministicReplayClock(bundle.fixtures.clock);
+  const readTransport = new FakeGitHubReadTransport();
+  const writeTransport = new FakeGitHubWriteTransport();
+  const gitPublisher = new FakeGitPublisher();
+  const agentRuntime = new FakeAgentRuntime();
+  const app = createSoftwareFactoryApp({
+    agentRuntime,
+    artifactByteDriver: new MemoryArtifactByteDriver(),
+    clock: clock.now,
+    credentialsPresent: () => false,
+    gitPublisher,
+    githubWriteTransport: writeTransport,
+    moduleManifestDigest: trusted.moduleManifestDigest,
+    now: clock.now,
+    random: () => 0,
+    readTransport,
+    repositoryReachability: () => ({}),
+    workflowVersionDigest: trusted.workflowVersionDigest,
+  });
+  const runtime =
+    "Bun" in globalThis
+      ? await import("chimpbase/runtime/bun")
+      : await import("chimpbase/runtime/node");
+  const host = await runtime.createChimpbase({
+    app,
+    projectDir: process.cwd(),
+    storage: { engine: "memory" },
+    subscriptions: { dispatch: "sync" },
+  });
+  try {
+    const result = executeReplayBundle(bundle, trusted);
+    const observedWrites =
+      writeTransport.calls.length +
+      gitPublisher.mutations.length +
+      gitPublisher.publications.length;
+    if (observedWrites !== 0) throw new Error("replay_live_write: fake infrastructure wrote");
+    const output = {
+      replayId: ids.next(),
+      ...result,
+      infrastructure: "fake",
+      storage: "memory",
+    };
+    io.stdout(
+      values.json
+        ? `${canonicalJson(output)}\n`
+        : `replayed ${result.bundleDigest}\ntransitions: ${result.transitions.length}\neffects: ${result.effectIntents.length}\nlive writes: 0\n`,
+    );
+    return 0;
+  } finally {
+    await host.close();
   }
 }
 
