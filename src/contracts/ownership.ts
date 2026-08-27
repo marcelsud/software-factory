@@ -93,6 +93,7 @@ export const MODULE_RESOURCES = {
     collections: [
       "operator-commands",
       "run-admissions",
+      "run-admission-slots",
       "run-engine-state",
       "run-gates",
       "runs",
@@ -100,6 +101,7 @@ export const MODULE_RESOURCES = {
     ],
     tables: [
       "operator_commands",
+      "run_admission_slots",
       "run_admissions",
       "run_audit",
       "run_engine_state",
@@ -183,6 +185,8 @@ export const RESOURCE_OWNERS = {
   "operator-commands": "runs",
   "operator-routes": "operations",
   "repository-poll-crons": "intake",
+  "run-admission-slots": "runs",
+  run_admission_slots: "runs",
   "run-admissions": "runs",
   run_admissions: "runs",
   run_audit: "runs",

@@ -460,14 +460,19 @@ async function finishEngineRun(
   stateId: string,
   outcome: RunV3["outcome"],
   occurredAt: string,
+  terminal?: "success" | "failure",
 ): Promise<{ engine: RunEngineStateRow; row: RunRow }> {
   if (isTerminal(row.status)) return { engine, row };
   const status =
-    outcome === "completed" || outcome === "not_actionable"
-      ? "succeeded"
-      : outcome === "cancelled"
-        ? "cancelled"
-        : "failed";
+    outcome === "cancelled"
+      ? "cancelled"
+      : terminal === "success"
+        ? "succeeded"
+        : terminal === "failure"
+          ? "failed"
+          : outcome === "completed" || outcome === "not_actionable"
+            ? "succeeded"
+            : "failed";
   const cleared: Partial<RunRow> = {
     current_attempt_id: null,
     current_correlation_token: null,
@@ -511,6 +516,7 @@ async function finishEngineRun(
     .where("run_id", "=", row.run_id)
     .executeTakeFirst();
   if (admission !== undefined && admission.status !== "released") {
+    await db.deleteFrom("run_admission_slots").where("run_id", "=", row.run_id).execute();
     await db
       .updateTable("run_admissions")
       .set({ status: "released" })
@@ -565,9 +571,13 @@ async function transition(
   outcome: string,
   occurredAt: string,
   outputDigests: readonly string[] = [],
+  signalMode = false,
 ): Promise<{ engine: RunEngineStateRow; row: RunRow } | null> {
   const edge = plan.transitions.find(
-    (candidate) => candidate.from === row.state_id && candidate.on === outcome,
+    (candidate) =>
+      candidate.from === row.state_id &&
+      candidate.on === outcome &&
+      candidate.mode === (signalMode ? "signal" : "immediate"),
   );
   if (edge === undefined) return null;
   const outputs = JSON.parse(engine.artifact_outputs_json) as Record<string, string[]>;
@@ -596,10 +606,12 @@ async function transition(
     artifact_outputs_json: JSON.stringify(outputs),
     attempt_count: 0,
     engine_phase: target.gate === undefined ? "runnable" : "waiting",
+    paused_from_phase: null,
     last_outcome: outcome,
     outcome: target.gate === undefined ? engine.outcome : "waiting",
     pending_json: null,
     retry_delay_ms: null,
+    state_generation: engine.state_generation + 1,
   };
   await db
     .updateTable("run_engine_state")
@@ -607,10 +619,12 @@ async function transition(
       artifact_outputs_json: nextEngine.artifact_outputs_json,
       attempt_count: 0,
       engine_phase: nextEngine.engine_phase,
+      paused_from_phase: null,
       last_outcome: outcome,
       outcome: nextEngine.outcome,
       pending_json: null,
       retry_delay_ms: null,
+      state_generation: nextEngine.state_generation,
     })
     .where("run_id", "=", row.run_id)
     .execute();
@@ -678,7 +692,7 @@ function validResult(
   const contract = step.resultContracts.find((candidate) => candidate.outcome === result.outcome);
   if (
     contract === undefined ||
-    outputArtifactDigests.length < contract.requiredArtifactCount ||
+    new Set(outputArtifactDigests).size < contract.requiredArtifactCount ||
     !contract.requiredData.every((key) => Object.hasOwn(data, key))
   )
     return false;
@@ -929,6 +943,7 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
       collections: [
         "operator-commands",
         "run-admissions",
+        "run-admission-slots",
         "run-engine-state",
         "run-gates",
         "runs",
@@ -936,6 +951,7 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
       ],
       tables: [
         "operator_commands",
+        "run_admission_slots",
         "run_admissions",
         "run_audit",
         "run_engine_state",
@@ -1148,11 +1164,13 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
           artifact_outputs_json: "{}",
           attempt_count: 0,
           engine_phase: "queued",
+          paused_from_phase: null,
           last_outcome: null,
           outcome: "waiting",
           pending_json: null,
           repository: input.repository,
           retry_delay_ms: null,
+          state_generation: 0,
           run_id: input.runId,
           subject: input.subject,
           terminal_published: 0,
@@ -1384,13 +1402,33 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
           if (engine.engine_phase === "paused")
             throw new Error("command_not_allowed: run is already paused");
           patch = { status: "paused" };
-          enginePatch = { engine_phase: "paused", outcome: "waiting" };
+          enginePatch = {
+            engine_phase: "paused",
+            outcome: "waiting",
+            paused_from_phase: engine.engine_phase,
+          };
         } else if (input.kind === "resume") {
           if (engine.engine_phase !== "paused")
             throw new Error("command_not_allowed: run is not paused");
+          const admission = await db
+            .selectFrom("run_admissions")
+            .select("status")
+            .where("run_id", "=", input.runId)
+            .executeTakeFirstOrThrow();
           const gatePending = loaded.row.current_gate_status === "pending";
-          patch = { status: gatePending ? "waiting" : "running" };
-          enginePatch = { engine_phase: gatePending ? "waiting" : "runnable" };
+          const resumedPhase =
+            admission.status === "queued"
+              ? "queued"
+              : gatePending
+                ? "waiting"
+                : (engine.paused_from_phase ?? "runnable");
+          patch = {
+            status:
+              resumedPhase === "queued" || resumedPhase === "waiting" || resumedPhase === "retrying"
+                ? "waiting"
+                : "running",
+          };
+          enginePatch = { engine_phase: resumedPhase, paused_from_phase: null };
         } else if (input.kind === "cancel") {
           await db
             .insertInto("operator_commands")
@@ -1413,7 +1451,7 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
           await signalResume(ctx, loaded.row, input.commandId, input.issuedAt, "cancel");
           return runFromRow((await loadRows(db, input.runId))?.row ?? loaded.row);
         } else if (input.kind === "retry") {
-          if (engine.engine_phase !== "retrying" && engine.engine_phase !== "waiting")
+          if (engine.engine_phase !== "retrying" || loaded.row.current_gate_status === "pending")
             throw new Error("command_not_allowed: no retryable work");
           patch = {
             current_attempt_id: null,
@@ -1595,12 +1633,6 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
             .selectAll()
             .where("run_id", "=", row.run_id)
             .executeTakeFirstOrThrow();
-          const active = await db
-            .selectFrom("run_admissions")
-            .select("run_id")
-            .where("scope_key", "=", admission.scope_key)
-            .where("status", "=", "active")
-            .execute();
           const firstQueued = await db
             .selectFrom("run_admissions")
             .select("run_id")
@@ -1609,8 +1641,35 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
             .orderBy("requested_at", "asc")
             .orderBy("run_id", "asc")
             .executeTakeFirst();
-          if (active.length >= admission.limit_value || firstQueued?.run_id !== row.run_id)
+          if (firstQueued?.run_id !== row.run_id)
             return { kind: "wait" as const, signal: "resume" };
+          const ownedSlot = await db
+            .selectFrom("run_admission_slots")
+            .select("slot_number")
+            .where("run_id", "=", row.run_id)
+            .executeTakeFirst();
+          let slot: number | null = ownedSlot?.slot_number ?? null;
+          for (
+            let candidate = 0;
+            slot === null && candidate < admission.limit_value;
+            candidate += 1
+          ) {
+            const inserted = await db
+              .insertInto("run_admission_slots")
+              .values({
+                run_id: row.run_id,
+                scope_key: admission.scope_key,
+                slot_number: candidate,
+              })
+              .onConflict((conflict) => conflict.columns(["scope_key", "slot_number"]).doNothing())
+              .returning("slot_number")
+              .executeTakeFirst();
+            if (inserted !== undefined) {
+              slot = inserted.slot_number;
+              break;
+            }
+          }
+          if (slot === null) return { kind: "wait" as const, signal: "resume" };
           await db
             .updateTable("run_admissions")
             .set({ status: "active" })
@@ -1621,7 +1680,7 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
             row,
             "admission.granted",
             input.now,
-            { scope: admission.scope_key },
+            { scope: admission.scope_key, slot },
             { status: "running" },
           );
           engine = { ...engine, engine_phase: "runnable" };
@@ -1630,6 +1689,30 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
             .set({ engine_phase: "runnable" })
             .where("run_id", "=", row.run_id)
             .execute();
+          const nextQueued = await db
+            .selectFrom("run_admissions")
+            .select("run_id")
+            .where("scope_key", "=", admission.scope_key)
+            .where("status", "=", "queued")
+            .orderBy("requested_at", "asc")
+            .orderBy("run_id", "asc")
+            .executeTakeFirst();
+          if (nextQueued !== undefined) {
+            const nextRun = await db
+              .selectFrom("runs")
+              .selectAll()
+              .where("run_id", "=", nextQueued.run_id)
+              .executeTakeFirst();
+            if (nextRun !== undefined) {
+              await signalResume(
+                ctx,
+                nextRun,
+                `admission-fill:${row.run_id}`,
+                input.now,
+                "admission",
+              );
+            }
+          }
         }
         if (engine.engine_phase === "retrying") {
           if (input.wakeKind !== "retry")
@@ -1653,7 +1736,18 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
           return { kind: "complete" as const };
         }
         if (state.terminalOutcome !== undefined) {
-          await finishEngineRun(ctx, row, engine, state.id, state.terminalOutcome, input.now);
+          if (state.terminal !== "success" && state.terminal !== "failure") {
+            throw new Error("invalid_revision_pin: terminal state classification is missing");
+          }
+          await finishEngineRun(
+            ctx,
+            row,
+            engine,
+            state.id,
+            state.terminalOutcome,
+            input.now,
+            state.terminal,
+          );
           return { kind: "complete" as const };
         }
         if (engine.pending_json !== null) {
@@ -1694,12 +1788,27 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
           }
           if (pending.kind === "effect" && isDataRecord(pending.outcome)) {
             if (pending.outcome.outcome === "ambiguous") {
-              const retry = await scheduleRetry(db, row, engine, plan, input.now);
-              if (retry === null) {
-                await finishEngineRun(ctx, row, engine, state.id, "failed", input.now);
-                return { kind: "complete" as const };
-              }
-              return { delayMs: retry.delayMs, kind: "sleep" as const };
+              engine = {
+                ...engine,
+                engine_phase: "waiting",
+                outcome: "waiting",
+                pending_json: null,
+              };
+              await db
+                .updateTable("run_engine_state")
+                .set({ engine_phase: "waiting", outcome: "waiting", pending_json: null })
+                .where("run_id", "=", row.run_id)
+                .execute();
+              row = await appendAudit(
+                db,
+                row,
+                "effect.ambiguous_waiting",
+                input.now,
+                { idempotencyKey: row.current_effect_key },
+                { status: "waiting" },
+              );
+              await publishProjection(ctx, row, engine);
+              return { kind: "wait" as const, signal: "resume" };
             }
             const next = await transition(
               db,
@@ -1724,6 +1833,8 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
               plan,
               String(pending.outcome),
               input.now,
+              [],
+              true,
             );
             if (next === null) {
               await finishEngineRun(ctx, row, engine, state.id, "failed", input.now);
@@ -1740,7 +1851,16 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
             return { kind: "complete" as const };
           }
           if (input.wakeKind === "timeout" && gate.timeoutOutcome !== undefined) {
-            const next = await transition(db, row, engine, plan, gate.timeoutOutcome, input.now);
+            const next = await transition(
+              db,
+              row,
+              engine,
+              plan,
+              gate.timeoutOutcome,
+              input.now,
+              [],
+              true,
+            );
             if (next === null)
               await finishEngineRun(ctx, row, engine, state.id, "failed", input.now);
             else await publishProjection(ctx, next.row, next.engine);
@@ -1759,7 +1879,12 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
               await finishEngineRun(ctx, row, engine, state.id, "failed", input.now);
               return { kind: "complete" as const };
             }
-            const token = digestIdentity(row.run_id, state.id, "gate");
+            const token = digestIdentity(
+              row.run_id,
+              state.id,
+              String(engine.state_generation),
+              "gate",
+            );
             await db
               .insertInto("run_gates")
               .values({
@@ -1824,9 +1949,21 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
         if (row.current_attempt_id !== null || row.current_effect_key !== null)
           return { kind: "wait" as const, signal: "resume" };
         const number = engine.attempt_count + 1;
-        const token = digestIdentity(row.run_id, state.id, String(number), "correlation");
+        const token = digestIdentity(
+          row.run_id,
+          state.id,
+          String(engine.state_generation),
+          String(number),
+          "correlation",
+        );
         if (step.kind === "agent") {
-          const attemptId = digestIdentity(row.run_id, state.id, String(number), "attempt");
+          const attemptId = digestIdentity(
+            row.run_id,
+            state.id,
+            String(engine.state_generation),
+            String(number),
+            "attempt",
+          );
           const profile =
             step.agentProfile === undefined ? undefined : plan.agentProfiles[step.agentProfile];
           if (profile === undefined) {
@@ -1894,7 +2031,13 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
           await publishProjection(ctx, row, engine);
           return { kind: "wait" as const, signal: "resume" };
         }
-        const idempotencyKey = digestIdentity(row.run_id, state.id, String(number), "effect");
+        const idempotencyKey = digestIdentity(
+          row.run_id,
+          state.id,
+          String(engine.state_generation),
+          String(number),
+          "effect",
+        );
         const artifacts = inputArtifacts(plan, step.id, engine);
         row = await appendAudit(
           db,

@@ -91,11 +91,13 @@ export interface RunEngineStateRow {
   artifact_outputs_json: string;
   attempt_count: number;
   engine_phase: string;
+  paused_from_phase: string | null;
   last_outcome: string | null;
   outcome: string;
   pending_json: string | null;
   repository: string;
   retry_delay_ms: number | null;
+  state_generation: number;
   run_id: string;
   subject: string;
   terminal_published: number;
@@ -109,8 +111,15 @@ export interface RunAdmissionRow {
   status: string;
 }
 
+export interface RunAdmissionSlotRow {
+  run_id: string;
+  scope_key: string;
+  slot_number: number;
+}
+
 export interface RunsDatabase {
   operator_commands: OperatorCommandRow;
+  run_admission_slots: RunAdmissionSlotRow;
   run_admissions: RunAdmissionRow;
   run_engine_state: RunEngineStateRow;
   run_identities: RunIdentityRow;
@@ -209,6 +218,8 @@ export const runsMigrations = {
           outcome TEXT NOT NULL,
           engine_phase TEXT NOT NULL,
           attempt_count INTEGER NOT NULL,
+          state_generation INTEGER NOT NULL DEFAULT 0,
+          paused_from_phase TEXT,
           retry_delay_ms INTEGER,
           last_outcome TEXT,
           artifact_outputs_json TEXT NOT NULL,
@@ -226,6 +237,18 @@ export const runsMigrations = {
         );
         CREATE INDEX IF NOT EXISTS run_admissions_scope_fairness
           ON run_admissions(scope_key, status, requested_at, run_id);
+      `,
+    },
+    {
+      name: "004_atomic_admission_and_generations",
+      sql: `
+        CREATE TABLE IF NOT EXISTS run_admission_slots (
+          scope_key TEXT NOT NULL,
+          slot_number INTEGER NOT NULL,
+          run_id TEXT NOT NULL UNIQUE,
+          PRIMARY KEY (scope_key, slot_number),
+          FOREIGN KEY (run_id) REFERENCES runs(run_id)
+        );
       `,
     },
   ],
@@ -316,6 +339,8 @@ export const runsMigrations = {
           outcome TEXT NOT NULL,
           engine_phase TEXT NOT NULL,
           attempt_count INTEGER NOT NULL,
+          state_generation INTEGER NOT NULL DEFAULT 0,
+          paused_from_phase TEXT,
           retry_delay_ms INTEGER,
           last_outcome TEXT,
           artifact_outputs_json TEXT NOT NULL,
@@ -329,8 +354,17 @@ export const runsMigrations = {
           requested_at TEXT NOT NULL,
           status TEXT NOT NULL
         );
-        CREATE INDEX IF NOT EXISTS chimpbase_runs.run_admissions_scope_fairness
-          ON chimpbase_runs.run_admissions(scope_key, status, requested_at, run_id);
+      `,
+    },
+    {
+      name: "004_atomic_admission_and_generations",
+      sql: `
+        CREATE TABLE IF NOT EXISTS chimpbase_runs.run_admission_slots (
+          scope_key TEXT NOT NULL,
+          slot_number INTEGER NOT NULL,
+          run_id TEXT NOT NULL UNIQUE REFERENCES chimpbase_runs.runs(run_id),
+          PRIMARY KEY (scope_key, slot_number)
+        );
       `,
     },
   ],

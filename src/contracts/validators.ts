@@ -142,6 +142,7 @@ export const executionStateV2 = v.object({
   gate: v.string().optional(),
   id: identifier,
   step: v.string().optional(),
+  terminal: v.enum(["success", "failure"]).optional(),
   terminalOutcome: v
     .enum([
       "not_actionable",

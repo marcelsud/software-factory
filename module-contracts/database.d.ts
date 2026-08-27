@@ -46,6 +46,7 @@ export interface OperationsDatabase {
 
 export interface RunsDatabase {
   "operator_commands": Record<string, unknown>;
+  "run_admission_slots": Record<string, unknown>;
   "run_admissions": Record<string, unknown>;
   "run_audit": Record<string, unknown>;
   "run_engine_state": Record<string, unknown>;

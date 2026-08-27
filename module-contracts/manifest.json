@@ -1155,6 +1155,12 @@
                         "step": {
                           "type": "string"
                         },
+                        "terminal": {
+                          "enum": [
+                            "success",
+                            "failure"
+                          ]
+                        },
                         "terminalOutcome": {
                           "enum": [
                             "not_actionable",
@@ -6013,18 +6019,21 @@
         "postgres": [
           "001_ledger",
           "002_audit_and_gates",
-          "003_engine_state_and_admission"
+          "003_engine_state_and_admission",
+          "004_atomic_admission_and_generations"
         ],
         "sqlite": [
           "001_ledger",
           "002_audit_and_gates",
-          "003_engine_state_and_admission"
+          "003_engine_state_and_admission",
+          "004_atomic_admission_and_generations"
         ]
       },
       "name": "runs",
       "resources": {
         "collections": [
           "operator-commands",
+          "run-admission-slots",
           "run-admissions",
           "run-engine-state",
           "run-gates",
@@ -6033,6 +6042,7 @@
         ],
         "tables": [
           "operator_commands",
+          "run_admission_slots",
           "run_admissions",
           "run_audit",
           "run_engine_state",
@@ -7104,6 +7114,12 @@
                     },
                     "step": {
                       "type": "string"
+                    },
+                    "terminal": {
+                      "enum": [
+                        "success",
+                        "failure"
+                      ]
                     },
                     "terminalOutcome": {
                       "enum": [

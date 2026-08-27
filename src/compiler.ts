@@ -304,6 +304,7 @@ export function compileFactoryDefinition(
             ...(state.gate === undefined ? {} : { gate: state.gate }),
             id: state.id,
             ...(state.step === undefined ? {} : { step: state.step }),
+            ...(state.terminal === undefined ? {} : { terminal: state.terminal }),
             ...(state.terminalOutcome === undefined
               ? {}
               : { terminalOutcome: state.terminalOutcome }),
@@ -978,10 +979,23 @@ function validateDefinition(definition: FactoryDefinition): void {
     requireCapabilityOwner(capability.id, `$.capabilities[${index}].id`);
   });
   const profileById = new Map(definition.agentProfiles.map((profile) => [profile.id, profile]));
+  const githubSourceByRepository = new Map<string, number>();
 
   definition.sources.forEach((source, index) => {
     if (source.repository !== undefined && !repositories.has(source.repository)) {
       missingRef(`$.sources[${index}].repository`, "repository", source.repository);
+    }
+    if (source.type === "github" && source.repository !== undefined) {
+      const previous = githubSourceByRepository.get(source.repository);
+      if (previous !== undefined) {
+        fail(
+          `$.sources[${index}].repository`,
+          `GitHub source duplicates repository identity from $.sources[${previous}]`,
+          "declare at most one GitHub source per repository",
+          "ambiguous_source_identity",
+        );
+      }
+      githubSourceByRepository.set(source.repository, index);
     }
   });
   definition.agentProfiles.forEach((profile, index) => {
@@ -1046,6 +1060,19 @@ function validateDefinition(definition: FactoryDefinition): void {
         "use repository, subject, flow, agent-profile, or repository-and-subject",
         "invalid_concurrency_scope",
       );
+    }
+    if (flow.concurrency.key === "agent-profile") {
+      const flowProfiles = new Set(
+        flow.steps.flatMap((step) => (step.agentProfile === undefined ? [] : [step.agentProfile])),
+      );
+      if (flowProfiles.size > 1) {
+        fail(
+          `${path}.concurrency.key`,
+          "agent-profile concurrency is a run-level policy and the flow uses multiple profiles",
+          "use one agent profile or select another concurrency scope",
+          "ambiguous_agent_profile_scope",
+        );
+      }
     }
     if (!states.has(flow.initialState))
       missingRef(`${path}.initialState`, "state", flow.initialState);
@@ -1225,6 +1252,14 @@ function validateDefinition(definition: FactoryDefinition): void {
       if (!states.has(transition.to))
         missingRef(`${path}.transitions[${index}].to`, "state", transition.to);
       const fromState = flow.states.find((state) => state.id === transition.from);
+      if (transition.mode === "signal" && fromState?.gate === undefined) {
+        fail(
+          `${path}.transitions[${index}].mode`,
+          "signal transition originates from a state without a gate",
+          "use immediate mode for step outcomes or add an explicit gate state",
+          "invalid_signal_transition",
+        );
+      }
       if (fromState?.gate !== undefined) {
         const gate = flow.gates.find((entry) => entry.id === fromState.gate);
         if (gate !== undefined && !gate.accepted.includes(transition.on)) {
