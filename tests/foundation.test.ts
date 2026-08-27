@@ -37,7 +37,7 @@ import { execution } from "../src/modules/execution/interface.ts";
 import { runs } from "../src/modules/runs/interface.ts";
 import {
   FakeAgentRuntime,
-  FakeGitHubTransport,
+  FakeGitHubReadTransport,
   FakeGitPublisher,
   MemoryArtifactByteDriver,
 } from "../src/testing/fakes.ts";
@@ -186,7 +186,7 @@ describe("foundation", () => {
       "agent-runtime",
       "artifact-byte-driver",
       "git-publisher",
-      "github-transport",
+      "github-read-transport",
     ]);
     for (const owner of Object.values(CAPABILITY_OWNERS))
       expect(validCapabilityOwners.has(owner)).toBe(true);
@@ -739,11 +739,11 @@ describe("foundation", () => {
   });
 
   test("[G17] in-memory fakes exercise boundary behavior through declared data contracts", async () => {
-    const github = new FakeGitHubTransport([{ body: { id: 1 }, headers: {}, status: 200 }]);
-    expect(
-      (await github.request({ method: "GET", path: "/repos/example/factory/issues/1" })).status,
-    ).toBe(200);
-    expect(github.requests).toHaveLength(1);
+    const github = new FakeGitHubReadTransport();
+    expect((await github.listChangedIssues({ repositoryId: "factory" })).items).toEqual([]);
+    expect(github.calls).toEqual([
+      { input: { repositoryId: "factory" }, method: "listChangedIssues" },
+    ]);
 
     const profile =
       compileFactoryDefinition(factorySource).plans["issue-triage"]?.agentProfiles["triage-agent"];

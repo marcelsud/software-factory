@@ -29,6 +29,9 @@ export interface IntakeDatabase {
   "delivery_deduplication": Record<string, unknown>;
   "event_sources": Record<string, unknown>;
   "factory_events": Record<string, unknown>;
+  "github_comment_snapshots": Record<string, unknown>;
+  "github_issue_snapshots": Record<string, unknown>;
+  "github_poll_state": Record<string, unknown>;
   "source_cursors": Record<string, unknown>;
   "source_payload_snapshots": Record<string, unknown>;
 }

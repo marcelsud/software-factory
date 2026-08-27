@@ -35,6 +35,15 @@ const calls = {
     errors: ["module_unavailable", "source_not_found", "transport_failure"],
     guarantees: ["never advances a cursor past an uncommitted event"],
   },
+  pollRepositoryV2: {
+    input: v.object({ observedAt: v.string(), repositoryId: v.string() }),
+    output: v.object({ accepted: v.integer(), cursor: sourceCursor }),
+    errors: ["module_unavailable", "source_not_found", "transport_failure"],
+    guarantees: [
+      "never advances a cursor past an uncommitted event",
+      "source positions are monotonic and overlap replays are idempotent",
+    ],
+  },
 } as const;
 
 const events = {

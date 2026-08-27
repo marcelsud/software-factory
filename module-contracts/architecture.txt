@@ -39,6 +39,7 @@ intake v1
   call: intake/acceptSourceEventV2@v1
   call: intake/getSourceCursor@v1
   call: intake/pollRepository@v1
+  call: intake/pollRepositoryV2@v1
   event: intake/factoryEventAccepted@v1
   event: intake/factoryEventAccepted@v2
 operations v1
