@@ -2,8 +2,6 @@ import { createHash } from "node:crypto";
 
 import type {
   AgentRuntime,
-  AgentRuntimeRequest,
-  AgentRuntimeResult,
   ArtifactByteDriver,
   GitHubIssueCommentRecord,
   GitHubIssueRecord,
@@ -15,6 +13,7 @@ import type {
   GitPublication,
   GitPublisher,
 } from "../adapters/seams.ts";
+import type { AgentRequest, AgentResult } from "../contracts/index.ts";
 
 export interface FakeGitHubReadTransportScript {
   readonly comments?: ReadonlyArray<Error | GitHubPage<GitHubIssueCommentRecord>>;
@@ -110,22 +109,61 @@ function unlimitedRate(): GitHubRateLimitRecord {
 }
 
 export class FakeAgentRuntime implements AgentRuntime {
-  readonly requests: AgentRuntimeRequest[] = [];
-  readonly #result: AgentRuntimeResult;
+  readonly cancelledAttempts: string[] = [];
+  readonly requests: AgentRequest[] = [];
+  readonly #result: AgentResult | ((request: AgentRequest) => AgentResult);
 
-  constructor(
-    result: AgentRuntimeResult = {
-      result: { data: {}, outcome: "completed", outputArtifactDigests: [], summary: "ok" },
-      status: "succeeded",
-    },
-  ) {
+  constructor(result: AgentResult | ((request: AgentRequest) => AgentResult) = fakeDomainResult) {
     this.#result = result;
   }
 
-  async execute(request: AgentRuntimeRequest): Promise<AgentRuntimeResult> {
+  async run(request: AgentRequest, signal: AbortSignal): Promise<AgentResult> {
     this.requests.push(request);
+    if (signal.aborted) return fakeInfrastructureResult(request, "cancel");
+    if (typeof this.#result === "function") return this.#result(request);
     return this.#result;
   }
+
+  async cancel(attemptId: string): Promise<void> {
+    this.cancelledAttempts.push(attemptId);
+  }
+}
+
+function fakeDomainResult(request: AgentRequest): AgentResult {
+  const emptyDigest = createHash("sha256").update("").digest("hex");
+  return {
+    attemptId: request.attemptId,
+    changedFiles: [],
+    logs: {
+      stderrBytes: 0,
+      stderrDigest: emptyDigest,
+      stderrTruncated: false,
+      stdoutBytes: 0,
+      stdoutDigest: emptyDigest,
+    },
+    outcome: { data: {}, outcome: "completed", outputArtifactDigests: [], summary: "ok" },
+    resources: { cpuMs: 0, maxRssBytes: 0 },
+    status: "succeeded",
+    tests: [],
+    timing: {
+      durationMs: 0,
+      finishedAt: request.startedAt,
+      startedAt: request.startedAt,
+    },
+  };
+}
+
+function fakeInfrastructureResult(
+  request: AgentRequest,
+  category: "cancel" | "adapter",
+): AgentResult {
+  const result = fakeDomainResult(request);
+  return {
+    ...result,
+    failure: { category, message: category, retriable: true },
+    outcome: undefined,
+    status: "failed",
+  };
 }
 
 export class FakeGitPublisher implements GitPublisher {

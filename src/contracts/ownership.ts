@@ -1,5 +1,5 @@
 export const CAPABILITY_OWNERS = {
-  "agent.execute": "agent-runtime",
+  "agent.run": "agent-runtime",
   "artifact.bytes": "artifact-byte-driver",
   "definition.compile": "definitions",
   "git.publish": "git-publisher",
@@ -31,9 +31,9 @@ export const SQLITE_MODULE_LIMITATIONS = {
 
 export const MODULE_RESOURCES = {
   assets: {
-    collections: ["artifacts", "skill-revisions"],
+    collections: ["artifacts", "skill-bundles", "skill-revisions"],
     kvPrefixes: ["artifact-bytes", "artifact-materializations"],
-    tables: ["artifacts", "skill_revisions"],
+    tables: ["artifact_blobs", "artifacts", "skill_bundles", "skill_revisions"],
   },
   definitions: {
     collections: [
@@ -61,7 +61,15 @@ export const MODULE_RESOURCES = {
   execution: {
     collections: ["step-attempts", "workspaces"],
     queues: ["agent-workers"],
-    tables: ["attempt_results", "step_attempts", "workspaces"],
+    tables: [
+      "attempt_requests",
+      "attempt_result_metadata",
+      "attempt_cancellations",
+      "attempt_results",
+      "step_attempts",
+      "workspace_lifecycle",
+      "workspaces",
+    ],
   },
   intake: {
     collections: [
@@ -102,6 +110,7 @@ export const MODULE_RESOURCES = {
     tables: [
       "operator_commands",
       "run_admission_slots",
+      "run_execution_pins",
       "run_admissions",
       "run_audit",
       "run_engine_state",
@@ -123,6 +132,10 @@ export const RESOURCE_OWNERS = {
   "artifact-bytes": "assets",
   "artifact-materializations": "assets",
   artifacts: "assets",
+  attempt_requests: "execution",
+  attempt_cancellations: "execution",
+  artifact_blobs: "assets",
+  attempt_result_metadata: "execution",
   attempt_results: "execution",
   definition_revisions: "definitions",
   "definition-revisions": "definitions",
@@ -140,7 +153,9 @@ export const RESOURCE_OWNERS = {
   "event-delivery": "chimpbase",
   "event:ArtifactStored.v1": "assets",
   "event:AttemptFinished.v1": "execution",
+  "event:AttemptFinished.v2": "execution",
   "event:AttemptQueued.v1": "execution",
+  "event:AttemptQueued.v2": "execution",
   "event:DefinitionPublished.v1": "definitions",
   "event:EffectFinished.v1": "effects",
   "event:EffectFinished.v2": "effects",
@@ -193,6 +208,7 @@ export const RESOURCE_OWNERS = {
   run_gates: "runs",
   run_identities: "runs",
   "run-engine-state": "runs",
+  run_execution_pins: "runs",
   run_engine_state: "runs",
   "run-gates": "runs",
   "run-projections": "operations",
@@ -205,9 +221,12 @@ export const RESOURCE_OWNERS = {
   source_payload_snapshots: "intake",
   step_attempts: "execution",
   telemetry: "chimpbase",
+  "skill-bundles": "assets",
+  skill_bundles: "assets",
   "step-attempts": "execution",
   "workflow-engine": "chimpbase",
   workflow_signals: "runs",
   "workflow-signals": "runs",
+  workspace_lifecycle: "execution",
   workspaces: "execution",
 } as const;

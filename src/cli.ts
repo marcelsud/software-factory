@@ -1,9 +1,10 @@
 #!/usr/bin/env node
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, realpath } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseArgs } from "node:util";
+import { parseArgs, promisify } from "node:util";
 
 import { syncChimpbaseModuleArtifacts } from "chimpbase/tooling/modules";
 
@@ -18,6 +19,8 @@ import {
   type GitHubTokenProvider,
   PersonalAccessTokenProvider,
 } from "./adapters/github-read-transport.ts";
+import { LocalProcessAgentRuntime } from "./adapters/local-process-agent-runtime.ts";
+import type { AgentRuntime } from "./adapters/seams.ts";
 import {
   canonicalJson,
   compileFactoryDefinition,
@@ -45,6 +48,7 @@ export interface CliDependencies {
     signal: AbortSignal,
     sourceRepositories?: Readonly<Record<string, string>>,
     repositoryEvents?: Readonly<Record<string, readonly string[]>>,
+    localRepositories?: Readonly<Record<string, string>>,
   ) => Promise<CliHost>;
   readonly readStdin?: () => Promise<string>;
   readonly readText: (path: string) => Promise<string>;
@@ -74,24 +78,67 @@ const defaultDependencies: Required<CliDependencies> = {
       process.off("SIGTERM", abort);
     };
   },
-  async openHost(repositories, signal, sourceRepositories = {}, repositoryEvents = {}) {
+  async openHost(
+    repositories,
+    signal,
+    sourceRepositories = {},
+    repositoryEvents = {},
+    localRepositories = {},
+  ) {
     const clock = () => new Date();
     const tokenProvider = tokenProviderFromEnvironment();
     const readTransport = new FetchGitHubReadTransport({ clock, repositories, tokenProvider });
     const path = process.env.FACTORY_DB_PATH ?? ".factory/factory.sqlite";
     await mkdir(dirname(resolve(path)), { recursive: true });
-    // Runtime adapters import incompatible platform built-ins, so load only the active one.
     const runtime =
       "Bun" in globalThis
         ? await import("chimpbase/runtime/bun")
         : await import("chimpbase/runtime/node");
     const manifest = await readFile(new URL("../module-contracts/manifest.json", import.meta.url));
+    const agentExecutable = await realpath(process.env.FACTORY_AGENT_BIN ?? process.execPath);
+    const workspaceRoot = resolve(process.env.FACTORY_WORKSPACE_ROOT ?? ".factory/workspaces");
+    const runtimes = new Map<string, LocalProcessAgentRuntime>();
+    const repositoryPins: Record<string, string> = {};
+    for (const [fullName, configuredPath] of Object.entries(localRepositories)) {
+      const repositoryRoot = await realpath(configuredPath);
+      repositoryPins[fullName] = (
+        await promisify(execFile)("git", ["-C", repositoryRoot, "rev-parse", "HEAD"])
+      ).stdout.trim();
+      runtimes.set(
+        fullName,
+        new LocalProcessAgentRuntime({
+          repositoryRoot,
+          trustedRuntimePaths: ["/usr", "/bin", "/lib", "/lib64", dirname(agentExecutable)],
+          workspaceRoot: resolve(
+            workspaceRoot,
+            createHash("sha256").update(fullName).digest("hex"),
+          ),
+        }),
+      );
+    }
+    const attemptOwners = new Map<string, LocalProcessAgentRuntime>();
+    const agentRuntime: AgentRuntime = {
+      async run(request, attemptSignal) {
+        const selected = runtimes.get(request.repository.id);
+        if (selected === undefined)
+          throw new Error(
+            `agent_runtime_unavailable: no configured local runtime for ${request.repository.id}`,
+          );
+        attemptOwners.set(request.attemptId, selected);
+        return await selected.run(request, attemptSignal);
+      },
+      async cancel(attemptId) {
+        await attemptOwners.get(attemptId)?.cancel(attemptId);
+      },
+    };
     return await runtime.createChimpbase({
       app: createSoftwareFactoryApp({
+        agentRuntime,
         clock,
         moduleManifestDigest: createHash("sha256").update(manifest).digest("hex"),
         readTransport,
         repositoryEvents,
+        repositoryPins,
         signal,
         sourceRepositories,
         workflowVersionDigest: FACTORY_RUNS_V2_WORKFLOW_DIGEST,
@@ -221,12 +268,13 @@ async function pollCommand(
     dependencies.createAbortController ?? defaultDependencies.createAbortController
   )();
   const repositories = githubRepositories(definition, values.repository);
-  const composition = repositoryComposition(repositories);
+  const composition = repositoryComposition(repositories, values.config);
   const host = await (dependencies.openHost ?? defaultDependencies.openHost)(
     composition.repositories,
     controller.signal,
     composition.sourceRepositories,
     composition.repositoryEvents,
+    composition.localRepositories,
   );
   await activateCheckedDefinition(host, values.config, dependencies);
   try {
@@ -247,7 +295,7 @@ async function daemonCommand(
   const values = parseIntakeOptions(argv);
   const definition = await loadDefinition(values.config, dependencies);
   const repositories = githubRepositories(definition, values.repository);
-  const composition = repositoryComposition(repositories);
+  const composition = repositoryComposition(repositories, values.config);
   const controller = (
     dependencies.createAbortController ?? defaultDependencies.createAbortController
   )();
@@ -259,6 +307,7 @@ async function daemonCommand(
     controller.signal,
     composition.sourceRepositories,
     composition.repositoryEvents,
+    composition.localRepositories,
   );
   await activateCheckedDefinition(host, values.config, dependencies);
   const intervalMs = positiveInteger(
@@ -301,7 +350,7 @@ async function triggerCommand(
   if (values.event === undefined) throw new Error("trigger requires --event <file|stdin>");
   const definition = await loadDefinition(values.config, dependencies);
   const repositories = githubRepositories(definition, values.repository);
-  const composition = repositoryComposition(repositories);
+  const composition = repositoryComposition(repositories, values.config);
   const source =
     values.event === "stdin"
       ? await (dependencies.readStdin ?? defaultDependencies.readStdin)()
@@ -326,6 +375,7 @@ async function triggerCommand(
     controller.signal,
     composition.sourceRepositories,
     composition.repositoryEvents,
+    composition.localRepositories,
   );
   await activateCheckedDefinition(host, values.config, dependencies);
   let accepted = 0;
@@ -378,7 +428,20 @@ async function activateCheckedDefinition(
   config: string,
   dependencies: CliDependencies,
 ): Promise<void> {
-  const source = await dependencies.readText(config);
+  let source = await dependencies.readText(config);
+  const agentExecutable = await realpath(process.env.FACTORY_AGENT_BIN ?? process.execPath);
+  source = source.replaceAll("/__factory_agent_bin__", agentExecutable);
+  const definition = compileFactoryDefinition(source, { sourceName: config }).definition;
+  for (const skill of definition.skills) {
+    const instructions = await dependencies.readText(resolve(dirname(config), skill.path));
+    const canonical = JSON.stringify({ files: [], instructions });
+    const digest = `sha256:${createHash("sha256").update(canonical).digest("hex")}`;
+    await host.executeAction("assets/putSkillBundle@v1", {
+      bundle: { digest, files: [], id: skill.id, instructions },
+      reference: skill.path,
+    });
+    source = source.replace(`revision: ${skill.revision}`, `revision: ${digest}`);
+  }
   const revision = (
     await host.executeAction("definitions/compileDefinition@v1", {
       source,
@@ -408,11 +471,16 @@ function githubRepositories(definition: FactoryDefinition, selected?: string) {
       const sources = definition.sources.filter(
         (source) => source.type === "github" && source.repository === repository.id,
       );
+      if (repository.localPath === undefined)
+        throw new Error(
+          `repository ${repository.owner}/${repository.name} is missing required localPath`,
+        );
       return {
         events: [...new Set(sources.flatMap((source) => source.events ?? ["*"]))].sort(),
         fullName: `${repository.owner}/${repository.name}`,
         id: repository.id,
         sourceIds: sources.map((source) => source.id),
+        localPath: repository.localPath,
       };
     });
   if (repositories.length === 0) throw new Error("no configured GitHub repository matched");
@@ -424,10 +492,16 @@ function repositoryComposition(
     readonly events: readonly string[];
     readonly fullName: string;
     readonly id: string;
+    readonly localPath: string;
     readonly sourceIds: readonly string[];
   }[],
+  config: string,
 ) {
+  const localRepositories: Record<string, string> = {};
+  for (const repository of repositories)
+    localRepositories[repository.fullName] = resolve(dirname(config), repository.localPath);
   return {
+    localRepositories,
     repositoryEvents: Object.fromEntries(repositories.map((entry) => [entry.id, entry.events])),
     repositories: Object.fromEntries(repositories.map((entry) => [entry.id, entry.fullName])),
     sourceRepositories: Object.fromEntries(

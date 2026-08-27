@@ -3,9 +3,11 @@ Chimpbase module architecture
 assets v1
   depends: none
   call: assets/getArtifact@v1
+  call: assets/getSkillBundle@v1
   call: assets/listRunArtifacts@v1
   call: assets/materializeArtifact@v1
   call: assets/putArtifact@v1
+  call: assets/putSkillBundle@v1
   call: assets/resolveSkill@v1
   event: assets/artifactStored@v1
   event: assets/skillRevisionPinned@v1
@@ -31,11 +33,17 @@ effects v1
   event: effects/effectQueued@v1
 execution v1
   depends: assets
+  call: execution/cancelAttempt@v1
   call: execution/getAttempt@v1
+  call: execution/getAttemptProtocol@v1
   call: execution/getAttemptV2@v1
+  call: execution/getAttemptV3@v1
   call: execution/requestAttempt@v1
+  call: execution/requestAttemptV2@v1
   event: execution/attemptFinished@v1
+  event: execution/attemptFinished@v2
   event: execution/attemptQueued@v1
+  event: execution/attemptQueued@v2
 intake v1
   depends: definitions
   call: intake/acceptSourceEvent@v1
@@ -75,6 +83,7 @@ runs v1
   event: runs/runStateChanged@v3
   event: runs/stepRequested@v1
   event: runs/stepRequested@v2
-  consumes: execution/attemptFinished@v1 as record-attempt-outcome
+  consumes: execution/attemptFinished@v1 as record-attempt-outcome-v1
+  consumes: execution/attemptFinished@v2 as record-attempt-outcome-v2
   consumes: effects/effectFinished@v2 as record-effect-outcome
   consumes: intake/factoryEventAccepted@v2 as start-matching-runs

@@ -1,4 +1,4 @@
-import type { PinnedAgentProfile, StepResultDocument } from "../contracts/index.ts";
+import type { AgentRequest, AgentResult } from "../contracts/index.ts";
 
 export interface GitHubRepositoryRecord {
   readonly fullName: string;
@@ -90,20 +90,9 @@ export interface GitHubReadTransport {
   }): Promise<GitHubReadPermissionDiagnostic>;
 }
 
-export interface AgentRuntimeRequest {
-  readonly agentProfile: PinnedAgentProfile;
-  readonly attemptId: string;
-  readonly inputArtifactDigests: readonly string[];
-  readonly skillDigests: Readonly<Record<string, string>>;
-}
-
-export interface AgentRuntimeResult {
-  readonly result: StepResultDocument;
-  readonly status: "succeeded" | "failed";
-}
-
 export interface AgentRuntime {
-  execute(request: AgentRuntimeRequest): Promise<AgentRuntimeResult>;
+  run(request: AgentRequest, signal: AbortSignal): Promise<AgentResult>;
+  cancel(attemptId: string): Promise<void>;
 }
 
 export interface GitPublication {

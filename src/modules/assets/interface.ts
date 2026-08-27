@@ -1,7 +1,7 @@
 import { defineChimpbaseModuleInterface } from "chimpbase/core";
 import { v } from "chimpbase/runtime";
 
-import { artifact, skillRevision } from "../../contracts/index.ts";
+import { artifact, pinnedSkillBundle, skillRevision } from "../../contracts/index.ts";
 import type { AssetsDatabase } from "../../storage/assets-database.ts";
 
 const artifactEnvelope = v.object({ artifact, contentBase64: v.string() });
@@ -12,6 +12,18 @@ const calls = {
     output: skillRevision,
     errors: ["module_unavailable", "skill_not_found", "skill_root_escape"],
     guarantees: ["returns an immutable digest-pinned skill revision"],
+  },
+  putSkillBundle: {
+    input: v.object({ bundle: pinnedSkillBundle, reference: v.string() }),
+    output: pinnedSkillBundle,
+    errors: ["module_unavailable", "digest_mismatch", "skill_conflict"],
+    guarantees: ["stores immutable canonical skill instructions and files by digest"],
+  },
+  getSkillBundle: {
+    input: v.object({ digest: v.string() }),
+    output: pinnedSkillBundle.nullable(),
+    errors: ["module_unavailable"],
+    guarantees: ["returns only the exact immutable pinned skill bundle"],
   },
   putArtifact: {
     input: artifactEnvelope,

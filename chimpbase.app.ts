@@ -3,7 +3,10 @@ import { defineChimpbaseApp } from "chimpbase/core";
 import { assetsImplementation } from "./src/modules/assets/implementation.ts";
 import { definitionsImplementation } from "./src/modules/definitions/implementation.ts";
 import { effectsImplementation } from "./src/modules/effects/implementation.ts";
-import { executionImplementation } from "./src/modules/execution/implementation.ts";
+import {
+  createExecutionImplementation,
+  type ExecutionImplementationDependencies,
+} from "./src/modules/execution/implementation.ts";
 import {
   createIntakeImplementation,
   type IntakeImplementationDependencies,
@@ -16,7 +19,8 @@ import {
   type RunsImplementationDependencies,
 } from "./src/modules/runs/implementation.ts";
 
-export type FactoryAppDependencies = IntakeImplementationDependencies &
+export type FactoryAppDependencies = ExecutionImplementationDependencies &
+  IntakeImplementationDependencies &
   RunsImplementationDependencies;
 export { FACTORY_RUNS_V2_WORKFLOW_DIGEST };
 
@@ -27,7 +31,7 @@ export function createSoftwareFactoryApp(dependencies?: FactoryAppDependencies) 
       assetsImplementation,
       definitionsImplementation,
       effectsImplementation,
-      executionImplementation,
+      createExecutionImplementation(dependencies),
       createIntakeImplementation(dependencies ?? { readTransport: unavailableGitHubReadTransport }),
       operationsImplementation,
       createRunsImplementation(dependencies),

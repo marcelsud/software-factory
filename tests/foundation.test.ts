@@ -152,8 +152,10 @@ describe("foundation", () => {
       "handler",
       "Octokit",
       "SQLite",
-      "process",
-      "filesystem",
+      "ChildProcess",
+      "ProcessHandle",
+      "ProcessId",
+      "FileSystemPath",
       "model-provider",
     ]) {
       expect(contract).not.toContain(forbidden);
@@ -442,7 +444,7 @@ describe("foundation", () => {
     const profile = plan.agentProfiles["triage-agent"];
     expect(profile).toMatchObject({
       capabilities: ["repository.read"],
-      command: ["factory-agent"],
+      command: ["/__factory_agent_bin__", "/workspace/src/adapters/json-stdio-agent.mjs"],
       model: "trusted-composition-default",
     });
     if (profile === undefined) return;
@@ -753,25 +755,44 @@ describe("foundation", () => {
       compileFactoryDefinition(factorySource).plans["issue-triage"]?.agentProfiles["triage-agent"];
     expect(profile).toBeDefined();
     if (profile === undefined) return;
-    const agent = new FakeAgentRuntime({
-      result: {
-        data: { confidence: 0.95 },
-        outcome: "verified",
-        outputArtifactDigests: ["out"],
-        summary: "verified",
+    const agent = new FakeAgentRuntime();
+    const agentResult = await agent.run(
+      {
+        agentProfile: {
+          ...profile,
+          capabilityPreset: "read-only",
+          environment: {},
+          limits: {
+            cpuSeconds: 1,
+            maxFileBytes: 1024,
+            ...profile.limits,
+            maxInputBytes: 1024,
+            maxLogBytes: 1024,
+            maxPatchBytes: 1024,
+            maxPids: 4,
+            maxWorkspaceBytes: 1024,
+            maxWorkspaceFiles: 10,
+            memoryBytes: 1024 * 1024,
+          },
+        },
+        attemptId: "attempt",
+        budget: { maxDurationMs: 1000, maxInputBytes: 1024, maxOutputBytes: 1024 },
+        correlationToken: "token",
+        declaredOutputPaths: [],
+        inputArtifacts: [],
+        repository: { id: "factory", sha: "pinned-sha" },
+        runId: "run",
+        skills: [],
+        startedAt: "2026-01-01T00:00:00.000Z",
+        stepId: "verify",
+        task: { mediaType: "application/json", payload: {} },
       },
-      status: "succeeded",
-    });
-    const agentResult = await agent.execute({
-      agentProfile: profile,
-      attemptId: "attempt",
-      inputArtifactDigests: [],
-      skillDigests: {},
-    });
-    expect(agentResult.result.outcome).toBe("verified");
+      new AbortController().signal,
+    );
+    expect(agentResult.outcome?.outcome).toBe("completed");
     expect(agent.requests[0]?.agentProfile).toMatchObject({
       capabilities: ["repository.read"],
-      command: ["factory-agent"],
+      command: ["/__factory_agent_bin__", "/workspace/src/adapters/json-stdio-agent.mjs"],
       model: "trusted-composition-default",
     });
 

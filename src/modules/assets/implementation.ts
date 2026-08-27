@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { type ChimpbaseModuleInterface, defineChimpbaseModuleImplementation } from "chimpbase/core";
 import type { Kysely } from "kysely";
 
-import { artifact } from "../../contracts/index.ts";
+import { artifact, type PinnedSkillBundle, pinnedSkillBundle } from "../../contracts/index.ts";
 import { type AssetsDatabase, assetsMigrations } from "../../storage/assets-database.ts";
 import { assets } from "./interface.ts";
 
@@ -22,13 +22,29 @@ function artifactFromRow(row: AssetsDatabase["artifacts"]) {
   });
 }
 
+function skillBundleDigest(bundle: PinnedSkillBundle): string {
+  const canonical = JSON.stringify({
+    files: [...bundle.files]
+      .sort((left, right) => left.path.localeCompare(right.path))
+      .map(({ contentBase64, digest, kind, path, size }) => ({
+        contentBase64: contentBase64 ?? null,
+        digest,
+        kind,
+        path,
+        size,
+      })),
+    instructions: bundle.instructions,
+  });
+  return `sha256:${createHash("sha256").update(canonical).digest("hex")}`;
+}
+
 export const assetsImplementation = defineChimpbaseModuleImplementation({
   interface: implementationInterface,
   migrations: assetsMigrations,
   resources: {
-    collections: ["artifacts", "skill-revisions"],
+    collections: ["artifacts", "skill-bundles", "skill-revisions"],
     kvPrefixes: ["artifact-bytes", "artifact-materializations"],
-    tables: ["artifacts", "skill_revisions"],
+    tables: ["artifact_blobs", "artifacts", "skill_bundles", "skill_revisions"],
   },
   calls: {
     async resolveSkill(ctx, input) {
@@ -43,6 +59,35 @@ export const assetsImplementation = defineChimpbaseModuleImplementation({
       await db.insertInto("skill_revisions").values(revision).execute();
       ctx.publish(assets.events.skillRevisionPinnedV1, revision);
       return revision;
+    },
+    async putSkillBundle(ctx, input) {
+      const bundle = pinnedSkillBundle.parse(input.bundle);
+      if (skillBundleDigest(bundle) !== bundle.digest) throw new Error("digest_mismatch");
+      const db = ctx.db.kysely() as unknown as Kysely<AssetsDatabase>;
+      const existing = await db
+        .selectFrom("skill_bundles")
+        .selectAll()
+        .where("digest", "=", bundle.digest)
+        .executeTakeFirst();
+      const bundleJson = JSON.stringify(bundle);
+      if (existing !== undefined) {
+        if (existing.reference !== input.reference || existing.bundle_json !== bundleJson)
+          throw new Error("skill_conflict");
+        return bundle;
+      }
+      await db
+        .insertInto("skill_bundles")
+        .values({ bundle_json: bundleJson, digest: bundle.digest, reference: input.reference })
+        .execute();
+      return bundle;
+    },
+    async getSkillBundle(ctx, input) {
+      const row = await (ctx.db.kysely() as unknown as Kysely<AssetsDatabase>)
+        .selectFrom("skill_bundles")
+        .select("bundle_json")
+        .where("digest", "=", input.digest)
+        .executeTakeFirst();
+      return row === undefined ? null : pinnedSkillBundle.parse(JSON.parse(row.bundle_json));
     },
     async putArtifact(ctx, input) {
       const bytes = Buffer.from(input.contentBase64, "base64");
@@ -83,6 +128,10 @@ export const assetsImplementation = defineChimpbaseModuleImplementation({
           size: metadata.size,
         })
         .execute();
+      await db
+        .insertInto("artifact_blobs")
+        .values({ content_base64: input.contentBase64, digest: metadata.digest })
+        .execute();
       ctx.publish(assets.events.artifactStoredV1, metadata);
       return metadata;
     },
@@ -90,11 +139,14 @@ export const assetsImplementation = defineChimpbaseModuleImplementation({
       const db = ctx.db.kysely() as unknown as Kysely<AssetsDatabase>;
       const row = await db
         .selectFrom("artifacts")
-        .select("digest")
-        .where("digest", "=", input.digest)
+        .innerJoin("artifact_blobs", "artifact_blobs.digest", "artifacts.digest")
+        .selectAll("artifacts")
+        .select("artifact_blobs.content_base64")
+        .where("artifacts.digest", "=", input.digest)
         .executeTakeFirst();
-      if (row === undefined) return null;
-      throw new Error("module_unavailable: artifact byte driver is not configured");
+      return row === undefined
+        ? null
+        : { artifact: artifactFromRow(row), contentBase64: row.content_base64 };
     },
     async materializeArtifact(ctx, input) {
       const db = ctx.db.kysely() as unknown as Kysely<AssetsDatabase>;

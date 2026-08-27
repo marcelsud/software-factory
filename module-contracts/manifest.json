@@ -10,7 +10,13 @@
       "consumer": "runs",
       "event": "execution/attemptFinished@v1",
       "publisher": "execution",
-      "subscription": "record-attempt-outcome"
+      "subscription": "record-attempt-outcome-v1"
+    },
+    {
+      "consumer": "runs",
+      "event": "execution/attemptFinished@v2",
+      "publisher": "execution",
+      "subscription": "record-attempt-outcome-v2"
     },
     {
       "consumer": "runs",
@@ -87,6 +93,88 @@
                 "required": [
                   "artifact",
                   "contentBase64"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "version": 1
+        },
+        {
+          "errors": [
+            "module_unavailable"
+          ],
+          "guarantees": [
+            "returns only the exact immutable pinned skill bundle"
+          ],
+          "id": "assets/getSkillBundle@v1",
+          "inputSchema": {
+            "properties": {
+              "digest": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "digest"
+            ],
+            "type": "object"
+          },
+          "name": "getSkillBundle",
+          "outputSchema": {
+            "anyOf": [
+              {
+                "properties": {
+                  "digest": {
+                    "type": "string"
+                  },
+                  "files": {
+                    "items": {
+                      "properties": {
+                        "contentBase64": {
+                          "type": "string"
+                        },
+                        "digest": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "enum": [
+                            "artifact",
+                            "skill",
+                            "task"
+                          ]
+                        },
+                        "path": {
+                          "type": "string"
+                        },
+                        "size": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "digest",
+                        "kind",
+                        "path",
+                        "size"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "instructions": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "digest",
+                  "files",
+                  "id",
+                  "instructions"
                 ],
                 "type": "object"
               },
@@ -314,6 +402,137 @@
         {
           "errors": [
             "module_unavailable",
+            "digest_mismatch",
+            "skill_conflict"
+          ],
+          "guarantees": [
+            "stores immutable canonical skill instructions and files by digest"
+          ],
+          "id": "assets/putSkillBundle@v1",
+          "inputSchema": {
+            "properties": {
+              "bundle": {
+                "properties": {
+                  "digest": {
+                    "type": "string"
+                  },
+                  "files": {
+                    "items": {
+                      "properties": {
+                        "contentBase64": {
+                          "type": "string"
+                        },
+                        "digest": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "enum": [
+                            "artifact",
+                            "skill",
+                            "task"
+                          ]
+                        },
+                        "path": {
+                          "type": "string"
+                        },
+                        "size": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "digest",
+                        "kind",
+                        "path",
+                        "size"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "instructions": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "digest",
+                  "files",
+                  "id",
+                  "instructions"
+                ],
+                "type": "object"
+              },
+              "reference": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "bundle",
+              "reference"
+            ],
+            "type": "object"
+          },
+          "name": "putSkillBundle",
+          "outputSchema": {
+            "properties": {
+              "digest": {
+                "type": "string"
+              },
+              "files": {
+                "items": {
+                  "properties": {
+                    "contentBase64": {
+                      "type": "string"
+                    },
+                    "digest": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "enum": [
+                        "artifact",
+                        "skill",
+                        "task"
+                      ]
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "size": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "digest",
+                    "kind",
+                    "path",
+                    "size"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "id": {
+                "type": "string"
+              },
+              "instructions": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "digest",
+              "files",
+              "id",
+              "instructions"
+            ],
+            "type": "object"
+          },
+          "version": 1
+        },
+        {
+          "errors": [
+            "module_unavailable",
             "skill_not_found",
             "skill_root_escape"
           ],
@@ -420,17 +639,22 @@
       "migrations": {
         "postgres": [
           "001_ledger",
-          "002_artifact_metadata"
+          "002_artifact_metadata",
+          "003_skill_bundles",
+          "004_artifact_blobs"
         ],
         "sqlite": [
           "001_ledger",
-          "002_artifact_metadata"
+          "002_artifact_metadata",
+          "003_skill_bundles",
+          "004_artifact_blobs"
         ]
       },
       "name": "assets",
       "resources": {
         "collections": [
           "artifacts",
+          "skill-bundles",
           "skill-revisions"
         ],
         "kvPrefixes": [
@@ -438,7 +662,9 @@
           "artifact-materializations"
         ],
         "tables": [
+          "artifact_blobs",
           "artifacts",
+          "skill_bundles",
           "skill_revisions"
         ]
       },
@@ -2246,6 +2472,35 @@
             "module_unavailable"
           ],
           "guarantees": [
+            "cancellation is idempotent and terminates the active runtime attempt"
+          ],
+          "id": "execution/cancelAttempt@v1",
+          "inputSchema": {
+            "properties": {
+              "attemptId": {
+                "type": "string"
+              },
+              "cancelledAt": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "attemptId",
+              "cancelledAt"
+            ],
+            "type": "object"
+          },
+          "name": "cancelAttempt",
+          "outputSchema": {
+            "type": "boolean"
+          },
+          "version": 1
+        },
+        {
+          "errors": [
+            "module_unavailable"
+          ],
+          "guarantees": [
             "returns committed attempt state"
           ],
           "id": "execution/getAttempt@v1",
@@ -2344,6 +2599,41 @@
             "module_unavailable"
           ],
           "guarantees": [
+            "returns the persisted request protocol; pre-migration attempts are v1"
+          ],
+          "id": "execution/getAttemptProtocol@v1",
+          "inputSchema": {
+            "properties": {
+              "attemptId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "attemptId"
+            ],
+            "type": "object"
+          },
+          "name": "getAttemptProtocol",
+          "outputSchema": {
+            "anyOf": [
+              {
+                "enum": [
+                  "v1",
+                  "v2"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "version": 1
+        },
+        {
+          "errors": [
+            "module_unavailable"
+          ],
+          "guarantees": [
             "returns committed workspace and result metadata"
           ],
           "id": "execution/getAttemptV2@v1",
@@ -2406,6 +2696,299 @@
                       "outcome",
                       "outputArtifactDigests",
                       "summary"
+                    ],
+                    "type": "object"
+                  },
+                  "runId": {
+                    "type": "string"
+                  },
+                  "startedAt": {
+                    "type": "string"
+                  },
+                  "stepId": {
+                    "type": "string"
+                  },
+                  "workspaceStatus": {
+                    "enum": [
+                      "queued",
+                      "ready",
+                      "finished"
+                    ]
+                  }
+                },
+                "required": [
+                  "agentProfileDigest",
+                  "attemptId",
+                  "correlationToken",
+                  "outcome",
+                  "runId",
+                  "startedAt",
+                  "stepId",
+                  "workspaceStatus"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "version": 1
+        },
+        {
+          "errors": [
+            "module_unavailable"
+          ],
+          "guarantees": [
+            "returns the strict committed workspace and complete runtime result metadata"
+          ],
+          "id": "execution/getAttemptV3@v1",
+          "inputSchema": {
+            "properties": {
+              "attemptId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "attemptId"
+            ],
+            "type": "object"
+          },
+          "name": "getAttemptV3",
+          "outputSchema": {
+            "anyOf": [
+              {
+                "properties": {
+                  "agentProfileDigest": {
+                    "type": "string"
+                  },
+                  "attemptId": {
+                    "type": "string"
+                  },
+                  "correlationToken": {
+                    "type": "string"
+                  },
+                  "finishedAt": {
+                    "type": "string"
+                  },
+                  "outcome": {
+                    "enum": [
+                      "pending",
+                      "succeeded",
+                      "failed"
+                    ]
+                  },
+                  "result": {
+                    "properties": {
+                      "attemptId": {
+                        "type": "string"
+                      },
+                      "changedFiles": {
+                        "items": {
+                          "properties": {
+                            "contentBase64": {
+                              "type": "string"
+                            },
+                            "digest": {
+                              "type": "string"
+                            },
+                            "path": {
+                              "type": "string"
+                            },
+                            "size": {
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "digest",
+                            "path",
+                            "size"
+                          ],
+                          "type": "object"
+                        },
+                        "type": "array"
+                      },
+                      "commit": {
+                        "properties": {
+                          "sha": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "sha"
+                        ],
+                        "type": "object"
+                      },
+                      "failure": {
+                        "properties": {
+                          "category": {
+                            "enum": [
+                              "timeout",
+                              "cancel",
+                              "result-invalid",
+                              "process",
+                              "sandbox",
+                              "adapter",
+                              "workspace-limit"
+                            ]
+                          },
+                          "message": {
+                            "type": "string"
+                          },
+                          "retriable": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "category",
+                          "message",
+                          "retriable"
+                        ],
+                        "type": "object"
+                      },
+                      "logs": {
+                        "properties": {
+                          "stderrBytes": {
+                            "type": "integer"
+                          },
+                          "stderrDigest": {
+                            "type": "string"
+                          },
+                          "stderrTruncated": {
+                            "type": "boolean"
+                          },
+                          "stdoutBytes": {
+                            "type": "integer"
+                          },
+                          "stdoutDigest": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "stderrBytes",
+                          "stderrDigest",
+                          "stderrTruncated",
+                          "stdoutBytes",
+                          "stdoutDigest"
+                        ],
+                        "type": "object"
+                      },
+                      "outcome": {
+                        "properties": {
+                          "data": {
+                            "additionalProperties": {},
+                            "type": "object"
+                          },
+                          "outcome": {
+                            "type": "string"
+                          },
+                          "outputArtifactDigests": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "summary": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "data",
+                          "outcome",
+                          "outputArtifactDigests",
+                          "summary"
+                        ],
+                        "type": "object"
+                      },
+                      "patch": {
+                        "properties": {
+                          "digest": {
+                            "type": "string"
+                          },
+                          "size": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "digest",
+                          "size"
+                        ],
+                        "type": "object"
+                      },
+                      "resources": {
+                        "properties": {
+                          "cpuMs": {
+                            "type": "integer"
+                          },
+                          "maxRssBytes": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "cpuMs",
+                          "maxRssBytes"
+                        ],
+                        "type": "object"
+                      },
+                      "status": {
+                        "enum": [
+                          "succeeded",
+                          "failed"
+                        ]
+                      },
+                      "tests": {
+                        "items": {
+                          "properties": {
+                            "command": {
+                              "items": {
+                                "type": "string"
+                              },
+                              "type": "array"
+                            },
+                            "durationMs": {
+                              "type": "integer"
+                            },
+                            "exitCode": {
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "command",
+                            "durationMs",
+                            "exitCode"
+                          ],
+                          "type": "object"
+                        },
+                        "type": "array"
+                      },
+                      "timing": {
+                        "properties": {
+                          "durationMs": {
+                            "type": "integer"
+                          },
+                          "finishedAt": {
+                            "type": "string"
+                          },
+                          "startedAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "durationMs",
+                          "finishedAt",
+                          "startedAt"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "attemptId",
+                      "changedFiles",
+                      "logs",
+                      "resources",
+                      "status",
+                      "tests",
+                      "timing"
                     ],
                     "type": "object"
                   },
@@ -2624,6 +3207,567 @@
             "type": "object"
           },
           "version": 1
+        },
+        {
+          "errors": [
+            "module_unavailable",
+            "attempt_exists",
+            "invalid_pin"
+          ],
+          "guarantees": [
+            "request is idempotent by attempt id and compares every immutable execution pin"
+          ],
+          "id": "execution/requestAttemptV2@v1",
+          "inputSchema": {
+            "properties": {
+              "agentProfile": {
+                "properties": {
+                  "capabilities": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "capabilityPreset": {
+                    "enum": [
+                      "read-only",
+                      "patch",
+                      "test",
+                      "release"
+                    ]
+                  },
+                  "command": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "digest": {
+                    "type": "string"
+                  },
+                  "environment": {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "type": "object"
+                  },
+                  "instructions": {
+                    "type": "string"
+                  },
+                  "limits": {
+                    "properties": {
+                      "cpuSeconds": {
+                        "type": "integer"
+                      },
+                      "maxFileBytes": {
+                        "type": "integer"
+                      },
+                      "maxInputBytes": {
+                        "type": "integer"
+                      },
+                      "maxLogBytes": {
+                        "type": "integer"
+                      },
+                      "maxOutputBytes": {
+                        "type": "integer"
+                      },
+                      "maxPatchBytes": {
+                        "type": "integer"
+                      },
+                      "maxPids": {
+                        "type": "integer"
+                      },
+                      "maxWorkspaceBytes": {
+                        "type": "integer"
+                      },
+                      "maxWorkspaceFiles": {
+                        "type": "integer"
+                      },
+                      "memoryBytes": {
+                        "type": "integer"
+                      },
+                      "timeoutMs": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "cpuSeconds",
+                      "maxFileBytes",
+                      "maxInputBytes",
+                      "maxLogBytes",
+                      "maxOutputBytes",
+                      "maxPatchBytes",
+                      "maxPids",
+                      "maxWorkspaceBytes",
+                      "maxWorkspaceFiles",
+                      "memoryBytes",
+                      "timeoutMs"
+                    ],
+                    "type": "object"
+                  },
+                  "model": {
+                    "type": "string"
+                  },
+                  "skills": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "capabilities",
+                  "capabilityPreset",
+                  "command",
+                  "digest",
+                  "environment",
+                  "instructions",
+                  "limits",
+                  "model",
+                  "skills"
+                ],
+                "type": "object"
+              },
+              "attemptId": {
+                "type": "string"
+              },
+              "budget": {
+                "properties": {
+                  "maxDurationMs": {
+                    "type": "integer"
+                  },
+                  "maxInputBytes": {
+                    "type": "integer"
+                  },
+                  "maxOutputBytes": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "maxDurationMs",
+                  "maxInputBytes",
+                  "maxOutputBytes"
+                ],
+                "type": "object"
+              },
+              "correlationToken": {
+                "type": "string"
+              },
+              "declaredOutputPaths": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "inputArtifacts": {
+                "items": {
+                  "properties": {
+                    "contentBase64": {
+                      "type": "string"
+                    },
+                    "digest": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "enum": [
+                        "artifact",
+                        "skill",
+                        "task"
+                      ]
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "size": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "digest",
+                    "kind",
+                    "path",
+                    "size"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "repository": {
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "sha": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "sha"
+                ],
+                "type": "object"
+              },
+              "runId": {
+                "type": "string"
+              },
+              "skills": {
+                "items": {
+                  "properties": {
+                    "digest": {
+                      "type": "string"
+                    },
+                    "files": {
+                      "items": {
+                        "properties": {
+                          "contentBase64": {
+                            "type": "string"
+                          },
+                          "digest": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "enum": [
+                              "artifact",
+                              "skill",
+                              "task"
+                            ]
+                          },
+                          "path": {
+                            "type": "string"
+                          },
+                          "size": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "digest",
+                          "kind",
+                          "path",
+                          "size"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "instructions": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "digest",
+                    "files",
+                    "id",
+                    "instructions"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "startedAt": {
+                "type": "string"
+              },
+              "stepId": {
+                "type": "string"
+              },
+              "task": {
+                "properties": {
+                  "mediaType": {
+                    "type": "string"
+                  },
+                  "payload": {}
+                },
+                "required": [
+                  "mediaType",
+                  "payload"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "agentProfile",
+              "attemptId",
+              "budget",
+              "correlationToken",
+              "declaredOutputPaths",
+              "inputArtifacts",
+              "repository",
+              "runId",
+              "skills",
+              "startedAt",
+              "stepId",
+              "task"
+            ],
+            "type": "object"
+          },
+          "name": "requestAttemptV2",
+          "outputSchema": {
+            "properties": {
+              "agentProfileDigest": {
+                "type": "string"
+              },
+              "attemptId": {
+                "type": "string"
+              },
+              "correlationToken": {
+                "type": "string"
+              },
+              "finishedAt": {
+                "type": "string"
+              },
+              "outcome": {
+                "enum": [
+                  "pending",
+                  "succeeded",
+                  "failed"
+                ]
+              },
+              "result": {
+                "properties": {
+                  "attemptId": {
+                    "type": "string"
+                  },
+                  "changedFiles": {
+                    "items": {
+                      "properties": {
+                        "contentBase64": {
+                          "type": "string"
+                        },
+                        "digest": {
+                          "type": "string"
+                        },
+                        "path": {
+                          "type": "string"
+                        },
+                        "size": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "digest",
+                        "path",
+                        "size"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "commit": {
+                    "properties": {
+                      "sha": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "sha"
+                    ],
+                    "type": "object"
+                  },
+                  "failure": {
+                    "properties": {
+                      "category": {
+                        "enum": [
+                          "timeout",
+                          "cancel",
+                          "result-invalid",
+                          "process",
+                          "sandbox",
+                          "adapter",
+                          "workspace-limit"
+                        ]
+                      },
+                      "message": {
+                        "type": "string"
+                      },
+                      "retriable": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "category",
+                      "message",
+                      "retriable"
+                    ],
+                    "type": "object"
+                  },
+                  "logs": {
+                    "properties": {
+                      "stderrBytes": {
+                        "type": "integer"
+                      },
+                      "stderrDigest": {
+                        "type": "string"
+                      },
+                      "stderrTruncated": {
+                        "type": "boolean"
+                      },
+                      "stdoutBytes": {
+                        "type": "integer"
+                      },
+                      "stdoutDigest": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "stderrBytes",
+                      "stderrDigest",
+                      "stderrTruncated",
+                      "stdoutBytes",
+                      "stdoutDigest"
+                    ],
+                    "type": "object"
+                  },
+                  "outcome": {
+                    "properties": {
+                      "data": {
+                        "additionalProperties": {},
+                        "type": "object"
+                      },
+                      "outcome": {
+                        "type": "string"
+                      },
+                      "outputArtifactDigests": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "summary": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "data",
+                      "outcome",
+                      "outputArtifactDigests",
+                      "summary"
+                    ],
+                    "type": "object"
+                  },
+                  "patch": {
+                    "properties": {
+                      "digest": {
+                        "type": "string"
+                      },
+                      "size": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "digest",
+                      "size"
+                    ],
+                    "type": "object"
+                  },
+                  "resources": {
+                    "properties": {
+                      "cpuMs": {
+                        "type": "integer"
+                      },
+                      "maxRssBytes": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "cpuMs",
+                      "maxRssBytes"
+                    ],
+                    "type": "object"
+                  },
+                  "status": {
+                    "enum": [
+                      "succeeded",
+                      "failed"
+                    ]
+                  },
+                  "tests": {
+                    "items": {
+                      "properties": {
+                        "command": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "durationMs": {
+                          "type": "integer"
+                        },
+                        "exitCode": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "command",
+                        "durationMs",
+                        "exitCode"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "timing": {
+                    "properties": {
+                      "durationMs": {
+                        "type": "integer"
+                      },
+                      "finishedAt": {
+                        "type": "string"
+                      },
+                      "startedAt": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "durationMs",
+                      "finishedAt",
+                      "startedAt"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "attemptId",
+                  "changedFiles",
+                  "logs",
+                  "resources",
+                  "status",
+                  "tests",
+                  "timing"
+                ],
+                "type": "object"
+              },
+              "runId": {
+                "type": "string"
+              },
+              "startedAt": {
+                "type": "string"
+              },
+              "stepId": {
+                "type": "string"
+              },
+              "workspaceStatus": {
+                "enum": [
+                  "queued",
+                  "ready",
+                  "finished"
+                ]
+              }
+            },
+            "required": [
+              "agentProfileDigest",
+              "attemptId",
+              "correlationToken",
+              "outcome",
+              "runId",
+              "startedAt",
+              "stepId",
+              "workspaceStatus"
+            ],
+            "type": "object"
+          },
+          "version": 1
         }
       ],
       "dependencies": [
@@ -2706,6 +3850,261 @@
           "version": 1
         },
         {
+          "id": "execution/attemptFinished@v2",
+          "name": "attemptFinished",
+          "payloadSchema": {
+            "properties": {
+              "agentProfileDigest": {
+                "type": "string"
+              },
+              "attemptId": {
+                "type": "string"
+              },
+              "correlationToken": {
+                "type": "string"
+              },
+              "finishedAt": {
+                "type": "string"
+              },
+              "result": {
+                "properties": {
+                  "attemptId": {
+                    "type": "string"
+                  },
+                  "changedFiles": {
+                    "items": {
+                      "properties": {
+                        "contentBase64": {
+                          "type": "string"
+                        },
+                        "digest": {
+                          "type": "string"
+                        },
+                        "path": {
+                          "type": "string"
+                        },
+                        "size": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "digest",
+                        "path",
+                        "size"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "commit": {
+                    "properties": {
+                      "sha": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "sha"
+                    ],
+                    "type": "object"
+                  },
+                  "failure": {
+                    "properties": {
+                      "category": {
+                        "enum": [
+                          "timeout",
+                          "cancel",
+                          "result-invalid",
+                          "process",
+                          "sandbox",
+                          "adapter",
+                          "workspace-limit"
+                        ]
+                      },
+                      "message": {
+                        "type": "string"
+                      },
+                      "retriable": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "category",
+                      "message",
+                      "retriable"
+                    ],
+                    "type": "object"
+                  },
+                  "logs": {
+                    "properties": {
+                      "stderrBytes": {
+                        "type": "integer"
+                      },
+                      "stderrDigest": {
+                        "type": "string"
+                      },
+                      "stderrTruncated": {
+                        "type": "boolean"
+                      },
+                      "stdoutBytes": {
+                        "type": "integer"
+                      },
+                      "stdoutDigest": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "stderrBytes",
+                      "stderrDigest",
+                      "stderrTruncated",
+                      "stdoutBytes",
+                      "stdoutDigest"
+                    ],
+                    "type": "object"
+                  },
+                  "outcome": {
+                    "properties": {
+                      "data": {
+                        "additionalProperties": {},
+                        "type": "object"
+                      },
+                      "outcome": {
+                        "type": "string"
+                      },
+                      "outputArtifactDigests": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "summary": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "data",
+                      "outcome",
+                      "outputArtifactDigests",
+                      "summary"
+                    ],
+                    "type": "object"
+                  },
+                  "patch": {
+                    "properties": {
+                      "digest": {
+                        "type": "string"
+                      },
+                      "size": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "digest",
+                      "size"
+                    ],
+                    "type": "object"
+                  },
+                  "resources": {
+                    "properties": {
+                      "cpuMs": {
+                        "type": "integer"
+                      },
+                      "maxRssBytes": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "cpuMs",
+                      "maxRssBytes"
+                    ],
+                    "type": "object"
+                  },
+                  "status": {
+                    "enum": [
+                      "succeeded",
+                      "failed"
+                    ]
+                  },
+                  "tests": {
+                    "items": {
+                      "properties": {
+                        "command": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "durationMs": {
+                          "type": "integer"
+                        },
+                        "exitCode": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "command",
+                        "durationMs",
+                        "exitCode"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "timing": {
+                    "properties": {
+                      "durationMs": {
+                        "type": "integer"
+                      },
+                      "finishedAt": {
+                        "type": "string"
+                      },
+                      "startedAt": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "durationMs",
+                      "finishedAt",
+                      "startedAt"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "attemptId",
+                  "changedFiles",
+                  "logs",
+                  "resources",
+                  "status",
+                  "tests",
+                  "timing"
+                ],
+                "type": "object"
+              },
+              "runId": {
+                "type": "string"
+              },
+              "startedAt": {
+                "type": "string"
+              },
+              "stepId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "agentProfileDigest",
+              "attemptId",
+              "correlationToken",
+              "finishedAt",
+              "result",
+              "runId",
+              "startedAt",
+              "stepId"
+            ],
+            "type": "object"
+          },
+          "version": 2
+        },
+        {
           "id": "execution/attemptQueued@v1",
           "name": "attemptQueued",
           "payloadSchema": {
@@ -2786,16 +4185,307 @@
             "type": "object"
           },
           "version": 1
+        },
+        {
+          "id": "execution/attemptQueued@v2",
+          "name": "attemptQueued",
+          "payloadSchema": {
+            "properties": {
+              "agentProfile": {
+                "properties": {
+                  "capabilities": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "capabilityPreset": {
+                    "enum": [
+                      "read-only",
+                      "patch",
+                      "test",
+                      "release"
+                    ]
+                  },
+                  "command": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "digest": {
+                    "type": "string"
+                  },
+                  "environment": {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "type": "object"
+                  },
+                  "instructions": {
+                    "type": "string"
+                  },
+                  "limits": {
+                    "properties": {
+                      "cpuSeconds": {
+                        "type": "integer"
+                      },
+                      "maxFileBytes": {
+                        "type": "integer"
+                      },
+                      "maxInputBytes": {
+                        "type": "integer"
+                      },
+                      "maxLogBytes": {
+                        "type": "integer"
+                      },
+                      "maxOutputBytes": {
+                        "type": "integer"
+                      },
+                      "maxPatchBytes": {
+                        "type": "integer"
+                      },
+                      "maxPids": {
+                        "type": "integer"
+                      },
+                      "maxWorkspaceBytes": {
+                        "type": "integer"
+                      },
+                      "maxWorkspaceFiles": {
+                        "type": "integer"
+                      },
+                      "memoryBytes": {
+                        "type": "integer"
+                      },
+                      "timeoutMs": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "cpuSeconds",
+                      "maxFileBytes",
+                      "maxInputBytes",
+                      "maxLogBytes",
+                      "maxOutputBytes",
+                      "maxPatchBytes",
+                      "maxPids",
+                      "maxWorkspaceBytes",
+                      "maxWorkspaceFiles",
+                      "memoryBytes",
+                      "timeoutMs"
+                    ],
+                    "type": "object"
+                  },
+                  "model": {
+                    "type": "string"
+                  },
+                  "skills": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "capabilities",
+                  "capabilityPreset",
+                  "command",
+                  "digest",
+                  "environment",
+                  "instructions",
+                  "limits",
+                  "model",
+                  "skills"
+                ],
+                "type": "object"
+              },
+              "attemptId": {
+                "type": "string"
+              },
+              "budget": {
+                "properties": {
+                  "maxDurationMs": {
+                    "type": "integer"
+                  },
+                  "maxInputBytes": {
+                    "type": "integer"
+                  },
+                  "maxOutputBytes": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "maxDurationMs",
+                  "maxInputBytes",
+                  "maxOutputBytes"
+                ],
+                "type": "object"
+              },
+              "correlationToken": {
+                "type": "string"
+              },
+              "declaredOutputPaths": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "inputArtifacts": {
+                "items": {
+                  "properties": {
+                    "contentBase64": {
+                      "type": "string"
+                    },
+                    "digest": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "enum": [
+                        "artifact",
+                        "skill",
+                        "task"
+                      ]
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "size": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "digest",
+                    "kind",
+                    "path",
+                    "size"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "repository": {
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "sha": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "sha"
+                ],
+                "type": "object"
+              },
+              "runId": {
+                "type": "string"
+              },
+              "skills": {
+                "items": {
+                  "properties": {
+                    "digest": {
+                      "type": "string"
+                    },
+                    "files": {
+                      "items": {
+                        "properties": {
+                          "contentBase64": {
+                            "type": "string"
+                          },
+                          "digest": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "enum": [
+                              "artifact",
+                              "skill",
+                              "task"
+                            ]
+                          },
+                          "path": {
+                            "type": "string"
+                          },
+                          "size": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "digest",
+                          "kind",
+                          "path",
+                          "size"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "instructions": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "digest",
+                    "files",
+                    "id",
+                    "instructions"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "startedAt": {
+                "type": "string"
+              },
+              "stepId": {
+                "type": "string"
+              },
+              "task": {
+                "properties": {
+                  "mediaType": {
+                    "type": "string"
+                  },
+                  "payload": {}
+                },
+                "required": [
+                  "mediaType",
+                  "payload"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "agentProfile",
+              "attemptId",
+              "budget",
+              "correlationToken",
+              "declaredOutputPaths",
+              "inputArtifacts",
+              "repository",
+              "runId",
+              "skills",
+              "startedAt",
+              "stepId",
+              "task"
+            ],
+            "type": "object"
+          },
+          "version": 2
         }
       ],
       "migrations": {
         "postgres": [
           "001_ledger",
-          "002_workspace_results"
+          "002_workspace_results",
+          "003_strict_execution_protocol"
         ],
         "sqlite": [
           "001_ledger",
-          "002_workspace_results"
+          "002_workspace_results",
+          "003_strict_execution_protocol"
         ]
       },
       "name": "execution",
@@ -2808,8 +4498,12 @@
           "agent-workers"
         ],
         "tables": [
+          "attempt_cancellations",
+          "attempt_requests",
+          "attempt_result_metadata",
           "attempt_results",
           "step_attempts",
+          "workspace_lifecycle",
           "workspaces"
         ]
       },
@@ -5107,6 +6801,9 @@
               "repository": {
                 "type": "string"
               },
+              "repositorySha": {
+                "type": "string"
+              },
               "runId": {
                 "type": "string"
               },
@@ -5116,6 +6813,7 @@
               "subject": {
                 "type": "string"
               },
+              "taskPayload": {},
               "workflowId": {
                 "type": "string"
               },
@@ -6020,13 +7718,15 @@
           "001_ledger",
           "002_audit_and_gates",
           "003_engine_state_and_admission",
-          "004_atomic_admission_and_generations"
+          "004_atomic_admission_and_generations",
+          "005_execution_request_pins"
         ],
         "sqlite": [
           "001_ledger",
           "002_audit_and_gates",
           "003_engine_state_and_admission",
-          "004_atomic_admission_and_generations"
+          "004_atomic_admission_and_generations",
+          "005_execution_request_pins"
         ]
       },
       "name": "runs",
@@ -6046,6 +7746,7 @@
           "run_admissions",
           "run_audit",
           "run_engine_state",
+          "run_execution_pins",
           "run_gates",
           "run_identities",
           "runs",
@@ -6059,7 +7760,11 @@
       "subscriptions": [
         {
           "event": "execution/attemptFinished@v1",
-          "name": "record-attempt-outcome"
+          "name": "record-attempt-outcome-v1"
+        },
+        {
+          "event": "execution/attemptFinished@v2",
+          "name": "record-attempt-outcome-v2"
         },
         {
           "event": "effects/effectFinished@v2",
@@ -6133,6 +7838,82 @@
             "required": [
               "artifact",
               "contentBase64"
+            ],
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "provider": "assets"
+    },
+    {
+      "inputSchema": {
+        "properties": {
+          "digest": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "digest"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "assets/getSkillBundle@v1",
+      "outputSchema": {
+        "anyOf": [
+          {
+            "properties": {
+              "digest": {
+                "type": "string"
+              },
+              "files": {
+                "items": {
+                  "properties": {
+                    "contentBase64": {
+                      "type": "string"
+                    },
+                    "digest": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "enum": [
+                        "artifact",
+                        "skill",
+                        "task"
+                      ]
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "size": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "digest",
+                    "kind",
+                    "path",
+                    "size"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "id": {
+                "type": "string"
+              },
+              "instructions": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "digest",
+              "files",
+              "id",
+              "instructions"
             ],
             "type": "object"
           },
@@ -6330,6 +8111,129 @@
           "name",
           "runId",
           "size"
+        ],
+        "type": "object"
+      },
+      "provider": "assets"
+    },
+    {
+      "inputSchema": {
+        "properties": {
+          "bundle": {
+            "properties": {
+              "digest": {
+                "type": "string"
+              },
+              "files": {
+                "items": {
+                  "properties": {
+                    "contentBase64": {
+                      "type": "string"
+                    },
+                    "digest": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "enum": [
+                        "artifact",
+                        "skill",
+                        "task"
+                      ]
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "size": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "digest",
+                    "kind",
+                    "path",
+                    "size"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "id": {
+                "type": "string"
+              },
+              "instructions": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "digest",
+              "files",
+              "id",
+              "instructions"
+            ],
+            "type": "object"
+          },
+          "reference": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "bundle",
+          "reference"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "assets/putSkillBundle@v1",
+      "outputSchema": {
+        "properties": {
+          "digest": {
+            "type": "string"
+          },
+          "files": {
+            "items": {
+              "properties": {
+                "contentBase64": {
+                  "type": "string"
+                },
+                "digest": {
+                  "type": "string"
+                },
+                "kind": {
+                  "enum": [
+                    "artifact",
+                    "skill",
+                    "task"
+                  ]
+                },
+                "path": {
+                  "type": "string"
+                },
+                "size": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "digest",
+                "kind",
+                "path",
+                "size"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "id": {
+            "type": "string"
+          },
+          "instructions": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "digest",
+          "files",
+          "id",
+          "instructions"
         ],
         "type": "object"
       },
@@ -8083,6 +9987,29 @@
         "properties": {
           "attemptId": {
             "type": "string"
+          },
+          "cancelledAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "attemptId",
+          "cancelledAt"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "execution/cancelAttempt@v1",
+      "outputSchema": {
+        "type": "boolean"
+      },
+      "provider": "execution"
+    },
+    {
+      "inputSchema": {
+        "properties": {
+          "attemptId": {
+            "type": "string"
           }
         },
         "required": [
@@ -8183,6 +10110,35 @@
         "type": "object"
       },
       "kind": "action",
+      "name": "execution/getAttemptProtocol@v1",
+      "outputSchema": {
+        "anyOf": [
+          {
+            "enum": [
+              "v1",
+              "v2"
+            ]
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "provider": "execution"
+    },
+    {
+      "inputSchema": {
+        "properties": {
+          "attemptId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "attemptId"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
       "name": "execution/getAttemptV2@v1",
       "outputSchema": {
         "anyOf": [
@@ -8231,6 +10187,293 @@
                   "outcome",
                   "outputArtifactDigests",
                   "summary"
+                ],
+                "type": "object"
+              },
+              "runId": {
+                "type": "string"
+              },
+              "startedAt": {
+                "type": "string"
+              },
+              "stepId": {
+                "type": "string"
+              },
+              "workspaceStatus": {
+                "enum": [
+                  "queued",
+                  "ready",
+                  "finished"
+                ]
+              }
+            },
+            "required": [
+              "agentProfileDigest",
+              "attemptId",
+              "correlationToken",
+              "outcome",
+              "runId",
+              "startedAt",
+              "stepId",
+              "workspaceStatus"
+            ],
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "provider": "execution"
+    },
+    {
+      "inputSchema": {
+        "properties": {
+          "attemptId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "attemptId"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "execution/getAttemptV3@v1",
+      "outputSchema": {
+        "anyOf": [
+          {
+            "properties": {
+              "agentProfileDigest": {
+                "type": "string"
+              },
+              "attemptId": {
+                "type": "string"
+              },
+              "correlationToken": {
+                "type": "string"
+              },
+              "finishedAt": {
+                "type": "string"
+              },
+              "outcome": {
+                "enum": [
+                  "pending",
+                  "succeeded",
+                  "failed"
+                ]
+              },
+              "result": {
+                "properties": {
+                  "attemptId": {
+                    "type": "string"
+                  },
+                  "changedFiles": {
+                    "items": {
+                      "properties": {
+                        "contentBase64": {
+                          "type": "string"
+                        },
+                        "digest": {
+                          "type": "string"
+                        },
+                        "path": {
+                          "type": "string"
+                        },
+                        "size": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "digest",
+                        "path",
+                        "size"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "commit": {
+                    "properties": {
+                      "sha": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "sha"
+                    ],
+                    "type": "object"
+                  },
+                  "failure": {
+                    "properties": {
+                      "category": {
+                        "enum": [
+                          "timeout",
+                          "cancel",
+                          "result-invalid",
+                          "process",
+                          "sandbox",
+                          "adapter",
+                          "workspace-limit"
+                        ]
+                      },
+                      "message": {
+                        "type": "string"
+                      },
+                      "retriable": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "category",
+                      "message",
+                      "retriable"
+                    ],
+                    "type": "object"
+                  },
+                  "logs": {
+                    "properties": {
+                      "stderrBytes": {
+                        "type": "integer"
+                      },
+                      "stderrDigest": {
+                        "type": "string"
+                      },
+                      "stderrTruncated": {
+                        "type": "boolean"
+                      },
+                      "stdoutBytes": {
+                        "type": "integer"
+                      },
+                      "stdoutDigest": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "stderrBytes",
+                      "stderrDigest",
+                      "stderrTruncated",
+                      "stdoutBytes",
+                      "stdoutDigest"
+                    ],
+                    "type": "object"
+                  },
+                  "outcome": {
+                    "properties": {
+                      "data": {
+                        "additionalProperties": {},
+                        "type": "object"
+                      },
+                      "outcome": {
+                        "type": "string"
+                      },
+                      "outputArtifactDigests": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "summary": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "data",
+                      "outcome",
+                      "outputArtifactDigests",
+                      "summary"
+                    ],
+                    "type": "object"
+                  },
+                  "patch": {
+                    "properties": {
+                      "digest": {
+                        "type": "string"
+                      },
+                      "size": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "digest",
+                      "size"
+                    ],
+                    "type": "object"
+                  },
+                  "resources": {
+                    "properties": {
+                      "cpuMs": {
+                        "type": "integer"
+                      },
+                      "maxRssBytes": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "cpuMs",
+                      "maxRssBytes"
+                    ],
+                    "type": "object"
+                  },
+                  "status": {
+                    "enum": [
+                      "succeeded",
+                      "failed"
+                    ]
+                  },
+                  "tests": {
+                    "items": {
+                      "properties": {
+                        "command": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "durationMs": {
+                          "type": "integer"
+                        },
+                        "exitCode": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "command",
+                        "durationMs",
+                        "exitCode"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "timing": {
+                    "properties": {
+                      "durationMs": {
+                        "type": "integer"
+                      },
+                      "finishedAt": {
+                        "type": "string"
+                      },
+                      "startedAt": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "durationMs",
+                      "finishedAt",
+                      "startedAt"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "attemptId",
+                  "changedFiles",
+                  "logs",
+                  "resources",
+                  "status",
+                  "tests",
+                  "timing"
                 ],
                 "type": "object"
               },
@@ -8443,6 +10686,559 @@
       "provider": "execution"
     },
     {
+      "inputSchema": {
+        "properties": {
+          "agentProfile": {
+            "properties": {
+              "capabilities": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "capabilityPreset": {
+                "enum": [
+                  "read-only",
+                  "patch",
+                  "test",
+                  "release"
+                ]
+              },
+              "command": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "digest": {
+                "type": "string"
+              },
+              "environment": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "instructions": {
+                "type": "string"
+              },
+              "limits": {
+                "properties": {
+                  "cpuSeconds": {
+                    "type": "integer"
+                  },
+                  "maxFileBytes": {
+                    "type": "integer"
+                  },
+                  "maxInputBytes": {
+                    "type": "integer"
+                  },
+                  "maxLogBytes": {
+                    "type": "integer"
+                  },
+                  "maxOutputBytes": {
+                    "type": "integer"
+                  },
+                  "maxPatchBytes": {
+                    "type": "integer"
+                  },
+                  "maxPids": {
+                    "type": "integer"
+                  },
+                  "maxWorkspaceBytes": {
+                    "type": "integer"
+                  },
+                  "maxWorkspaceFiles": {
+                    "type": "integer"
+                  },
+                  "memoryBytes": {
+                    "type": "integer"
+                  },
+                  "timeoutMs": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "cpuSeconds",
+                  "maxFileBytes",
+                  "maxInputBytes",
+                  "maxLogBytes",
+                  "maxOutputBytes",
+                  "maxPatchBytes",
+                  "maxPids",
+                  "maxWorkspaceBytes",
+                  "maxWorkspaceFiles",
+                  "memoryBytes",
+                  "timeoutMs"
+                ],
+                "type": "object"
+              },
+              "model": {
+                "type": "string"
+              },
+              "skills": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "capabilities",
+              "capabilityPreset",
+              "command",
+              "digest",
+              "environment",
+              "instructions",
+              "limits",
+              "model",
+              "skills"
+            ],
+            "type": "object"
+          },
+          "attemptId": {
+            "type": "string"
+          },
+          "budget": {
+            "properties": {
+              "maxDurationMs": {
+                "type": "integer"
+              },
+              "maxInputBytes": {
+                "type": "integer"
+              },
+              "maxOutputBytes": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "maxDurationMs",
+              "maxInputBytes",
+              "maxOutputBytes"
+            ],
+            "type": "object"
+          },
+          "correlationToken": {
+            "type": "string"
+          },
+          "declaredOutputPaths": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "inputArtifacts": {
+            "items": {
+              "properties": {
+                "contentBase64": {
+                  "type": "string"
+                },
+                "digest": {
+                  "type": "string"
+                },
+                "kind": {
+                  "enum": [
+                    "artifact",
+                    "skill",
+                    "task"
+                  ]
+                },
+                "path": {
+                  "type": "string"
+                },
+                "size": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "digest",
+                "kind",
+                "path",
+                "size"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "repository": {
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "sha": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "sha"
+            ],
+            "type": "object"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "skills": {
+            "items": {
+              "properties": {
+                "digest": {
+                  "type": "string"
+                },
+                "files": {
+                  "items": {
+                    "properties": {
+                      "contentBase64": {
+                        "type": "string"
+                      },
+                      "digest": {
+                        "type": "string"
+                      },
+                      "kind": {
+                        "enum": [
+                          "artifact",
+                          "skill",
+                          "task"
+                        ]
+                      },
+                      "path": {
+                        "type": "string"
+                      },
+                      "size": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "digest",
+                      "kind",
+                      "path",
+                      "size"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "instructions": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "digest",
+                "files",
+                "id",
+                "instructions"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "stepId": {
+            "type": "string"
+          },
+          "task": {
+            "properties": {
+              "mediaType": {
+                "type": "string"
+              },
+              "payload": {}
+            },
+            "required": [
+              "mediaType",
+              "payload"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "agentProfile",
+          "attemptId",
+          "budget",
+          "correlationToken",
+          "declaredOutputPaths",
+          "inputArtifacts",
+          "repository",
+          "runId",
+          "skills",
+          "startedAt",
+          "stepId",
+          "task"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "execution/requestAttemptV2@v1",
+      "outputSchema": {
+        "properties": {
+          "agentProfileDigest": {
+            "type": "string"
+          },
+          "attemptId": {
+            "type": "string"
+          },
+          "correlationToken": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "pending",
+              "succeeded",
+              "failed"
+            ]
+          },
+          "result": {
+            "properties": {
+              "attemptId": {
+                "type": "string"
+              },
+              "changedFiles": {
+                "items": {
+                  "properties": {
+                    "contentBase64": {
+                      "type": "string"
+                    },
+                    "digest": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "size": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "digest",
+                    "path",
+                    "size"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "commit": {
+                "properties": {
+                  "sha": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "sha"
+                ],
+                "type": "object"
+              },
+              "failure": {
+                "properties": {
+                  "category": {
+                    "enum": [
+                      "timeout",
+                      "cancel",
+                      "result-invalid",
+                      "process",
+                      "sandbox",
+                      "adapter",
+                      "workspace-limit"
+                    ]
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "retriable": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "category",
+                  "message",
+                  "retriable"
+                ],
+                "type": "object"
+              },
+              "logs": {
+                "properties": {
+                  "stderrBytes": {
+                    "type": "integer"
+                  },
+                  "stderrDigest": {
+                    "type": "string"
+                  },
+                  "stderrTruncated": {
+                    "type": "boolean"
+                  },
+                  "stdoutBytes": {
+                    "type": "integer"
+                  },
+                  "stdoutDigest": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "stderrBytes",
+                  "stderrDigest",
+                  "stderrTruncated",
+                  "stdoutBytes",
+                  "stdoutDigest"
+                ],
+                "type": "object"
+              },
+              "outcome": {
+                "properties": {
+                  "data": {
+                    "additionalProperties": {},
+                    "type": "object"
+                  },
+                  "outcome": {
+                    "type": "string"
+                  },
+                  "outputArtifactDigests": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "summary": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "data",
+                  "outcome",
+                  "outputArtifactDigests",
+                  "summary"
+                ],
+                "type": "object"
+              },
+              "patch": {
+                "properties": {
+                  "digest": {
+                    "type": "string"
+                  },
+                  "size": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "digest",
+                  "size"
+                ],
+                "type": "object"
+              },
+              "resources": {
+                "properties": {
+                  "cpuMs": {
+                    "type": "integer"
+                  },
+                  "maxRssBytes": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "cpuMs",
+                  "maxRssBytes"
+                ],
+                "type": "object"
+              },
+              "status": {
+                "enum": [
+                  "succeeded",
+                  "failed"
+                ]
+              },
+              "tests": {
+                "items": {
+                  "properties": {
+                    "command": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "durationMs": {
+                      "type": "integer"
+                    },
+                    "exitCode": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "command",
+                    "durationMs",
+                    "exitCode"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "timing": {
+                "properties": {
+                  "durationMs": {
+                    "type": "integer"
+                  },
+                  "finishedAt": {
+                    "type": "string"
+                  },
+                  "startedAt": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "durationMs",
+                  "finishedAt",
+                  "startedAt"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "attemptId",
+              "changedFiles",
+              "logs",
+              "resources",
+              "status",
+              "tests",
+              "timing"
+            ],
+            "type": "object"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "stepId": {
+            "type": "string"
+          },
+          "workspaceStatus": {
+            "enum": [
+              "queued",
+              "ready",
+              "finished"
+            ]
+          }
+        },
+        "required": [
+          "agentProfileDigest",
+          "attemptId",
+          "correlationToken",
+          "outcome",
+          "runId",
+          "startedAt",
+          "stepId",
+          "workspaceStatus"
+        ],
+        "type": "object"
+      },
+      "provider": "execution"
+    },
+    {
       "kind": "event",
       "name": "attemptFinished",
       "payloadSchema": {
@@ -8517,6 +11313,262 @@
       },
       "provider": "execution",
       "version": 1
+    },
+    {
+      "kind": "event",
+      "name": "attemptFinished",
+      "payloadSchema": {
+        "properties": {
+          "agentProfileDigest": {
+            "type": "string"
+          },
+          "attemptId": {
+            "type": "string"
+          },
+          "correlationToken": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": "string"
+          },
+          "result": {
+            "properties": {
+              "attemptId": {
+                "type": "string"
+              },
+              "changedFiles": {
+                "items": {
+                  "properties": {
+                    "contentBase64": {
+                      "type": "string"
+                    },
+                    "digest": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "size": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "digest",
+                    "path",
+                    "size"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "commit": {
+                "properties": {
+                  "sha": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "sha"
+                ],
+                "type": "object"
+              },
+              "failure": {
+                "properties": {
+                  "category": {
+                    "enum": [
+                      "timeout",
+                      "cancel",
+                      "result-invalid",
+                      "process",
+                      "sandbox",
+                      "adapter",
+                      "workspace-limit"
+                    ]
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "retriable": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "category",
+                  "message",
+                  "retriable"
+                ],
+                "type": "object"
+              },
+              "logs": {
+                "properties": {
+                  "stderrBytes": {
+                    "type": "integer"
+                  },
+                  "stderrDigest": {
+                    "type": "string"
+                  },
+                  "stderrTruncated": {
+                    "type": "boolean"
+                  },
+                  "stdoutBytes": {
+                    "type": "integer"
+                  },
+                  "stdoutDigest": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "stderrBytes",
+                  "stderrDigest",
+                  "stderrTruncated",
+                  "stdoutBytes",
+                  "stdoutDigest"
+                ],
+                "type": "object"
+              },
+              "outcome": {
+                "properties": {
+                  "data": {
+                    "additionalProperties": {},
+                    "type": "object"
+                  },
+                  "outcome": {
+                    "type": "string"
+                  },
+                  "outputArtifactDigests": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "summary": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "data",
+                  "outcome",
+                  "outputArtifactDigests",
+                  "summary"
+                ],
+                "type": "object"
+              },
+              "patch": {
+                "properties": {
+                  "digest": {
+                    "type": "string"
+                  },
+                  "size": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "digest",
+                  "size"
+                ],
+                "type": "object"
+              },
+              "resources": {
+                "properties": {
+                  "cpuMs": {
+                    "type": "integer"
+                  },
+                  "maxRssBytes": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "cpuMs",
+                  "maxRssBytes"
+                ],
+                "type": "object"
+              },
+              "status": {
+                "enum": [
+                  "succeeded",
+                  "failed"
+                ]
+              },
+              "tests": {
+                "items": {
+                  "properties": {
+                    "command": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "durationMs": {
+                      "type": "integer"
+                    },
+                    "exitCode": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "command",
+                    "durationMs",
+                    "exitCode"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "timing": {
+                "properties": {
+                  "durationMs": {
+                    "type": "integer"
+                  },
+                  "finishedAt": {
+                    "type": "string"
+                  },
+                  "startedAt": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "durationMs",
+                  "finishedAt",
+                  "startedAt"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "attemptId",
+              "changedFiles",
+              "logs",
+              "resources",
+              "status",
+              "tests",
+              "timing"
+            ],
+            "type": "object"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "stepId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "agentProfileDigest",
+          "attemptId",
+          "correlationToken",
+          "finishedAt",
+          "result",
+          "runId",
+          "startedAt",
+          "stepId"
+        ],
+        "type": "object"
+      },
+      "provider": "execution",
+      "version": 2
     },
     {
       "kind": "event",
@@ -8600,6 +11652,296 @@
       },
       "provider": "execution",
       "version": 1
+    },
+    {
+      "kind": "event",
+      "name": "attemptQueued",
+      "payloadSchema": {
+        "properties": {
+          "agentProfile": {
+            "properties": {
+              "capabilities": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "capabilityPreset": {
+                "enum": [
+                  "read-only",
+                  "patch",
+                  "test",
+                  "release"
+                ]
+              },
+              "command": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "digest": {
+                "type": "string"
+              },
+              "environment": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "instructions": {
+                "type": "string"
+              },
+              "limits": {
+                "properties": {
+                  "cpuSeconds": {
+                    "type": "integer"
+                  },
+                  "maxFileBytes": {
+                    "type": "integer"
+                  },
+                  "maxInputBytes": {
+                    "type": "integer"
+                  },
+                  "maxLogBytes": {
+                    "type": "integer"
+                  },
+                  "maxOutputBytes": {
+                    "type": "integer"
+                  },
+                  "maxPatchBytes": {
+                    "type": "integer"
+                  },
+                  "maxPids": {
+                    "type": "integer"
+                  },
+                  "maxWorkspaceBytes": {
+                    "type": "integer"
+                  },
+                  "maxWorkspaceFiles": {
+                    "type": "integer"
+                  },
+                  "memoryBytes": {
+                    "type": "integer"
+                  },
+                  "timeoutMs": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "cpuSeconds",
+                  "maxFileBytes",
+                  "maxInputBytes",
+                  "maxLogBytes",
+                  "maxOutputBytes",
+                  "maxPatchBytes",
+                  "maxPids",
+                  "maxWorkspaceBytes",
+                  "maxWorkspaceFiles",
+                  "memoryBytes",
+                  "timeoutMs"
+                ],
+                "type": "object"
+              },
+              "model": {
+                "type": "string"
+              },
+              "skills": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "capabilities",
+              "capabilityPreset",
+              "command",
+              "digest",
+              "environment",
+              "instructions",
+              "limits",
+              "model",
+              "skills"
+            ],
+            "type": "object"
+          },
+          "attemptId": {
+            "type": "string"
+          },
+          "budget": {
+            "properties": {
+              "maxDurationMs": {
+                "type": "integer"
+              },
+              "maxInputBytes": {
+                "type": "integer"
+              },
+              "maxOutputBytes": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "maxDurationMs",
+              "maxInputBytes",
+              "maxOutputBytes"
+            ],
+            "type": "object"
+          },
+          "correlationToken": {
+            "type": "string"
+          },
+          "declaredOutputPaths": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "inputArtifacts": {
+            "items": {
+              "properties": {
+                "contentBase64": {
+                  "type": "string"
+                },
+                "digest": {
+                  "type": "string"
+                },
+                "kind": {
+                  "enum": [
+                    "artifact",
+                    "skill",
+                    "task"
+                  ]
+                },
+                "path": {
+                  "type": "string"
+                },
+                "size": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "digest",
+                "kind",
+                "path",
+                "size"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "repository": {
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "sha": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "sha"
+            ],
+            "type": "object"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "skills": {
+            "items": {
+              "properties": {
+                "digest": {
+                  "type": "string"
+                },
+                "files": {
+                  "items": {
+                    "properties": {
+                      "contentBase64": {
+                        "type": "string"
+                      },
+                      "digest": {
+                        "type": "string"
+                      },
+                      "kind": {
+                        "enum": [
+                          "artifact",
+                          "skill",
+                          "task"
+                        ]
+                      },
+                      "path": {
+                        "type": "string"
+                      },
+                      "size": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "digest",
+                      "kind",
+                      "path",
+                      "size"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "instructions": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "digest",
+                "files",
+                "id",
+                "instructions"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "stepId": {
+            "type": "string"
+          },
+          "task": {
+            "properties": {
+              "mediaType": {
+                "type": "string"
+              },
+              "payload": {}
+            },
+            "required": [
+              "mediaType",
+              "payload"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "agentProfile",
+          "attemptId",
+          "budget",
+          "correlationToken",
+          "declaredOutputPaths",
+          "inputArtifacts",
+          "repository",
+          "runId",
+          "skills",
+          "startedAt",
+          "stepId",
+          "task"
+        ],
+        "type": "object"
+      },
+      "provider": "execution",
+      "version": 2
     },
     {
       "inputSchema": {
@@ -10661,6 +14003,9 @@
           "repository": {
             "type": "string"
           },
+          "repositorySha": {
+            "type": "string"
+          },
           "runId": {
             "type": "string"
           },
@@ -10670,6 +14015,7 @@
           "subject": {
             "type": "string"
           },
+          "taskPayload": {},
           "workflowId": {
             "type": "string"
           },
