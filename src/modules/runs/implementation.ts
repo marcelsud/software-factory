@@ -2673,8 +2673,8 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
               })()
             : null;
         try {
-          await ctx.call(effects.calls.requestEffectV2, legacyIntent);
-          if (strictIntent !== null) await ctx.call(effects.calls.requestEffectV3, strictIntent);
+          if (strictIntent === null) await ctx.call(effects.calls.requestEffectV2, legacyIntent);
+          else await ctx.call(effects.calls.requestEffectV3, strictIntent);
         } catch (error) {
           row = await appendAudit(db, row, "infrastructure.failed", input.now, {
             message: error instanceof Error ? error.message : String(error),

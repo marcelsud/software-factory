@@ -2,6 +2,8 @@
 
 `factory run-once` is a one-shot process adapter around the same `createSoftwareFactoryApp` composition, Chimpbase modules, `factory-runs-v2` workflow, intake action, and operations projections used by `factory daemon`. It does not run a resident service or use a daemon lock, polling cursor, terminal, or process-global application instance.
 
+For the definition schema, triage state machine, daemon lifecycle, operator commands, recovery table, and replay procedure, see [local factory operation and recovery](local-operation.md). A future job wrapper must also follow [the GitHub Actions adapter contract](github-actions-adapter.md).
+
 ## Invocation
 
 The event file is a strict data-only JSON envelope. It identifies the repository, issue subject, GitHub delivery, event name/action, actor, installation metadata, invocation context, checked definition revision, correlation ID, observation time, and the untrusted GitHub payload. Unknown envelope keys, mismatched payload identities, invalid event/action pairs, non-UTC timestamps, and oversized payloads are rejected before storage or adapters are opened. Adapter names, commands, credentials, secrets, and environment configuration are not accepted from the event file.

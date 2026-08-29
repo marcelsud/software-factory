@@ -191,7 +191,7 @@ export function redactReplayValue(
 export function transitionsFromEvents(events: readonly ReplayEvent[]): ReplayTransition[] {
   return events
     .filter((event) => event.kind === "run.state")
-    .map((event) => {
+    .map((event, index) => {
       const payload = plainObject(event.payload, "run.state payload");
       return {
         correlationToken:
@@ -199,7 +199,7 @@ export function transitionsFromEvents(events: readonly ReplayEvent[]): ReplayTra
             ? payload.currentCorrelationToken
             : null,
         effectKey: typeof payload.currentEffectKey === "string" ? payload.currentEffectKey : null,
-        sequence: event.sequence,
+        sequence: typeof payload.auditSequence === "number" ? payload.auditSequence : index + 1,
         stateId: String(payload.stateId),
         status: String(payload.status),
         stepId: typeof payload.currentStepId === "string" ? payload.currentStepId : null,
@@ -539,8 +539,18 @@ export function verifyReplayObservation(
   const bundle = verifyReplayBundle(bundleInput, trusted);
   const transitions = transitionsFromEvents(observedEvents);
   const effectIntents = effectIntentsFromEvents(observedEvents);
-  if (canonicalJson(transitions) !== canonicalJson(bundle.transitions))
-    throw new Error("transition_drift: replayed app diverged from bundle");
+  if (canonicalJson(transitions) !== canonicalJson(bundle.transitions)) {
+    const firstMismatch = bundle.transitions.findIndex(
+      (expected, index) => canonicalJson(expected) !== canonicalJson(transitions[index] ?? null),
+    );
+    const mismatch =
+      firstMismatch === -1
+        ? Math.min(bundle.transitions.length, transitions.length)
+        : firstMismatch;
+    throw new Error(
+      `transition_drift: replayed app diverged at ${mismatch}: expected ${canonicalJson(bundle.transitions[mismatch] ?? null)}, observed ${canonicalJson(transitions[mismatch] ?? null)}`,
+    );
+  }
   if (canonicalJson(effectIntents) !== canonicalJson(effectIntentsFromEvents(bundle.events)))
     throw new Error("effect_drift: replayed app diverged from bundle");
   if (writes.live !== 0) throw new Error(`replay_live_write: observed ${writes.live}`);
