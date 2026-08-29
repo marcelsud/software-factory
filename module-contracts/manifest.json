@@ -1,6 +1,30 @@
 {
   "eventGraph": [
     {
+      "consumer": "operations",
+      "event": "assets/artifactStored@v2",
+      "publisher": "assets",
+      "subscription": "project-artifact-v2"
+    },
+    {
+      "consumer": "operations",
+      "event": "assets/skillRevisionPinned@v2",
+      "publisher": "assets",
+      "subscription": "project-skill-v2"
+    },
+    {
+      "consumer": "operations",
+      "event": "definitions/definitionPublished@v1",
+      "publisher": "definitions",
+      "subscription": "project-definition-v1"
+    },
+    {
+      "consumer": "operations",
+      "event": "effects/effectFinished@v3",
+      "publisher": "effects",
+      "subscription": "project-effect-finished-v3"
+    },
+    {
       "consumer": "runs",
       "event": "effects/effectFinished@v2",
       "publisher": "effects",
@@ -11,6 +35,12 @@
       "event": "effects/effectFinished@v3",
       "publisher": "effects",
       "subscription": "record-effect-outcome-v3"
+    },
+    {
+      "consumer": "operations",
+      "event": "execution/attemptFinished@v2",
+      "publisher": "execution",
+      "subscription": "project-attempt-v2"
     },
     {
       "consumer": "runs",
@@ -25,10 +55,40 @@
       "subscription": "record-attempt-outcome-v2"
     },
     {
+      "consumer": "operations",
+      "event": "intake/factoryEventAccepted@v2",
+      "publisher": "intake",
+      "subscription": "project-source-event-v2"
+    },
+    {
       "consumer": "runs",
       "event": "intake/factoryEventAccepted@v2",
       "publisher": "intake",
       "subscription": "start-matching-runs"
+    },
+    {
+      "consumer": "operations",
+      "event": "runs/effectRequested@v3",
+      "publisher": "runs",
+      "subscription": "project-effect-request-v3"
+    },
+    {
+      "consumer": "operations",
+      "event": "runs/runFinished@v3",
+      "publisher": "runs",
+      "subscription": "project-run-finished-v3"
+    },
+    {
+      "consumer": "operations",
+      "event": "runs/runStateChanged@v3",
+      "publisher": "runs",
+      "subscription": "project-run-state-v3"
+    },
+    {
+      "consumer": "operations",
+      "event": "runs/stepRequested@v2",
+      "publisher": "runs",
+      "subscription": "project-step-v2"
     }
   ],
   "modules": [
@@ -9877,6 +9937,124 @@
       "calls": [
         {
           "errors": [
+            "module_unavailable",
+            "run_not_found",
+            "command_not_allowed",
+            "command_conflict"
+          ],
+          "guarantees": [
+            "audits successful routing atomically; after a routing error the caller must invoke recordOperatorCommandRejection in a separate root action"
+          ],
+          "id": "operations/applyOperatorCommand@v1",
+          "inputSchema": {
+            "properties": {
+              "actor": {
+                "type": "string"
+              },
+              "commandKey": {
+                "type": "string"
+              },
+              "correlationToken": {
+                "type": "string"
+              },
+              "gateId": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "approve",
+                  "reject",
+                  "cancel",
+                  "retry",
+                  "pause",
+                  "resume"
+                ]
+              },
+              "requestedAt": {
+                "type": "string"
+              },
+              "runId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "actor",
+              "commandKey",
+              "kind",
+              "requestedAt",
+              "runId"
+            ],
+            "type": "object"
+          },
+          "name": "applyOperatorCommand",
+          "outputSchema": {
+            "properties": {
+              "actor": {
+                "type": "string"
+              },
+              "appliedAt": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "commandKey": {
+                "type": "string"
+              },
+              "error": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "kind": {
+                "enum": [
+                  "approve",
+                  "reject",
+                  "cancel",
+                  "retry",
+                  "pause",
+                  "resume"
+                ]
+              },
+              "outcome": {
+                "enum": [
+                  "requested",
+                  "applied",
+                  "rejected"
+                ]
+              },
+              "requestedAt": {
+                "type": "string"
+              },
+              "runId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "actor",
+              "appliedAt",
+              "commandKey",
+              "error",
+              "kind",
+              "outcome",
+              "requestedAt",
+              "runId"
+            ],
+            "type": "object"
+          },
+          "version": 1
+        },
+        {
+          "errors": [
             "module_unavailable"
           ],
           "guarantees": [
@@ -9912,6 +10090,199 @@
               "status"
             ],
             "type": "object"
+          },
+          "version": 1
+        },
+        {
+          "errors": [
+            "module_unavailable"
+          ],
+          "guarantees": [
+            "reports detailed readiness without changing domain state"
+          ],
+          "id": "operations/getHealthV2@v1",
+          "inputSchema": {
+            "properties": {},
+            "required": [],
+            "type": "object"
+          },
+          "name": "getHealthV2",
+          "outputSchema": {
+            "properties": {
+              "adapters": {
+                "properties": {
+                  "credentialsPresent": {
+                    "type": "boolean"
+                  },
+                  "repositories": {
+                    "additionalProperties": {
+                      "enum": [
+                        "reachable",
+                        "unreachable"
+                      ]
+                    },
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "credentialsPresent",
+                  "repositories"
+                ],
+                "type": "object"
+              },
+              "checkedAt": {
+                "type": "string"
+              },
+              "pendingEffects": {
+                "type": "integer"
+              },
+              "pollLagMs": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "staleLocks": {
+                "type": "integer"
+              },
+              "status": {
+                "enum": [
+                  "ready",
+                  "degraded"
+                ]
+              },
+              "storage": {
+                "enum": [
+                  "ready",
+                  "unavailable"
+                ]
+              },
+              "unreconciledEffects": {
+                "type": "integer"
+              },
+              "worker": {
+                "enum": [
+                  "ready",
+                  "unavailable"
+                ]
+              },
+              "workflow": {
+                "enum": [
+                  "ready",
+                  "unavailable"
+                ]
+              }
+            },
+            "required": [
+              "adapters",
+              "checkedAt",
+              "pendingEffects",
+              "pollLagMs",
+              "staleLocks",
+              "status",
+              "storage",
+              "unreconciledEffects",
+              "worker",
+              "workflow"
+            ],
+            "type": "object"
+          },
+          "version": 1
+        },
+        {
+          "errors": [
+            "module_unavailable"
+          ],
+          "guarantees": [
+            "returns the durable operations-owned command audit record"
+          ],
+          "id": "operations/getOperatorCommand@v1",
+          "inputSchema": {
+            "properties": {
+              "commandKey": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "commandKey"
+            ],
+            "type": "object"
+          },
+          "name": "getOperatorCommand",
+          "outputSchema": {
+            "anyOf": [
+              {
+                "properties": {
+                  "actor": {
+                    "type": "string"
+                  },
+                  "appliedAt": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "commandKey": {
+                    "type": "string"
+                  },
+                  "error": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "kind": {
+                    "enum": [
+                      "approve",
+                      "reject",
+                      "cancel",
+                      "retry",
+                      "pause",
+                      "resume"
+                    ]
+                  },
+                  "outcome": {
+                    "enum": [
+                      "requested",
+                      "applied",
+                      "rejected"
+                    ]
+                  },
+                  "requestedAt": {
+                    "type": "string"
+                  },
+                  "runId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "actor",
+                  "appliedAt",
+                  "commandKey",
+                  "error",
+                  "kind",
+                  "outcome",
+                  "requestedAt",
+                  "runId"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "version": 1
         },
@@ -9993,6 +10364,158 @@
         {
           "errors": [
             "module_unavailable",
+            "invalid_limit",
+            "invalid_cursor"
+          ],
+          "guarantees": [
+            "returns committed effect receipts in deterministic order"
+          ],
+          "id": "operations/listEffectsV2@v1",
+          "inputSchema": {
+            "properties": {
+              "after": {
+                "type": "string"
+              },
+              "limit": {
+                "type": "integer"
+              },
+              "runId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "limit"
+            ],
+            "type": "object"
+          },
+          "name": "listEffectsV2",
+          "outputSchema": {
+            "properties": {
+              "items": {
+                "items": {
+                  "properties": {
+                    "correlationToken": {
+                      "type": "string"
+                    },
+                    "effectId": {
+                      "type": "string"
+                    },
+                    "externalId": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "externalRevision": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "externalUrl": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "failureCategory": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "finishedAt": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "idempotencyKey": {
+                      "type": "string"
+                    },
+                    "outcome": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "recordedAt": {
+                      "type": "string"
+                    },
+                    "runId": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "enum": [
+                        "queued",
+                        "finished"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "correlationToken",
+                    "effectId",
+                    "externalId",
+                    "externalRevision",
+                    "externalUrl",
+                    "failureCategory",
+                    "finishedAt",
+                    "idempotencyKey",
+                    "outcome",
+                    "recordedAt",
+                    "runId",
+                    "status"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "nextCursor": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "items",
+              "nextCursor"
+            ],
+            "type": "object"
+          },
+          "version": 1
+        },
+        {
+          "errors": [
+            "module_unavailable",
             "invalid_limit"
           ],
           "guarantees": [
@@ -10040,6 +10563,94 @@
               "type": "object"
             },
             "type": "array"
+          },
+          "version": 1
+        },
+        {
+          "errors": [
+            "module_unavailable",
+            "invalid_limit",
+            "invalid_cursor"
+          ],
+          "guarantees": [
+            "returns redaction-safe projection records in stable event order"
+          ],
+          "id": "operations/listEventsV2@v1",
+          "inputSchema": {
+            "properties": {
+              "after": {
+                "type": "string"
+              },
+              "limit": {
+                "type": "integer"
+              },
+              "runId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "limit"
+            ],
+            "type": "object"
+          },
+          "name": "listEventsV2",
+          "outputSchema": {
+            "properties": {
+              "items": {
+                "items": {
+                  "properties": {
+                    "eventId": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "type": "string"
+                    },
+                    "occurredAt": {
+                      "type": "string"
+                    },
+                    "payload": {},
+                    "runId": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "sequence": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "eventId",
+                    "kind",
+                    "occurredAt",
+                    "payload",
+                    "runId",
+                    "sequence"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "nextCursor": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "items",
+              "nextCursor"
+            ],
+            "type": "object"
           },
           "version": 1
         },
@@ -10144,6 +10755,587 @@
         },
         {
           "errors": [
+            "module_unavailable",
+            "invalid_limit",
+            "invalid_cursor"
+          ],
+          "guarantees": [
+            "projection results are ordered deterministically and use stable cursor pagination"
+          ],
+          "id": "operations/listRunsV2@v1",
+          "inputSchema": {
+            "properties": {
+              "after": {
+                "type": "string"
+              },
+              "limit": {
+                "type": "integer"
+              },
+              "status": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "limit"
+            ],
+            "type": "object"
+          },
+          "name": "listRunsV2",
+          "outputSchema": {
+            "properties": {
+              "items": {
+                "items": {
+                  "properties": {
+                    "currentAttemptId": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "currentCorrelationToken": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "currentEffectKey": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "currentGateId": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "currentGateStatus": {
+                      "anyOf": [
+                        {
+                          "enum": [
+                            "pending",
+                            "approved",
+                            "rejected"
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "currentStepId": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "factoryEventId": {
+                      "type": "string"
+                    },
+                    "failureCategory": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "finishedAt": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "flowId": {
+                      "type": "string"
+                    },
+                    "leaseExpiresAt": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "leaseOwner": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "outcome": {
+                      "type": "string"
+                    },
+                    "revisions": {
+                      "properties": {
+                        "agentProfiles": {
+                          "properties": {
+                            "current": {
+                              "additionalProperties": {
+                                "type": "string"
+                              },
+                              "type": "object"
+                            },
+                            "drift": {
+                              "type": "boolean"
+                            },
+                            "pinned": {
+                              "additionalProperties": {
+                                "type": "string"
+                              },
+                              "type": "object"
+                            }
+                          },
+                          "required": [
+                            "current",
+                            "drift",
+                            "pinned"
+                          ],
+                          "type": "object"
+                        },
+                        "definition": {
+                          "properties": {
+                            "current": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "drift": {
+                              "type": "boolean"
+                            },
+                            "pinned": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "current",
+                            "drift",
+                            "pinned"
+                          ],
+                          "type": "object"
+                        },
+                        "flow": {
+                          "properties": {
+                            "current": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "drift": {
+                              "type": "boolean"
+                            },
+                            "pinned": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "current",
+                            "drift",
+                            "pinned"
+                          ],
+                          "type": "object"
+                        },
+                        "skills": {
+                          "properties": {
+                            "current": {
+                              "additionalProperties": {
+                                "type": "string"
+                              },
+                              "type": "object"
+                            },
+                            "drift": {
+                              "type": "boolean"
+                            },
+                            "pinned": {
+                              "additionalProperties": {
+                                "type": "string"
+                              },
+                              "type": "object"
+                            }
+                          },
+                          "required": [
+                            "current",
+                            "drift",
+                            "pinned"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "agentProfiles",
+                        "definition",
+                        "flow",
+                        "skills"
+                      ],
+                      "type": "object"
+                    },
+                    "runId": {
+                      "type": "string"
+                    },
+                    "sourceEvent": {
+                      "anyOf": [
+                        {
+                          "properties": {
+                            "actor": {
+                              "type": "string"
+                            },
+                            "correlationId": {
+                              "type": "string"
+                            },
+                            "deliveryId": {
+                              "type": "string"
+                            },
+                            "eventType": {
+                              "type": "string"
+                            },
+                            "observedAt": {
+                              "type": "string"
+                            },
+                            "occurredAt": {
+                              "type": "string"
+                            },
+                            "repository": {
+                              "type": "string"
+                            },
+                            "sourceId": {
+                              "type": "string"
+                            },
+                            "sourceRevision": {
+                              "type": "string"
+                            },
+                            "subject": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "actor",
+                            "correlationId",
+                            "deliveryId",
+                            "eventType",
+                            "observedAt",
+                            "occurredAt",
+                            "repository",
+                            "sourceId",
+                            "sourceRevision",
+                            "subject"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "startedAt": {
+                      "type": "string"
+                    },
+                    "stateId": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "enum": [
+                        "queued",
+                        "running",
+                        "retrying",
+                        "waiting",
+                        "paused",
+                        "succeeded",
+                        "failed",
+                        "cancelled"
+                      ]
+                    },
+                    "terminal": {
+                      "type": "boolean"
+                    },
+                    "updatedAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "currentAttemptId",
+                    "currentCorrelationToken",
+                    "currentEffectKey",
+                    "currentGateId",
+                    "currentGateStatus",
+                    "currentStepId",
+                    "failureCategory",
+                    "factoryEventId",
+                    "finishedAt",
+                    "flowId",
+                    "leaseExpiresAt",
+                    "leaseOwner",
+                    "outcome",
+                    "revisions",
+                    "runId",
+                    "sourceEvent",
+                    "startedAt",
+                    "stateId",
+                    "status",
+                    "terminal",
+                    "updatedAt"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "nextCursor": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "items",
+              "nextCursor"
+            ],
+            "type": "object"
+          },
+          "version": 1
+        },
+        {
+          "errors": [
+            "module_unavailable"
+          ],
+          "guarantees": [
+            "rebuilds byte-identical projections solely from stored versioned event facts"
+          ],
+          "id": "operations/rebuildProjections@v1",
+          "inputSchema": {
+            "properties": {},
+            "required": [],
+            "type": "object"
+          },
+          "name": "rebuildProjections",
+          "outputSchema": {
+            "properties": {
+              "effects": {
+                "type": "integer"
+              },
+              "events": {
+                "type": "integer"
+              },
+              "runs": {
+                "type": "integer"
+              },
+              "timeline": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "effects",
+              "events",
+              "runs",
+              "timeline"
+            ],
+            "type": "object"
+          },
+          "version": 1
+        },
+        {
+          "errors": [
+            "module_unavailable",
+            "command_conflict"
+          ],
+          "guarantees": [
+            "records a rejected command only after the failed routing transaction unwinds"
+          ],
+          "id": "operations/recordOperatorCommandRejection@v1",
+          "inputSchema": {
+            "properties": {
+              "error": {
+                "type": "string"
+              },
+              "request": {
+                "properties": {
+                  "actor": {
+                    "type": "string"
+                  },
+                  "commandKey": {
+                    "type": "string"
+                  },
+                  "correlationToken": {
+                    "type": "string"
+                  },
+                  "gateId": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "enum": [
+                      "approve",
+                      "reject",
+                      "cancel",
+                      "retry",
+                      "pause",
+                      "resume"
+                    ]
+                  },
+                  "requestedAt": {
+                    "type": "string"
+                  },
+                  "runId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "actor",
+                  "commandKey",
+                  "kind",
+                  "requestedAt",
+                  "runId"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "error",
+              "request"
+            ],
+            "type": "object"
+          },
+          "name": "recordOperatorCommandRejection",
+          "outputSchema": {
+            "properties": {
+              "actor": {
+                "type": "string"
+              },
+              "appliedAt": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "commandKey": {
+                "type": "string"
+              },
+              "error": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "kind": {
+                "enum": [
+                  "approve",
+                  "reject",
+                  "cancel",
+                  "retry",
+                  "pause",
+                  "resume"
+                ]
+              },
+              "outcome": {
+                "enum": [
+                  "requested",
+                  "applied",
+                  "rejected"
+                ]
+              },
+              "requestedAt": {
+                "type": "string"
+              },
+              "runId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "actor",
+              "appliedAt",
+              "commandKey",
+              "error",
+              "kind",
+              "outcome",
+              "requestedAt",
+              "runId"
+            ],
+            "type": "object"
+          },
+          "version": 1
+        },
+        {
+          "errors": [
+            "module_unavailable"
+          ],
+          "guarantees": [
+            "refreshes only the operations-owned worker liveness heartbeat"
+          ],
+          "id": "operations/refreshWorkerHeartbeat@v1",
+          "inputSchema": {
+            "properties": {},
+            "required": [],
+            "type": "object"
+          },
+          "name": "refreshWorkerHeartbeat",
+          "outputSchema": {
+            "properties": {
+              "updatedAt": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "updatedAt"
+            ],
+            "type": "object"
+          },
+          "version": 1
+        },
+        {
+          "errors": [
             "module_unavailable"
           ],
           "guarantees": [
@@ -10240,6 +11432,411 @@
             ]
           },
           "version": 1
+        },
+        {
+          "errors": [
+            "module_unavailable"
+          ],
+          "guarantees": [
+            "returns a redaction-safe event-fed timeline"
+          ],
+          "id": "operations/showRunV2@v1",
+          "inputSchema": {
+            "properties": {
+              "runId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "runId"
+            ],
+            "type": "object"
+          },
+          "name": "showRunV2",
+          "outputSchema": {
+            "anyOf": [
+              {
+                "properties": {
+                  "run": {
+                    "properties": {
+                      "currentAttemptId": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "currentCorrelationToken": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "currentEffectKey": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "currentGateId": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "currentGateStatus": {
+                        "anyOf": [
+                          {
+                            "enum": [
+                              "pending",
+                              "approved",
+                              "rejected"
+                            ]
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "currentStepId": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "factoryEventId": {
+                        "type": "string"
+                      },
+                      "failureCategory": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "finishedAt": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "flowId": {
+                        "type": "string"
+                      },
+                      "leaseExpiresAt": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "leaseOwner": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "outcome": {
+                        "type": "string"
+                      },
+                      "revisions": {
+                        "properties": {
+                          "agentProfiles": {
+                            "properties": {
+                              "current": {
+                                "additionalProperties": {
+                                  "type": "string"
+                                },
+                                "type": "object"
+                              },
+                              "drift": {
+                                "type": "boolean"
+                              },
+                              "pinned": {
+                                "additionalProperties": {
+                                  "type": "string"
+                                },
+                                "type": "object"
+                              }
+                            },
+                            "required": [
+                              "current",
+                              "drift",
+                              "pinned"
+                            ],
+                            "type": "object"
+                          },
+                          "definition": {
+                            "properties": {
+                              "current": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "drift": {
+                                "type": "boolean"
+                              },
+                              "pinned": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "current",
+                              "drift",
+                              "pinned"
+                            ],
+                            "type": "object"
+                          },
+                          "flow": {
+                            "properties": {
+                              "current": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "drift": {
+                                "type": "boolean"
+                              },
+                              "pinned": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "current",
+                              "drift",
+                              "pinned"
+                            ],
+                            "type": "object"
+                          },
+                          "skills": {
+                            "properties": {
+                              "current": {
+                                "additionalProperties": {
+                                  "type": "string"
+                                },
+                                "type": "object"
+                              },
+                              "drift": {
+                                "type": "boolean"
+                              },
+                              "pinned": {
+                                "additionalProperties": {
+                                  "type": "string"
+                                },
+                                "type": "object"
+                              }
+                            },
+                            "required": [
+                              "current",
+                              "drift",
+                              "pinned"
+                            ],
+                            "type": "object"
+                          }
+                        },
+                        "required": [
+                          "agentProfiles",
+                          "definition",
+                          "flow",
+                          "skills"
+                        ],
+                        "type": "object"
+                      },
+                      "runId": {
+                        "type": "string"
+                      },
+                      "sourceEvent": {
+                        "anyOf": [
+                          {
+                            "properties": {
+                              "actor": {
+                                "type": "string"
+                              },
+                              "correlationId": {
+                                "type": "string"
+                              },
+                              "deliveryId": {
+                                "type": "string"
+                              },
+                              "eventType": {
+                                "type": "string"
+                              },
+                              "observedAt": {
+                                "type": "string"
+                              },
+                              "occurredAt": {
+                                "type": "string"
+                              },
+                              "repository": {
+                                "type": "string"
+                              },
+                              "sourceId": {
+                                "type": "string"
+                              },
+                              "sourceRevision": {
+                                "type": "string"
+                              },
+                              "subject": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "actor",
+                              "correlationId",
+                              "deliveryId",
+                              "eventType",
+                              "observedAt",
+                              "occurredAt",
+                              "repository",
+                              "sourceId",
+                              "sourceRevision",
+                              "subject"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "startedAt": {
+                        "type": "string"
+                      },
+                      "stateId": {
+                        "type": "string"
+                      },
+                      "status": {
+                        "enum": [
+                          "queued",
+                          "running",
+                          "retrying",
+                          "waiting",
+                          "paused",
+                          "succeeded",
+                          "failed",
+                          "cancelled"
+                        ]
+                      },
+                      "terminal": {
+                        "type": "boolean"
+                      },
+                      "updatedAt": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "currentAttemptId",
+                      "currentCorrelationToken",
+                      "currentEffectKey",
+                      "currentGateId",
+                      "currentGateStatus",
+                      "currentStepId",
+                      "failureCategory",
+                      "factoryEventId",
+                      "finishedAt",
+                      "flowId",
+                      "leaseExpiresAt",
+                      "leaseOwner",
+                      "outcome",
+                      "revisions",
+                      "runId",
+                      "sourceEvent",
+                      "startedAt",
+                      "stateId",
+                      "status",
+                      "terminal",
+                      "updatedAt"
+                    ],
+                    "type": "object"
+                  },
+                  "timeline": {
+                    "items": {
+                      "properties": {
+                        "eventId": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "type": "string"
+                        },
+                        "occurredAt": {
+                          "type": "string"
+                        },
+                        "payload": {},
+                        "runId": {
+                          "type": "string"
+                        },
+                        "sequence": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "eventId",
+                        "kind",
+                        "occurredAt",
+                        "payload",
+                        "runId",
+                        "sequence"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "run",
+                  "timeline"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "version": 1
         }
       ],
       "dependencies": [
@@ -10252,18 +11849,66 @@
       ],
       "events": [],
       "migrations": {
-        "postgres": [],
-        "sqlite": []
+        "postgres": [
+          "001_projections"
+        ],
+        "sqlite": [
+          "001_projections"
+        ]
       },
       "name": "operations",
       "resources": {
-        "projections": [
-          "effect-projections",
-          "event-projections",
-          "run-projections"
+        "tables": [
+          "effect_projections",
+          "event_projections",
+          "health_projection",
+          "operator_command_audit",
+          "run_projections",
+          "timeline_projections"
         ]
       },
-      "subscriptions": [],
+      "subscriptions": [
+        {
+          "event": "assets/artifactStored@v2",
+          "name": "project-artifact-v2"
+        },
+        {
+          "event": "execution/attemptFinished@v2",
+          "name": "project-attempt-v2"
+        },
+        {
+          "event": "definitions/definitionPublished@v1",
+          "name": "project-definition-v1"
+        },
+        {
+          "event": "effects/effectFinished@v3",
+          "name": "project-effect-finished-v3"
+        },
+        {
+          "event": "runs/effectRequested@v3",
+          "name": "project-effect-request-v3"
+        },
+        {
+          "event": "runs/runFinished@v3",
+          "name": "project-run-finished-v3"
+        },
+        {
+          "event": "runs/runStateChanged@v3",
+          "name": "project-run-state-v3"
+        },
+        {
+          "event": "assets/skillRevisionPinned@v2",
+          "name": "project-skill-v2"
+        },
+        {
+          "event": "intake/factoryEventAccepted@v2",
+          "name": "project-source-event-v2"
+        },
+        {
+          "event": "runs/stepRequested@v2",
+          "name": "project-step-v2"
+        }
+      ],
       "version": 1
     },
     {
@@ -22224,6 +23869,115 @@
     },
     {
       "inputSchema": {
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "commandKey": {
+            "type": "string"
+          },
+          "correlationToken": {
+            "type": "string"
+          },
+          "gateId": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "approve",
+              "reject",
+              "cancel",
+              "retry",
+              "pause",
+              "resume"
+            ]
+          },
+          "requestedAt": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "actor",
+          "commandKey",
+          "kind",
+          "requestedAt",
+          "runId"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "operations/applyOperatorCommand@v1",
+      "outputSchema": {
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "appliedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "commandKey": {
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "kind": {
+            "enum": [
+              "approve",
+              "reject",
+              "cancel",
+              "retry",
+              "pause",
+              "resume"
+            ]
+          },
+          "outcome": {
+            "enum": [
+              "requested",
+              "applied",
+              "rejected"
+            ]
+          },
+          "requestedAt": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "actor",
+          "appliedAt",
+          "commandKey",
+          "error",
+          "kind",
+          "outcome",
+          "requestedAt",
+          "runId"
+        ],
+        "type": "object"
+      },
+      "provider": "operations"
+    },
+    {
+      "inputSchema": {
         "properties": {},
         "required": [],
         "type": "object"
@@ -22253,6 +24007,187 @@
           "status"
         ],
         "type": "object"
+      },
+      "provider": "operations"
+    },
+    {
+      "inputSchema": {
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "operations/getHealthV2@v1",
+      "outputSchema": {
+        "properties": {
+          "adapters": {
+            "properties": {
+              "credentialsPresent": {
+                "type": "boolean"
+              },
+              "repositories": {
+                "additionalProperties": {
+                  "enum": [
+                    "reachable",
+                    "unreachable"
+                  ]
+                },
+                "type": "object"
+              }
+            },
+            "required": [
+              "credentialsPresent",
+              "repositories"
+            ],
+            "type": "object"
+          },
+          "checkedAt": {
+            "type": "string"
+          },
+          "pendingEffects": {
+            "type": "integer"
+          },
+          "pollLagMs": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "staleLocks": {
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "ready",
+              "degraded"
+            ]
+          },
+          "storage": {
+            "enum": [
+              "ready",
+              "unavailable"
+            ]
+          },
+          "unreconciledEffects": {
+            "type": "integer"
+          },
+          "worker": {
+            "enum": [
+              "ready",
+              "unavailable"
+            ]
+          },
+          "workflow": {
+            "enum": [
+              "ready",
+              "unavailable"
+            ]
+          }
+        },
+        "required": [
+          "adapters",
+          "checkedAt",
+          "pendingEffects",
+          "pollLagMs",
+          "staleLocks",
+          "status",
+          "storage",
+          "unreconciledEffects",
+          "worker",
+          "workflow"
+        ],
+        "type": "object"
+      },
+      "provider": "operations"
+    },
+    {
+      "inputSchema": {
+        "properties": {
+          "commandKey": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "commandKey"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "operations/getOperatorCommand@v1",
+      "outputSchema": {
+        "anyOf": [
+          {
+            "properties": {
+              "actor": {
+                "type": "string"
+              },
+              "appliedAt": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "commandKey": {
+                "type": "string"
+              },
+              "error": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "kind": {
+                "enum": [
+                  "approve",
+                  "reject",
+                  "cancel",
+                  "retry",
+                  "pause",
+                  "resume"
+                ]
+              },
+              "outcome": {
+                "enum": [
+                  "requested",
+                  "applied",
+                  "rejected"
+                ]
+              },
+              "requestedAt": {
+                "type": "string"
+              },
+              "runId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "actor",
+              "appliedAt",
+              "commandKey",
+              "error",
+              "kind",
+              "outcome",
+              "requestedAt",
+              "runId"
+            ],
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
       },
       "provider": "operations"
     },
@@ -22343,6 +24278,150 @@
         "type": "object"
       },
       "kind": "action",
+      "name": "operations/listEffectsV2@v1",
+      "outputSchema": {
+        "properties": {
+          "items": {
+            "items": {
+              "properties": {
+                "correlationToken": {
+                  "type": "string"
+                },
+                "effectId": {
+                  "type": "string"
+                },
+                "externalId": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "externalRevision": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "externalUrl": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "failureCategory": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "finishedAt": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "idempotencyKey": {
+                  "type": "string"
+                },
+                "outcome": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "recordedAt": {
+                  "type": "string"
+                },
+                "runId": {
+                  "type": "string"
+                },
+                "status": {
+                  "enum": [
+                    "queued",
+                    "finished"
+                  ]
+                }
+              },
+              "required": [
+                "correlationToken",
+                "effectId",
+                "externalId",
+                "externalRevision",
+                "externalUrl",
+                "failureCategory",
+                "finishedAt",
+                "idempotencyKey",
+                "outcome",
+                "recordedAt",
+                "runId",
+                "status"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "type": "object"
+      },
+      "provider": "operations"
+    },
+    {
+      "inputSchema": {
+        "properties": {
+          "after": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "runId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "limit"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
       "name": "operations/listEvents@v1",
       "outputSchema": {
         "items": {
@@ -22367,6 +24446,86 @@
           "type": "object"
         },
         "type": "array"
+      },
+      "provider": "operations"
+    },
+    {
+      "inputSchema": {
+        "properties": {
+          "after": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "runId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "limit"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "operations/listEventsV2@v1",
+      "outputSchema": {
+        "properties": {
+          "items": {
+            "items": {
+              "properties": {
+                "eventId": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "occurredAt": {
+                  "type": "string"
+                },
+                "payload": {},
+                "runId": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "sequence": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "eventId",
+                "kind",
+                "occurredAt",
+                "payload",
+                "runId",
+                "sequence"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "type": "object"
       },
       "provider": "operations"
     },
@@ -22465,6 +24624,560 @@
     {
       "inputSchema": {
         "properties": {
+          "after": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "limit"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "operations/listRunsV2@v1",
+      "outputSchema": {
+        "properties": {
+          "items": {
+            "items": {
+              "properties": {
+                "currentAttemptId": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "currentCorrelationToken": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "currentEffectKey": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "currentGateId": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "currentGateStatus": {
+                  "anyOf": [
+                    {
+                      "enum": [
+                        "pending",
+                        "approved",
+                        "rejected"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "currentStepId": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "factoryEventId": {
+                  "type": "string"
+                },
+                "failureCategory": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "finishedAt": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "flowId": {
+                  "type": "string"
+                },
+                "leaseExpiresAt": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "leaseOwner": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "outcome": {
+                  "type": "string"
+                },
+                "revisions": {
+                  "properties": {
+                    "agentProfiles": {
+                      "properties": {
+                        "current": {
+                          "additionalProperties": {
+                            "type": "string"
+                          },
+                          "type": "object"
+                        },
+                        "drift": {
+                          "type": "boolean"
+                        },
+                        "pinned": {
+                          "additionalProperties": {
+                            "type": "string"
+                          },
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "current",
+                        "drift",
+                        "pinned"
+                      ],
+                      "type": "object"
+                    },
+                    "definition": {
+                      "properties": {
+                        "current": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "drift": {
+                          "type": "boolean"
+                        },
+                        "pinned": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "current",
+                        "drift",
+                        "pinned"
+                      ],
+                      "type": "object"
+                    },
+                    "flow": {
+                      "properties": {
+                        "current": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "drift": {
+                          "type": "boolean"
+                        },
+                        "pinned": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "current",
+                        "drift",
+                        "pinned"
+                      ],
+                      "type": "object"
+                    },
+                    "skills": {
+                      "properties": {
+                        "current": {
+                          "additionalProperties": {
+                            "type": "string"
+                          },
+                          "type": "object"
+                        },
+                        "drift": {
+                          "type": "boolean"
+                        },
+                        "pinned": {
+                          "additionalProperties": {
+                            "type": "string"
+                          },
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "current",
+                        "drift",
+                        "pinned"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "agentProfiles",
+                    "definition",
+                    "flow",
+                    "skills"
+                  ],
+                  "type": "object"
+                },
+                "runId": {
+                  "type": "string"
+                },
+                "sourceEvent": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "actor": {
+                          "type": "string"
+                        },
+                        "correlationId": {
+                          "type": "string"
+                        },
+                        "deliveryId": {
+                          "type": "string"
+                        },
+                        "eventType": {
+                          "type": "string"
+                        },
+                        "observedAt": {
+                          "type": "string"
+                        },
+                        "occurredAt": {
+                          "type": "string"
+                        },
+                        "repository": {
+                          "type": "string"
+                        },
+                        "sourceId": {
+                          "type": "string"
+                        },
+                        "sourceRevision": {
+                          "type": "string"
+                        },
+                        "subject": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "actor",
+                        "correlationId",
+                        "deliveryId",
+                        "eventType",
+                        "observedAt",
+                        "occurredAt",
+                        "repository",
+                        "sourceId",
+                        "sourceRevision",
+                        "subject"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "startedAt": {
+                  "type": "string"
+                },
+                "stateId": {
+                  "type": "string"
+                },
+                "status": {
+                  "enum": [
+                    "queued",
+                    "running",
+                    "retrying",
+                    "waiting",
+                    "paused",
+                    "succeeded",
+                    "failed",
+                    "cancelled"
+                  ]
+                },
+                "terminal": {
+                  "type": "boolean"
+                },
+                "updatedAt": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "currentAttemptId",
+                "currentCorrelationToken",
+                "currentEffectKey",
+                "currentGateId",
+                "currentGateStatus",
+                "currentStepId",
+                "failureCategory",
+                "factoryEventId",
+                "finishedAt",
+                "flowId",
+                "leaseExpiresAt",
+                "leaseOwner",
+                "outcome",
+                "revisions",
+                "runId",
+                "sourceEvent",
+                "startedAt",
+                "stateId",
+                "status",
+                "terminal",
+                "updatedAt"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "type": "object"
+      },
+      "provider": "operations"
+    },
+    {
+      "inputSchema": {
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "operations/rebuildProjections@v1",
+      "outputSchema": {
+        "properties": {
+          "effects": {
+            "type": "integer"
+          },
+          "events": {
+            "type": "integer"
+          },
+          "runs": {
+            "type": "integer"
+          },
+          "timeline": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "effects",
+          "events",
+          "runs",
+          "timeline"
+        ],
+        "type": "object"
+      },
+      "provider": "operations"
+    },
+    {
+      "inputSchema": {
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "request": {
+            "properties": {
+              "actor": {
+                "type": "string"
+              },
+              "commandKey": {
+                "type": "string"
+              },
+              "correlationToken": {
+                "type": "string"
+              },
+              "gateId": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "approve",
+                  "reject",
+                  "cancel",
+                  "retry",
+                  "pause",
+                  "resume"
+                ]
+              },
+              "requestedAt": {
+                "type": "string"
+              },
+              "runId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "actor",
+              "commandKey",
+              "kind",
+              "requestedAt",
+              "runId"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "error",
+          "request"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "operations/recordOperatorCommandRejection@v1",
+      "outputSchema": {
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "appliedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "commandKey": {
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "kind": {
+            "enum": [
+              "approve",
+              "reject",
+              "cancel",
+              "retry",
+              "pause",
+              "resume"
+            ]
+          },
+          "outcome": {
+            "enum": [
+              "requested",
+              "applied",
+              "rejected"
+            ]
+          },
+          "requestedAt": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "actor",
+          "appliedAt",
+          "commandKey",
+          "error",
+          "kind",
+          "outcome",
+          "requestedAt",
+          "runId"
+        ],
+        "type": "object"
+      },
+      "provider": "operations"
+    },
+    {
+      "inputSchema": {
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "operations/refreshWorkerHeartbeat@v1",
+      "outputSchema": {
+        "properties": {
+          "updatedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "provider": "operations"
+    },
+    {
+      "inputSchema": {
+        "properties": {
           "runId": {
             "type": "string"
           }
@@ -22545,6 +25258,405 @@
               "stateId",
               "status",
               "workflowVersionDigest"
+            ],
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "provider": "operations"
+    },
+    {
+      "inputSchema": {
+        "properties": {
+          "runId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "runId"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "operations/showRunV2@v1",
+      "outputSchema": {
+        "anyOf": [
+          {
+            "properties": {
+              "run": {
+                "properties": {
+                  "currentAttemptId": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "currentCorrelationToken": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "currentEffectKey": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "currentGateId": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "currentGateStatus": {
+                    "anyOf": [
+                      {
+                        "enum": [
+                          "pending",
+                          "approved",
+                          "rejected"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "currentStepId": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "factoryEventId": {
+                    "type": "string"
+                  },
+                  "failureCategory": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "finishedAt": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "flowId": {
+                    "type": "string"
+                  },
+                  "leaseExpiresAt": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "leaseOwner": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "outcome": {
+                    "type": "string"
+                  },
+                  "revisions": {
+                    "properties": {
+                      "agentProfiles": {
+                        "properties": {
+                          "current": {
+                            "additionalProperties": {
+                              "type": "string"
+                            },
+                            "type": "object"
+                          },
+                          "drift": {
+                            "type": "boolean"
+                          },
+                          "pinned": {
+                            "additionalProperties": {
+                              "type": "string"
+                            },
+                            "type": "object"
+                          }
+                        },
+                        "required": [
+                          "current",
+                          "drift",
+                          "pinned"
+                        ],
+                        "type": "object"
+                      },
+                      "definition": {
+                        "properties": {
+                          "current": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "drift": {
+                            "type": "boolean"
+                          },
+                          "pinned": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "current",
+                          "drift",
+                          "pinned"
+                        ],
+                        "type": "object"
+                      },
+                      "flow": {
+                        "properties": {
+                          "current": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "drift": {
+                            "type": "boolean"
+                          },
+                          "pinned": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "current",
+                          "drift",
+                          "pinned"
+                        ],
+                        "type": "object"
+                      },
+                      "skills": {
+                        "properties": {
+                          "current": {
+                            "additionalProperties": {
+                              "type": "string"
+                            },
+                            "type": "object"
+                          },
+                          "drift": {
+                            "type": "boolean"
+                          },
+                          "pinned": {
+                            "additionalProperties": {
+                              "type": "string"
+                            },
+                            "type": "object"
+                          }
+                        },
+                        "required": [
+                          "current",
+                          "drift",
+                          "pinned"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "agentProfiles",
+                      "definition",
+                      "flow",
+                      "skills"
+                    ],
+                    "type": "object"
+                  },
+                  "runId": {
+                    "type": "string"
+                  },
+                  "sourceEvent": {
+                    "anyOf": [
+                      {
+                        "properties": {
+                          "actor": {
+                            "type": "string"
+                          },
+                          "correlationId": {
+                            "type": "string"
+                          },
+                          "deliveryId": {
+                            "type": "string"
+                          },
+                          "eventType": {
+                            "type": "string"
+                          },
+                          "observedAt": {
+                            "type": "string"
+                          },
+                          "occurredAt": {
+                            "type": "string"
+                          },
+                          "repository": {
+                            "type": "string"
+                          },
+                          "sourceId": {
+                            "type": "string"
+                          },
+                          "sourceRevision": {
+                            "type": "string"
+                          },
+                          "subject": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "actor",
+                          "correlationId",
+                          "deliveryId",
+                          "eventType",
+                          "observedAt",
+                          "occurredAt",
+                          "repository",
+                          "sourceId",
+                          "sourceRevision",
+                          "subject"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "startedAt": {
+                    "type": "string"
+                  },
+                  "stateId": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "enum": [
+                      "queued",
+                      "running",
+                      "retrying",
+                      "waiting",
+                      "paused",
+                      "succeeded",
+                      "failed",
+                      "cancelled"
+                    ]
+                  },
+                  "terminal": {
+                    "type": "boolean"
+                  },
+                  "updatedAt": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "currentAttemptId",
+                  "currentCorrelationToken",
+                  "currentEffectKey",
+                  "currentGateId",
+                  "currentGateStatus",
+                  "currentStepId",
+                  "failureCategory",
+                  "factoryEventId",
+                  "finishedAt",
+                  "flowId",
+                  "leaseExpiresAt",
+                  "leaseOwner",
+                  "outcome",
+                  "revisions",
+                  "runId",
+                  "sourceEvent",
+                  "startedAt",
+                  "stateId",
+                  "status",
+                  "terminal",
+                  "updatedAt"
+                ],
+                "type": "object"
+              },
+              "timeline": {
+                "items": {
+                  "properties": {
+                    "eventId": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "type": "string"
+                    },
+                    "occurredAt": {
+                      "type": "string"
+                    },
+                    "payload": {},
+                    "runId": {
+                      "type": "string"
+                    },
+                    "sequence": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "eventId",
+                    "kind",
+                    "occurredAt",
+                    "payload",
+                    "runId",
+                    "sequence"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "run",
+              "timeline"
             ],
             "type": "object"
           },

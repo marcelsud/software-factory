@@ -78,11 +78,31 @@ intake v1
   event: intake/factoryEventAccepted@v2
 operations v1
   depends: assets, definitions, effects, execution, intake, runs
+  call: operations/applyOperatorCommand@v1
   call: operations/getHealth@v1
+  call: operations/getHealthV2@v1
+  call: operations/getOperatorCommand@v1
   call: operations/listEffects@v1
+  call: operations/listEffectsV2@v1
   call: operations/listEvents@v1
+  call: operations/listEventsV2@v1
   call: operations/listRuns@v1
+  call: operations/listRunsV2@v1
+  call: operations/rebuildProjections@v1
+  call: operations/recordOperatorCommandRejection@v1
+  call: operations/refreshWorkerHeartbeat@v1
   call: operations/showRun@v1
+  call: operations/showRunV2@v1
+  consumes: assets/artifactStored@v2 as project-artifact-v2
+  consumes: execution/attemptFinished@v2 as project-attempt-v2
+  consumes: definitions/definitionPublished@v1 as project-definition-v1
+  consumes: effects/effectFinished@v3 as project-effect-finished-v3
+  consumes: runs/effectRequested@v3 as project-effect-request-v3
+  consumes: runs/runFinished@v3 as project-run-finished-v3
+  consumes: runs/runStateChanged@v3 as project-run-state-v3
+  consumes: assets/skillRevisionPinned@v2 as project-skill-v2
+  consumes: intake/factoryEventAccepted@v2 as project-source-event-v2
+  consumes: runs/stepRequested@v2 as project-step-v2
 runs v1
   depends: assets, definitions, effects, execution, intake
   call: runs/applyOperatorCommand@v1

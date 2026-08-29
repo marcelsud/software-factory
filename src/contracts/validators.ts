@@ -1062,6 +1062,168 @@ export const eventRecord = v.object({
   occurredAt: isoTimestamp,
   payload: v.unknown(),
 });
+
+export const operationsRevision = v.object({
+  current: v.string().nullable(),
+  drift: v.boolean(),
+  pinned: v.string(),
+});
+
+export const operationsRevisionMap = v.object({
+  current: v.record(v.string()),
+  drift: v.boolean(),
+  pinned: v.record(v.string()),
+});
+
+export const operationsSourceEvent = v
+  .object({
+    actor: v.string(),
+    correlationId: identifier,
+    deliveryId: identifier,
+    eventType: v.string(),
+    observedAt: isoTimestamp,
+    occurredAt: isoTimestamp,
+    repository: v.string(),
+    sourceId: identifier,
+    sourceRevision: v.string(),
+    subject: v.string(),
+  })
+  .nullable();
+
+export const operationsRun = v.object({
+  currentAttemptId: identifier.nullable(),
+  currentCorrelationToken: identifier.nullable(),
+  currentEffectKey: identifier.nullable(),
+  currentGateId: identifier.nullable(),
+  currentGateStatus: v.enum(["pending", "approved", "rejected"]).nullable(),
+  currentStepId: identifier.nullable(),
+  failureCategory: v.string().nullable(),
+  factoryEventId: identifier,
+  finishedAt: isoTimestamp.nullable(),
+  flowId: identifier,
+  leaseExpiresAt: isoTimestamp.nullable(),
+  leaseOwner: v.string().nullable(),
+  outcome: v.string(),
+  revisions: v.object({
+    agentProfiles: operationsRevisionMap,
+    definition: operationsRevision,
+    flow: operationsRevision,
+    skills: operationsRevisionMap,
+  }),
+  runId: identifier,
+  sourceEvent: operationsSourceEvent,
+  startedAt: isoTimestamp,
+  stateId: identifier,
+  status: v.enum([
+    "queued",
+    "running",
+    "retrying",
+    "waiting",
+    "paused",
+    "succeeded",
+    "failed",
+    "cancelled",
+  ]),
+  terminal: v.boolean(),
+  updatedAt: isoTimestamp,
+});
+
+export const operationsTimelineEntry = v.object({
+  eventId: identifier,
+  kind: v.string(),
+  occurredAt: isoTimestamp,
+  payload: v.unknown(),
+  runId: identifier,
+  sequence: v.integer(),
+});
+
+export const operationsRunDetails = v.object({
+  run: operationsRun,
+  timeline: operationsTimelineEntry.array(),
+});
+
+export const operationsEvent = v.object({
+  eventId: identifier,
+  kind: v.string(),
+  occurredAt: isoTimestamp,
+  payload: v.unknown(),
+  runId: identifier.nullable(),
+  sequence: v.integer(),
+});
+
+export const operationsEffect = v.object({
+  correlationToken: identifier,
+  effectId: identifier,
+  externalId: v.string().nullable(),
+  externalRevision: v.string().nullable(),
+  externalUrl: v.string().nullable(),
+  failureCategory: v.string().nullable(),
+  finishedAt: isoTimestamp.nullable(),
+  idempotencyKey: identifier,
+  outcome: v.string().nullable(),
+  recordedAt: isoTimestamp,
+  runId: identifier,
+  status: v.enum(["queued", "finished"]),
+});
+
+export const operationsRunPage = v.object({
+  items: operationsRun.array(),
+  nextCursor: v.string().nullable(),
+});
+
+export const operationsEventPage = v.object({
+  items: operationsEvent.array(),
+  nextCursor: v.string().nullable(),
+});
+
+export const operationsEffectPage = v.object({
+  items: operationsEffect.array(),
+  nextCursor: v.string().nullable(),
+});
+
+export const operationsHealth = v.object({
+  adapters: v.object({
+    credentialsPresent: v.boolean(),
+    repositories: v.record(v.enum(["reachable", "unreachable"])),
+  }),
+  checkedAt: isoTimestamp,
+  pendingEffects: v.integer(),
+  pollLagMs: v.integer().nullable(),
+  staleLocks: v.integer(),
+  status: v.enum(["ready", "degraded"]),
+  storage: v.enum(["ready", "unavailable"]),
+  unreconciledEffects: v.integer(),
+  worker: v.enum(["ready", "unavailable"]),
+  workflow: v.enum(["ready", "unavailable"]),
+});
+
+export const operatorCommandRequest = v.object({
+  actor: v.string(),
+  commandKey: identifier,
+  correlationToken: identifier.optional(),
+  gateId: identifier.optional(),
+  kind: v.enum(["approve", "reject", "cancel", "retry", "pause", "resume"]),
+  requestedAt: isoTimestamp,
+  runId: identifier,
+});
+
+export const operatorCommandAudit = v.object({
+  actor: v.string(),
+  appliedAt: isoTimestamp.nullable(),
+  commandKey: identifier,
+  error: v.string().nullable(),
+  kind: v.enum(["approve", "reject", "cancel", "retry", "pause", "resume"]),
+  outcome: v.enum(["requested", "applied", "rejected"]),
+  requestedAt: isoTimestamp,
+  runId: identifier,
+});
+
+export const operationsRebuildResult = v.object({
+  effects: v.integer(),
+  events: v.integer(),
+  runs: v.integer(),
+  timeline: v.integer(),
+});
 export type PinnedSkillBundle = Infer<typeof pinnedSkillBundle>;
 export type PinnedSkillBundleV2 = Infer<typeof pinnedSkillBundleV2>;
 export type SkillResultSchema = Infer<typeof skillResultSchema>;
@@ -1108,3 +1270,15 @@ export type RunFinishedV3 = Infer<typeof runFinishedV3>;
 export type AcceptedFactoryEvent = Infer<typeof acceptedFactoryEvent>;
 export type AttemptOutcome = Infer<typeof attemptOutcome>;
 export type EffectOutcome = Infer<typeof effectOutcome>;
+export type OperationsRun = Infer<typeof operationsRun>;
+export type OperationsRunDetails = Infer<typeof operationsRunDetails>;
+export type OperationsTimelineEntry = Infer<typeof operationsTimelineEntry>;
+export type OperationsEvent = Infer<typeof operationsEvent>;
+export type OperationsEffect = Infer<typeof operationsEffect>;
+export type OperationsRunPage = Infer<typeof operationsRunPage>;
+export type OperationsEventPage = Infer<typeof operationsEventPage>;
+export type OperationsEffectPage = Infer<typeof operationsEffectPage>;
+export type OperationsHealth = Infer<typeof operationsHealth>;
+export type OperatorCommandRequest = Infer<typeof operatorCommandRequest>;
+export type OperatorCommandAudit = Infer<typeof operatorCommandAudit>;
+export type OperationsRebuildResult = Infer<typeof operationsRebuildResult>;
