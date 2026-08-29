@@ -33,6 +33,16 @@ const stepRequestV2 = v.object({
   skillDigests: v.record(v.string()),
   stepId: v.string(),
 });
+const stepRequestV3 = v.object({
+  agentProfileDigest: v.string(),
+  attemptId: v.string(),
+  correlationToken: v.string(),
+  inputArtifactDigests: v.array(v.string()),
+  runId: v.string(),
+  skillDigests: v.record(v.string()),
+  skillId: v.string(),
+  stepId: v.string(),
+});
 
 const runCorrelation = v.object({
   attemptId: v.string().optional(),
@@ -232,6 +242,7 @@ const events = {
   runStateChangedV4: { name: "runStateChanged", payload: runV4, version: 4 },
   stepRequestedV1: { name: "stepRequested", payload: stepRequest, version: 1 },
   stepRequestedV2: { name: "stepRequested", payload: stepRequestV2, version: 2 },
+  stepRequestedV3: { name: "stepRequested", payload: stepRequestV3, version: 3 },
   effectRequestedV1: { name: "effectRequested", payload: effectIntent, version: 1 },
   effectRequestedV2: { name: "effectRequested", payload: effectIntentV2, version: 2 },
   effectRequestedV3: { name: "effectRequested", payload: effectIntentV3, version: 3 },

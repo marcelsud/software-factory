@@ -11,8 +11,12 @@ import {
   operationsRebuildResult,
   operationsRunDetails,
   operationsRunPage,
+  operationsTelemetrySnapshot,
   operatorCommandAudit,
   operatorCommandRequest,
+  replayBundle,
+  replayBundleEnvelope,
+  replayExportRequest,
   run,
 } from "../../contracts/index.ts";
 import type { OperationsDatabase } from "../../storage/operations-database.ts";
@@ -121,6 +125,36 @@ const calls = {
     output: v.object({ updatedAt: v.string() }),
     errors: ["module_unavailable"],
     guarantees: ["refreshes only the operations-owned worker liveness heartbeat"],
+  },
+  getTelemetrySnapshot: {
+    input: v.object({
+      checkedAt: v.string(),
+      pollLagMs: v.integer().nullable().optional(),
+      stuckAfterMs: v.integer(),
+    }),
+    output: operationsTelemetrySnapshot,
+    errors: ["module_unavailable", "invalid_threshold"],
+    guarantees: [
+      "projects product outcomes, infrastructure failures, stuck states, and correlation gaps from durable event facts",
+    ],
+  },
+  exportReplayBundle: {
+    input: replayExportRequest,
+    output: replayBundleEnvelope,
+    errors: ["module_unavailable", "run_not_found", "replay_export_invalid"],
+    guarantees: ["stores a bounded redacted replay bundle through assets-owned artifact storage"],
+  },
+  importReplayBundle: {
+    input: v.object({ bundle: replayBundle }),
+    output: replayBundleEnvelope,
+    errors: ["module_unavailable", "digest_mismatch", "replay_bundle_invalid"],
+    guarantees: ["validates and stores imported data-only bundles through assets-owned storage"],
+  },
+  getReplayBundle: {
+    input: v.object({ digest: v.string() }),
+    output: replayBundleEnvelope.nullable(),
+    errors: ["module_unavailable", "replay_bundle_invalid"],
+    guarantees: ["reads only public replay bytes through the assets module call"],
   },
   rebuildProjections: {
     input: v.object({}),

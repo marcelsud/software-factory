@@ -1143,7 +1143,15 @@ describe("leaf-02 domain ledger", () => {
     for (const engine of ["sqlite", "postgres"] as const) {
       const names = first[engine].map((migration) => migration.name);
       expect(names.filter((name) => name.endsWith(":001_ledger"))).toHaveLength(6);
-      expect(names.filter((name) => name.includes(":002_"))).toHaveLength(6);
+      expect(names.filter((name) => name.includes(":002_"))).toEqual([
+        "assets:002_artifact_metadata",
+        "definitions:002_compiled_metadata",
+        "effects:002_receipts",
+        "execution:002_workspace_results",
+        "intake:002_event_ledger",
+        "runs:002_audit_and_gates",
+        "operations:002_replay_step_skills",
+      ]);
       for (const owner of ["assets", "definitions", "effects", "execution", "intake", "runs"]) {
         expect(names.indexOf(`${owner}:001_ledger`)).toBeLessThan(
           names.findIndex((name) => name.startsWith(`${owner}:002_`)),

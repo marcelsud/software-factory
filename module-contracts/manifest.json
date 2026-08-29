@@ -89,6 +89,12 @@
       "event": "runs/stepRequested@v2",
       "publisher": "runs",
       "subscription": "project-step-v2"
+    },
+    {
+      "consumer": "operations",
+      "event": "runs/stepRequested@v3",
+      "publisher": "runs",
+      "subscription": "project-step-v3"
     }
   ],
   "modules": [
@@ -206,6 +212,119 @@
             "type": "object"
           },
           "name": "getArtifactV2",
+          "outputSchema": {
+            "anyOf": [
+              {
+                "properties": {
+                  "artifact": {
+                    "properties": {
+                      "attemptId": {
+                        "type": "string"
+                      },
+                      "classification": {
+                        "enum": [
+                          "public",
+                          "private"
+                        ]
+                      },
+                      "createdAt": {
+                        "type": "string"
+                      },
+                      "digest": {
+                        "type": "string"
+                      },
+                      "kind": {
+                        "enum": [
+                          "result.json",
+                          "report.md",
+                          "log",
+                          "patch",
+                          "test-result",
+                          "reproduction",
+                          "metadata"
+                        ]
+                      },
+                      "mediaType": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "redaction": {
+                        "enum": [
+                          "not-required",
+                          "raw-private",
+                          "redacted-public"
+                        ]
+                      },
+                      "retention": {
+                        "enum": [
+                          "ephemeral",
+                          "retained"
+                        ]
+                      },
+                      "runId": {
+                        "type": "string"
+                      },
+                      "size": {
+                        "type": "integer"
+                      },
+                      "sourceDigest": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "classification",
+                      "createdAt",
+                      "digest",
+                      "kind",
+                      "mediaType",
+                      "name",
+                      "redaction",
+                      "retention",
+                      "runId",
+                      "size"
+                    ],
+                    "type": "object"
+                  },
+                  "contentBase64": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "artifact",
+                  "contentBase64"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "version": 1
+        },
+        {
+          "errors": [
+            "module_unavailable",
+            "artifact_corrupt"
+          ],
+          "guarantees": [
+            "returns bytes only for an explicitly public immutable artifact"
+          ],
+          "id": "assets/getPublicArtifactV2@v1",
+          "inputSchema": {
+            "properties": {
+              "digest": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "digest"
+            ],
+            "type": "object"
+          },
+          "name": "getPublicArtifactV2",
           "outputSchema": {
             "anyOf": [
               {
@@ -10593,6 +10712,447 @@
         },
         {
           "errors": [
+            "module_unavailable",
+            "run_not_found",
+            "replay_export_invalid"
+          ],
+          "guarantees": [
+            "stores a bounded redacted replay bundle through assets-owned artifact storage"
+          ],
+          "id": "operations/exportReplayBundle@v1",
+          "inputSchema": {
+            "properties": {
+              "capabilities": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "createdAt": {
+                "type": "string"
+              },
+              "fixtures": {
+                "properties": {
+                  "agentResults": {
+                    "items": {},
+                    "type": "array"
+                  },
+                  "clock": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "effectResults": {
+                    "items": {},
+                    "type": "array"
+                  },
+                  "githubReads": {
+                    "items": {},
+                    "type": "array"
+                  },
+                  "ids": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "agentResults",
+                  "clock",
+                  "effectResults",
+                  "githubReads",
+                  "ids"
+                ],
+                "type": "object"
+              },
+              "redactionPolicy": {
+                "properties": {
+                  "maxBytes": {
+                    "type": "integer"
+                  },
+                  "maxItems": {
+                    "type": "integer"
+                  },
+                  "maxStringBytes": {
+                    "type": "integer"
+                  },
+                  "privateRetention": {
+                    "enum": [
+                      "ephemeral",
+                      "retained"
+                    ]
+                  },
+                  "secretMarkers": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "maxBytes",
+                  "maxItems",
+                  "maxStringBytes",
+                  "privateRetention",
+                  "secretMarkers"
+                ],
+                "type": "object"
+              },
+              "runId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "capabilities",
+              "createdAt",
+              "fixtures",
+              "redactionPolicy",
+              "runId"
+            ],
+            "type": "object"
+          },
+          "name": "exportReplayBundle",
+          "outputSchema": {
+            "properties": {
+              "artifactDigest": {
+                "type": "string"
+              },
+              "bundle": {
+                "properties": {
+                  "artifactDigests": {
+                    "items": {
+                      "properties": {
+                        "classification": {
+                          "const": "public"
+                        },
+                        "contentBase64": {
+                          "type": "string"
+                        },
+                        "digest": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "size": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "classification",
+                        "contentBase64",
+                        "digest",
+                        "name",
+                        "size"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "bundleDigest": {
+                    "type": "string"
+                  },
+                  "capabilities": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "createdAt": {
+                    "type": "string"
+                  },
+                  "events": {
+                    "items": {
+                      "properties": {
+                        "eventId": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "type": "string"
+                        },
+                        "occurredAt": {
+                          "type": "string"
+                        },
+                        "payload": {},
+                        "runId": {
+                          "type": "string"
+                        },
+                        "sequence": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "eventId",
+                        "kind",
+                        "occurredAt",
+                        "payload",
+                        "runId",
+                        "sequence"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "fixtures": {
+                    "properties": {
+                      "agentResults": {
+                        "items": {},
+                        "type": "array"
+                      },
+                      "clock": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "effectResults": {
+                        "items": {},
+                        "type": "array"
+                      },
+                      "githubReads": {
+                        "items": {},
+                        "type": "array"
+                      },
+                      "ids": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      }
+                    },
+                    "required": [
+                      "agentResults",
+                      "clock",
+                      "effectResults",
+                      "githubReads",
+                      "ids"
+                    ],
+                    "type": "object"
+                  },
+                  "infrastructure": {
+                    "const": "fake"
+                  },
+                  "pins": {
+                    "properties": {
+                      "agentProfileDigests": {
+                        "additionalProperties": {
+                          "type": "string"
+                        },
+                        "type": "object"
+                      },
+                      "definitionDigest": {
+                        "type": "string"
+                      },
+                      "flowDigest": {
+                        "type": "string"
+                      },
+                      "moduleManifestDigest": {
+                        "type": "string"
+                      },
+                      "skillDigests": {
+                        "additionalProperties": {
+                          "type": "string"
+                        },
+                        "type": "object"
+                      },
+                      "workflowVersionDigest": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "agentProfileDigests",
+                      "definitionDigest",
+                      "flowDigest",
+                      "moduleManifestDigest",
+                      "skillDigests",
+                      "workflowVersionDigest"
+                    ],
+                    "type": "object"
+                  },
+                  "redactionPolicy": {
+                    "properties": {
+                      "maxBytes": {
+                        "type": "integer"
+                      },
+                      "maxItems": {
+                        "type": "integer"
+                      },
+                      "maxStringBytes": {
+                        "type": "integer"
+                      },
+                      "privateRetention": {
+                        "enum": [
+                          "ephemeral",
+                          "retained"
+                        ]
+                      },
+                      "secretMarkers": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      }
+                    },
+                    "required": [
+                      "maxBytes",
+                      "maxItems",
+                      "maxStringBytes",
+                      "privateRetention",
+                      "secretMarkers"
+                    ],
+                    "type": "object"
+                  },
+                  "resultDocuments": {
+                    "items": {
+                      "properties": {
+                        "artifactDigests": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "result": {},
+                        "runId": {
+                          "type": "string"
+                        },
+                        "skillDigest": {
+                          "type": "string"
+                        },
+                        "skillId": {
+                          "type": "string"
+                        },
+                        "stepId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "artifactDigests",
+                        "result",
+                        "runId",
+                        "skillDigest",
+                        "skillId",
+                        "stepId"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "runId": {
+                    "type": "string"
+                  },
+                  "schemaVersion": {
+                    "const": 1
+                  },
+                  "transitions": {
+                    "items": {
+                      "properties": {
+                        "correlationToken": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "effectKey": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "sequence": {
+                          "type": "integer"
+                        },
+                        "stateId": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string"
+                        },
+                        "stepId": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "correlationToken",
+                        "effectKey",
+                        "sequence",
+                        "stateId",
+                        "status",
+                        "stepId"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "truncation": {
+                    "properties": {
+                      "bytes": {
+                        "type": "integer"
+                      },
+                      "items": {
+                        "type": "integer"
+                      },
+                      "strings": {
+                        "type": "integer"
+                      },
+                      "truncated": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "bytes",
+                      "items",
+                      "strings",
+                      "truncated"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "artifactDigests",
+                  "bundleDigest",
+                  "capabilities",
+                  "createdAt",
+                  "events",
+                  "fixtures",
+                  "infrastructure",
+                  "pins",
+                  "redactionPolicy",
+                  "resultDocuments",
+                  "runId",
+                  "schemaVersion",
+                  "transitions",
+                  "truncation"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "artifactDigest",
+              "bundle"
+            ],
+            "type": "object"
+          },
+          "version": 1
+        },
+        {
+          "errors": [
             "module_unavailable"
           ],
           "guarantees": [
@@ -10821,6 +11381,1280 @@
                 "type": "null"
               }
             ]
+          },
+          "version": 1
+        },
+        {
+          "errors": [
+            "module_unavailable",
+            "replay_bundle_invalid"
+          ],
+          "guarantees": [
+            "reads only public replay bytes through the assets module call"
+          ],
+          "id": "operations/getReplayBundle@v1",
+          "inputSchema": {
+            "properties": {
+              "digest": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "digest"
+            ],
+            "type": "object"
+          },
+          "name": "getReplayBundle",
+          "outputSchema": {
+            "anyOf": [
+              {
+                "properties": {
+                  "artifactDigest": {
+                    "type": "string"
+                  },
+                  "bundle": {
+                    "properties": {
+                      "artifactDigests": {
+                        "items": {
+                          "properties": {
+                            "classification": {
+                              "const": "public"
+                            },
+                            "contentBase64": {
+                              "type": "string"
+                            },
+                            "digest": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "size": {
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "classification",
+                            "contentBase64",
+                            "digest",
+                            "name",
+                            "size"
+                          ],
+                          "type": "object"
+                        },
+                        "type": "array"
+                      },
+                      "bundleDigest": {
+                        "type": "string"
+                      },
+                      "capabilities": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "createdAt": {
+                        "type": "string"
+                      },
+                      "events": {
+                        "items": {
+                          "properties": {
+                            "eventId": {
+                              "type": "string"
+                            },
+                            "kind": {
+                              "type": "string"
+                            },
+                            "occurredAt": {
+                              "type": "string"
+                            },
+                            "payload": {},
+                            "runId": {
+                              "type": "string"
+                            },
+                            "sequence": {
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "eventId",
+                            "kind",
+                            "occurredAt",
+                            "payload",
+                            "runId",
+                            "sequence"
+                          ],
+                          "type": "object"
+                        },
+                        "type": "array"
+                      },
+                      "fixtures": {
+                        "properties": {
+                          "agentResults": {
+                            "items": {},
+                            "type": "array"
+                          },
+                          "clock": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "effectResults": {
+                            "items": {},
+                            "type": "array"
+                          },
+                          "githubReads": {
+                            "items": {},
+                            "type": "array"
+                          },
+                          "ids": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          }
+                        },
+                        "required": [
+                          "agentResults",
+                          "clock",
+                          "effectResults",
+                          "githubReads",
+                          "ids"
+                        ],
+                        "type": "object"
+                      },
+                      "infrastructure": {
+                        "const": "fake"
+                      },
+                      "pins": {
+                        "properties": {
+                          "agentProfileDigests": {
+                            "additionalProperties": {
+                              "type": "string"
+                            },
+                            "type": "object"
+                          },
+                          "definitionDigest": {
+                            "type": "string"
+                          },
+                          "flowDigest": {
+                            "type": "string"
+                          },
+                          "moduleManifestDigest": {
+                            "type": "string"
+                          },
+                          "skillDigests": {
+                            "additionalProperties": {
+                              "type": "string"
+                            },
+                            "type": "object"
+                          },
+                          "workflowVersionDigest": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "agentProfileDigests",
+                          "definitionDigest",
+                          "flowDigest",
+                          "moduleManifestDigest",
+                          "skillDigests",
+                          "workflowVersionDigest"
+                        ],
+                        "type": "object"
+                      },
+                      "redactionPolicy": {
+                        "properties": {
+                          "maxBytes": {
+                            "type": "integer"
+                          },
+                          "maxItems": {
+                            "type": "integer"
+                          },
+                          "maxStringBytes": {
+                            "type": "integer"
+                          },
+                          "privateRetention": {
+                            "enum": [
+                              "ephemeral",
+                              "retained"
+                            ]
+                          },
+                          "secretMarkers": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          }
+                        },
+                        "required": [
+                          "maxBytes",
+                          "maxItems",
+                          "maxStringBytes",
+                          "privateRetention",
+                          "secretMarkers"
+                        ],
+                        "type": "object"
+                      },
+                      "resultDocuments": {
+                        "items": {
+                          "properties": {
+                            "artifactDigests": {
+                              "items": {
+                                "type": "string"
+                              },
+                              "type": "array"
+                            },
+                            "result": {},
+                            "runId": {
+                              "type": "string"
+                            },
+                            "skillDigest": {
+                              "type": "string"
+                            },
+                            "skillId": {
+                              "type": "string"
+                            },
+                            "stepId": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "artifactDigests",
+                            "result",
+                            "runId",
+                            "skillDigest",
+                            "skillId",
+                            "stepId"
+                          ],
+                          "type": "object"
+                        },
+                        "type": "array"
+                      },
+                      "runId": {
+                        "type": "string"
+                      },
+                      "schemaVersion": {
+                        "const": 1
+                      },
+                      "transitions": {
+                        "items": {
+                          "properties": {
+                            "correlationToken": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "effectKey": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "sequence": {
+                              "type": "integer"
+                            },
+                            "stateId": {
+                              "type": "string"
+                            },
+                            "status": {
+                              "type": "string"
+                            },
+                            "stepId": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "correlationToken",
+                            "effectKey",
+                            "sequence",
+                            "stateId",
+                            "status",
+                            "stepId"
+                          ],
+                          "type": "object"
+                        },
+                        "type": "array"
+                      },
+                      "truncation": {
+                        "properties": {
+                          "bytes": {
+                            "type": "integer"
+                          },
+                          "items": {
+                            "type": "integer"
+                          },
+                          "strings": {
+                            "type": "integer"
+                          },
+                          "truncated": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "bytes",
+                          "items",
+                          "strings",
+                          "truncated"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "artifactDigests",
+                      "bundleDigest",
+                      "capabilities",
+                      "createdAt",
+                      "events",
+                      "fixtures",
+                      "infrastructure",
+                      "pins",
+                      "redactionPolicy",
+                      "resultDocuments",
+                      "runId",
+                      "schemaVersion",
+                      "transitions",
+                      "truncation"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "artifactDigest",
+                  "bundle"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "version": 1
+        },
+        {
+          "errors": [
+            "module_unavailable",
+            "invalid_threshold"
+          ],
+          "guarantees": [
+            "projects product outcomes, infrastructure failures, stuck states, and correlation gaps from durable event facts"
+          ],
+          "id": "operations/getTelemetrySnapshot@v1",
+          "inputSchema": {
+            "properties": {
+              "checkedAt": {
+                "type": "string"
+              },
+              "pollLagMs": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "stuckAfterMs": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "checkedAt",
+              "stuckAfterMs"
+            ],
+            "type": "object"
+          },
+          "name": "getTelemetrySnapshot",
+          "outputSchema": {
+            "properties": {
+              "checkedAt": {
+                "type": "string"
+              },
+              "correlationGaps": {
+                "items": {
+                  "properties": {
+                    "actual": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "eventId": {
+                      "type": "string"
+                    },
+                    "expected": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "kind": {
+                      "type": "string"
+                    },
+                    "runId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "actual",
+                    "eventId",
+                    "expected",
+                    "kind",
+                    "runId"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "durationsMs": {
+                "properties": {
+                  "attempts": {
+                    "items": {
+                      "type": "integer"
+                    },
+                    "type": "array"
+                  },
+                  "gateWait": {
+                    "items": {
+                      "type": "integer"
+                    },
+                    "type": "array"
+                  },
+                  "runs": {
+                    "items": {
+                      "type": "integer"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "attempts",
+                  "gateWait",
+                  "runs"
+                ],
+                "type": "object"
+              },
+              "effects": {
+                "properties": {
+                  "applied": {
+                    "type": "integer"
+                  },
+                  "failed": {
+                    "type": "integer"
+                  },
+                  "requested": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "applied",
+                  "failed",
+                  "requested"
+                ],
+                "type": "object"
+              },
+              "infrastructureFailures": {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              "outcomes": {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              "pollLagMs": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "queueDepth": {
+                "type": "integer"
+              },
+              "retries": {
+                "type": "integer"
+              },
+              "schemaVersion": {
+                "const": 1
+              },
+              "stuck": {
+                "items": {
+                  "properties": {
+                    "ageMs": {
+                      "type": "integer"
+                    },
+                    "kind": {
+                      "enum": [
+                        "effect",
+                        "running",
+                        "waiting"
+                      ]
+                    },
+                    "runId": {
+                      "type": "string"
+                    },
+                    "since": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ageMs",
+                    "kind",
+                    "runId",
+                    "since"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "tokens": {
+                "properties": {
+                  "costUsd": {
+                    "type": "number"
+                  },
+                  "input": {
+                    "type": "integer"
+                  },
+                  "output": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "costUsd",
+                  "input",
+                  "output"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "checkedAt",
+              "correlationGaps",
+              "durationsMs",
+              "effects",
+              "infrastructureFailures",
+              "outcomes",
+              "pollLagMs",
+              "queueDepth",
+              "retries",
+              "schemaVersion",
+              "stuck",
+              "tokens"
+            ],
+            "type": "object"
+          },
+          "version": 1
+        },
+        {
+          "errors": [
+            "module_unavailable",
+            "digest_mismatch",
+            "replay_bundle_invalid"
+          ],
+          "guarantees": [
+            "validates and stores imported data-only bundles through assets-owned storage"
+          ],
+          "id": "operations/importReplayBundle@v1",
+          "inputSchema": {
+            "properties": {
+              "bundle": {
+                "properties": {
+                  "artifactDigests": {
+                    "items": {
+                      "properties": {
+                        "classification": {
+                          "const": "public"
+                        },
+                        "contentBase64": {
+                          "type": "string"
+                        },
+                        "digest": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "size": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "classification",
+                        "contentBase64",
+                        "digest",
+                        "name",
+                        "size"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "bundleDigest": {
+                    "type": "string"
+                  },
+                  "capabilities": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "createdAt": {
+                    "type": "string"
+                  },
+                  "events": {
+                    "items": {
+                      "properties": {
+                        "eventId": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "type": "string"
+                        },
+                        "occurredAt": {
+                          "type": "string"
+                        },
+                        "payload": {},
+                        "runId": {
+                          "type": "string"
+                        },
+                        "sequence": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "eventId",
+                        "kind",
+                        "occurredAt",
+                        "payload",
+                        "runId",
+                        "sequence"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "fixtures": {
+                    "properties": {
+                      "agentResults": {
+                        "items": {},
+                        "type": "array"
+                      },
+                      "clock": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "effectResults": {
+                        "items": {},
+                        "type": "array"
+                      },
+                      "githubReads": {
+                        "items": {},
+                        "type": "array"
+                      },
+                      "ids": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      }
+                    },
+                    "required": [
+                      "agentResults",
+                      "clock",
+                      "effectResults",
+                      "githubReads",
+                      "ids"
+                    ],
+                    "type": "object"
+                  },
+                  "infrastructure": {
+                    "const": "fake"
+                  },
+                  "pins": {
+                    "properties": {
+                      "agentProfileDigests": {
+                        "additionalProperties": {
+                          "type": "string"
+                        },
+                        "type": "object"
+                      },
+                      "definitionDigest": {
+                        "type": "string"
+                      },
+                      "flowDigest": {
+                        "type": "string"
+                      },
+                      "moduleManifestDigest": {
+                        "type": "string"
+                      },
+                      "skillDigests": {
+                        "additionalProperties": {
+                          "type": "string"
+                        },
+                        "type": "object"
+                      },
+                      "workflowVersionDigest": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "agentProfileDigests",
+                      "definitionDigest",
+                      "flowDigest",
+                      "moduleManifestDigest",
+                      "skillDigests",
+                      "workflowVersionDigest"
+                    ],
+                    "type": "object"
+                  },
+                  "redactionPolicy": {
+                    "properties": {
+                      "maxBytes": {
+                        "type": "integer"
+                      },
+                      "maxItems": {
+                        "type": "integer"
+                      },
+                      "maxStringBytes": {
+                        "type": "integer"
+                      },
+                      "privateRetention": {
+                        "enum": [
+                          "ephemeral",
+                          "retained"
+                        ]
+                      },
+                      "secretMarkers": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      }
+                    },
+                    "required": [
+                      "maxBytes",
+                      "maxItems",
+                      "maxStringBytes",
+                      "privateRetention",
+                      "secretMarkers"
+                    ],
+                    "type": "object"
+                  },
+                  "resultDocuments": {
+                    "items": {
+                      "properties": {
+                        "artifactDigests": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "result": {},
+                        "runId": {
+                          "type": "string"
+                        },
+                        "skillDigest": {
+                          "type": "string"
+                        },
+                        "skillId": {
+                          "type": "string"
+                        },
+                        "stepId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "artifactDigests",
+                        "result",
+                        "runId",
+                        "skillDigest",
+                        "skillId",
+                        "stepId"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "runId": {
+                    "type": "string"
+                  },
+                  "schemaVersion": {
+                    "const": 1
+                  },
+                  "transitions": {
+                    "items": {
+                      "properties": {
+                        "correlationToken": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "effectKey": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "sequence": {
+                          "type": "integer"
+                        },
+                        "stateId": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string"
+                        },
+                        "stepId": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "correlationToken",
+                        "effectKey",
+                        "sequence",
+                        "stateId",
+                        "status",
+                        "stepId"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "truncation": {
+                    "properties": {
+                      "bytes": {
+                        "type": "integer"
+                      },
+                      "items": {
+                        "type": "integer"
+                      },
+                      "strings": {
+                        "type": "integer"
+                      },
+                      "truncated": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "bytes",
+                      "items",
+                      "strings",
+                      "truncated"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "artifactDigests",
+                  "bundleDigest",
+                  "capabilities",
+                  "createdAt",
+                  "events",
+                  "fixtures",
+                  "infrastructure",
+                  "pins",
+                  "redactionPolicy",
+                  "resultDocuments",
+                  "runId",
+                  "schemaVersion",
+                  "transitions",
+                  "truncation"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "bundle"
+            ],
+            "type": "object"
+          },
+          "name": "importReplayBundle",
+          "outputSchema": {
+            "properties": {
+              "artifactDigest": {
+                "type": "string"
+              },
+              "bundle": {
+                "properties": {
+                  "artifactDigests": {
+                    "items": {
+                      "properties": {
+                        "classification": {
+                          "const": "public"
+                        },
+                        "contentBase64": {
+                          "type": "string"
+                        },
+                        "digest": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "size": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "classification",
+                        "contentBase64",
+                        "digest",
+                        "name",
+                        "size"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "bundleDigest": {
+                    "type": "string"
+                  },
+                  "capabilities": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "createdAt": {
+                    "type": "string"
+                  },
+                  "events": {
+                    "items": {
+                      "properties": {
+                        "eventId": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "type": "string"
+                        },
+                        "occurredAt": {
+                          "type": "string"
+                        },
+                        "payload": {},
+                        "runId": {
+                          "type": "string"
+                        },
+                        "sequence": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "eventId",
+                        "kind",
+                        "occurredAt",
+                        "payload",
+                        "runId",
+                        "sequence"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "fixtures": {
+                    "properties": {
+                      "agentResults": {
+                        "items": {},
+                        "type": "array"
+                      },
+                      "clock": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "effectResults": {
+                        "items": {},
+                        "type": "array"
+                      },
+                      "githubReads": {
+                        "items": {},
+                        "type": "array"
+                      },
+                      "ids": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      }
+                    },
+                    "required": [
+                      "agentResults",
+                      "clock",
+                      "effectResults",
+                      "githubReads",
+                      "ids"
+                    ],
+                    "type": "object"
+                  },
+                  "infrastructure": {
+                    "const": "fake"
+                  },
+                  "pins": {
+                    "properties": {
+                      "agentProfileDigests": {
+                        "additionalProperties": {
+                          "type": "string"
+                        },
+                        "type": "object"
+                      },
+                      "definitionDigest": {
+                        "type": "string"
+                      },
+                      "flowDigest": {
+                        "type": "string"
+                      },
+                      "moduleManifestDigest": {
+                        "type": "string"
+                      },
+                      "skillDigests": {
+                        "additionalProperties": {
+                          "type": "string"
+                        },
+                        "type": "object"
+                      },
+                      "workflowVersionDigest": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "agentProfileDigests",
+                      "definitionDigest",
+                      "flowDigest",
+                      "moduleManifestDigest",
+                      "skillDigests",
+                      "workflowVersionDigest"
+                    ],
+                    "type": "object"
+                  },
+                  "redactionPolicy": {
+                    "properties": {
+                      "maxBytes": {
+                        "type": "integer"
+                      },
+                      "maxItems": {
+                        "type": "integer"
+                      },
+                      "maxStringBytes": {
+                        "type": "integer"
+                      },
+                      "privateRetention": {
+                        "enum": [
+                          "ephemeral",
+                          "retained"
+                        ]
+                      },
+                      "secretMarkers": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      }
+                    },
+                    "required": [
+                      "maxBytes",
+                      "maxItems",
+                      "maxStringBytes",
+                      "privateRetention",
+                      "secretMarkers"
+                    ],
+                    "type": "object"
+                  },
+                  "resultDocuments": {
+                    "items": {
+                      "properties": {
+                        "artifactDigests": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "result": {},
+                        "runId": {
+                          "type": "string"
+                        },
+                        "skillDigest": {
+                          "type": "string"
+                        },
+                        "skillId": {
+                          "type": "string"
+                        },
+                        "stepId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "artifactDigests",
+                        "result",
+                        "runId",
+                        "skillDigest",
+                        "skillId",
+                        "stepId"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "runId": {
+                    "type": "string"
+                  },
+                  "schemaVersion": {
+                    "const": 1
+                  },
+                  "transitions": {
+                    "items": {
+                      "properties": {
+                        "correlationToken": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "effectKey": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "sequence": {
+                          "type": "integer"
+                        },
+                        "stateId": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string"
+                        },
+                        "stepId": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "correlationToken",
+                        "effectKey",
+                        "sequence",
+                        "stateId",
+                        "status",
+                        "stepId"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "truncation": {
+                    "properties": {
+                      "bytes": {
+                        "type": "integer"
+                      },
+                      "items": {
+                        "type": "integer"
+                      },
+                      "strings": {
+                        "type": "integer"
+                      },
+                      "truncated": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "bytes",
+                      "items",
+                      "strings",
+                      "truncated"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "artifactDigests",
+                  "bundleDigest",
+                  "capabilities",
+                  "createdAt",
+                  "events",
+                  "fixtures",
+                  "infrastructure",
+                  "pins",
+                  "redactionPolicy",
+                  "resultDocuments",
+                  "runId",
+                  "schemaVersion",
+                  "transitions",
+                  "truncation"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "artifactDigest",
+              "bundle"
+            ],
+            "type": "object"
           },
           "version": 1
         },
@@ -12388,10 +14222,12 @@
       "events": [],
       "migrations": {
         "postgres": [
-          "001_projections"
+          "001_projections",
+          "002_replay_step_skills"
         ],
         "sqlite": [
-          "001_projections"
+          "001_projections",
+          "002_replay_step_skills"
         ]
       },
       "name": "operations",
@@ -12402,6 +14238,7 @@
           "health_projection",
           "operator_command_audit",
           "run_projections",
+          "step_replay_projections",
           "timeline_projections"
         ]
       },
@@ -12445,6 +14282,10 @@
         {
           "event": "runs/stepRequested@v2",
           "name": "project-step-v2"
+        },
+        {
+          "event": "runs/stepRequested@v3",
+          "name": "project-step-v3"
         }
       ],
       "version": 1
@@ -16016,6 +17857,56 @@
             "type": "object"
           },
           "version": 2
+        },
+        {
+          "id": "runs/stepRequested@v3",
+          "name": "stepRequested",
+          "payloadSchema": {
+            "properties": {
+              "agentProfileDigest": {
+                "type": "string"
+              },
+              "attemptId": {
+                "type": "string"
+              },
+              "correlationToken": {
+                "type": "string"
+              },
+              "inputArtifactDigests": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "runId": {
+                "type": "string"
+              },
+              "skillDigests": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "skillId": {
+                "type": "string"
+              },
+              "stepId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "agentProfileDigest",
+              "attemptId",
+              "correlationToken",
+              "inputArtifactDigests",
+              "runId",
+              "skillDigests",
+              "skillId",
+              "stepId"
+            ],
+            "type": "object"
+          },
+          "version": 3
         }
       ],
       "migrations": {
@@ -16189,6 +18080,112 @@
       },
       "kind": "action",
       "name": "assets/getArtifactV2@v1",
+      "outputSchema": {
+        "anyOf": [
+          {
+            "properties": {
+              "artifact": {
+                "properties": {
+                  "attemptId": {
+                    "type": "string"
+                  },
+                  "classification": {
+                    "enum": [
+                      "public",
+                      "private"
+                    ]
+                  },
+                  "createdAt": {
+                    "type": "string"
+                  },
+                  "digest": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "enum": [
+                      "result.json",
+                      "report.md",
+                      "log",
+                      "patch",
+                      "test-result",
+                      "reproduction",
+                      "metadata"
+                    ]
+                  },
+                  "mediaType": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "redaction": {
+                    "enum": [
+                      "not-required",
+                      "raw-private",
+                      "redacted-public"
+                    ]
+                  },
+                  "retention": {
+                    "enum": [
+                      "ephemeral",
+                      "retained"
+                    ]
+                  },
+                  "runId": {
+                    "type": "string"
+                  },
+                  "size": {
+                    "type": "integer"
+                  },
+                  "sourceDigest": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "classification",
+                  "createdAt",
+                  "digest",
+                  "kind",
+                  "mediaType",
+                  "name",
+                  "redaction",
+                  "retention",
+                  "runId",
+                  "size"
+                ],
+                "type": "object"
+              },
+              "contentBase64": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "artifact",
+              "contentBase64"
+            ],
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "provider": "assets"
+    },
+    {
+      "inputSchema": {
+        "properties": {
+          "digest": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "digest"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "assets/getPublicArtifactV2@v1",
       "outputSchema": {
         "anyOf": [
           {
@@ -26022,6 +28019,439 @@
     },
     {
       "inputSchema": {
+        "properties": {
+          "capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "fixtures": {
+            "properties": {
+              "agentResults": {
+                "items": {},
+                "type": "array"
+              },
+              "clock": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "effectResults": {
+                "items": {},
+                "type": "array"
+              },
+              "githubReads": {
+                "items": {},
+                "type": "array"
+              },
+              "ids": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "agentResults",
+              "clock",
+              "effectResults",
+              "githubReads",
+              "ids"
+            ],
+            "type": "object"
+          },
+          "redactionPolicy": {
+            "properties": {
+              "maxBytes": {
+                "type": "integer"
+              },
+              "maxItems": {
+                "type": "integer"
+              },
+              "maxStringBytes": {
+                "type": "integer"
+              },
+              "privateRetention": {
+                "enum": [
+                  "ephemeral",
+                  "retained"
+                ]
+              },
+              "secretMarkers": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "maxBytes",
+              "maxItems",
+              "maxStringBytes",
+              "privateRetention",
+              "secretMarkers"
+            ],
+            "type": "object"
+          },
+          "runId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "capabilities",
+          "createdAt",
+          "fixtures",
+          "redactionPolicy",
+          "runId"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "operations/exportReplayBundle@v1",
+      "outputSchema": {
+        "properties": {
+          "artifactDigest": {
+            "type": "string"
+          },
+          "bundle": {
+            "properties": {
+              "artifactDigests": {
+                "items": {
+                  "properties": {
+                    "classification": {
+                      "const": "public"
+                    },
+                    "contentBase64": {
+                      "type": "string"
+                    },
+                    "digest": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "size": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "classification",
+                    "contentBase64",
+                    "digest",
+                    "name",
+                    "size"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "bundleDigest": {
+                "type": "string"
+              },
+              "capabilities": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "createdAt": {
+                "type": "string"
+              },
+              "events": {
+                "items": {
+                  "properties": {
+                    "eventId": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "type": "string"
+                    },
+                    "occurredAt": {
+                      "type": "string"
+                    },
+                    "payload": {},
+                    "runId": {
+                      "type": "string"
+                    },
+                    "sequence": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "eventId",
+                    "kind",
+                    "occurredAt",
+                    "payload",
+                    "runId",
+                    "sequence"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "fixtures": {
+                "properties": {
+                  "agentResults": {
+                    "items": {},
+                    "type": "array"
+                  },
+                  "clock": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "effectResults": {
+                    "items": {},
+                    "type": "array"
+                  },
+                  "githubReads": {
+                    "items": {},
+                    "type": "array"
+                  },
+                  "ids": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "agentResults",
+                  "clock",
+                  "effectResults",
+                  "githubReads",
+                  "ids"
+                ],
+                "type": "object"
+              },
+              "infrastructure": {
+                "const": "fake"
+              },
+              "pins": {
+                "properties": {
+                  "agentProfileDigests": {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "type": "object"
+                  },
+                  "definitionDigest": {
+                    "type": "string"
+                  },
+                  "flowDigest": {
+                    "type": "string"
+                  },
+                  "moduleManifestDigest": {
+                    "type": "string"
+                  },
+                  "skillDigests": {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "type": "object"
+                  },
+                  "workflowVersionDigest": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "agentProfileDigests",
+                  "definitionDigest",
+                  "flowDigest",
+                  "moduleManifestDigest",
+                  "skillDigests",
+                  "workflowVersionDigest"
+                ],
+                "type": "object"
+              },
+              "redactionPolicy": {
+                "properties": {
+                  "maxBytes": {
+                    "type": "integer"
+                  },
+                  "maxItems": {
+                    "type": "integer"
+                  },
+                  "maxStringBytes": {
+                    "type": "integer"
+                  },
+                  "privateRetention": {
+                    "enum": [
+                      "ephemeral",
+                      "retained"
+                    ]
+                  },
+                  "secretMarkers": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "maxBytes",
+                  "maxItems",
+                  "maxStringBytes",
+                  "privateRetention",
+                  "secretMarkers"
+                ],
+                "type": "object"
+              },
+              "resultDocuments": {
+                "items": {
+                  "properties": {
+                    "artifactDigests": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "result": {},
+                    "runId": {
+                      "type": "string"
+                    },
+                    "skillDigest": {
+                      "type": "string"
+                    },
+                    "skillId": {
+                      "type": "string"
+                    },
+                    "stepId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "artifactDigests",
+                    "result",
+                    "runId",
+                    "skillDigest",
+                    "skillId",
+                    "stepId"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "runId": {
+                "type": "string"
+              },
+              "schemaVersion": {
+                "const": 1
+              },
+              "transitions": {
+                "items": {
+                  "properties": {
+                    "correlationToken": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "effectKey": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "sequence": {
+                      "type": "integer"
+                    },
+                    "stateId": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "stepId": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "correlationToken",
+                    "effectKey",
+                    "sequence",
+                    "stateId",
+                    "status",
+                    "stepId"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "truncation": {
+                "properties": {
+                  "bytes": {
+                    "type": "integer"
+                  },
+                  "items": {
+                    "type": "integer"
+                  },
+                  "strings": {
+                    "type": "integer"
+                  },
+                  "truncated": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "bytes",
+                  "items",
+                  "strings",
+                  "truncated"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "artifactDigests",
+              "bundleDigest",
+              "capabilities",
+              "createdAt",
+              "events",
+              "fixtures",
+              "infrastructure",
+              "pins",
+              "redactionPolicy",
+              "resultDocuments",
+              "runId",
+              "schemaVersion",
+              "transitions",
+              "truncation"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "artifactDigest",
+          "bundle"
+        ],
+        "type": "object"
+      },
+      "provider": "operations"
+    },
+    {
+      "inputSchema": {
         "properties": {},
         "required": [],
         "type": "object"
@@ -26232,6 +28662,1258 @@
             "type": "null"
           }
         ]
+      },
+      "provider": "operations"
+    },
+    {
+      "inputSchema": {
+        "properties": {
+          "digest": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "digest"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "operations/getReplayBundle@v1",
+      "outputSchema": {
+        "anyOf": [
+          {
+            "properties": {
+              "artifactDigest": {
+                "type": "string"
+              },
+              "bundle": {
+                "properties": {
+                  "artifactDigests": {
+                    "items": {
+                      "properties": {
+                        "classification": {
+                          "const": "public"
+                        },
+                        "contentBase64": {
+                          "type": "string"
+                        },
+                        "digest": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "size": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "classification",
+                        "contentBase64",
+                        "digest",
+                        "name",
+                        "size"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "bundleDigest": {
+                    "type": "string"
+                  },
+                  "capabilities": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "createdAt": {
+                    "type": "string"
+                  },
+                  "events": {
+                    "items": {
+                      "properties": {
+                        "eventId": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "type": "string"
+                        },
+                        "occurredAt": {
+                          "type": "string"
+                        },
+                        "payload": {},
+                        "runId": {
+                          "type": "string"
+                        },
+                        "sequence": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "eventId",
+                        "kind",
+                        "occurredAt",
+                        "payload",
+                        "runId",
+                        "sequence"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "fixtures": {
+                    "properties": {
+                      "agentResults": {
+                        "items": {},
+                        "type": "array"
+                      },
+                      "clock": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "effectResults": {
+                        "items": {},
+                        "type": "array"
+                      },
+                      "githubReads": {
+                        "items": {},
+                        "type": "array"
+                      },
+                      "ids": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      }
+                    },
+                    "required": [
+                      "agentResults",
+                      "clock",
+                      "effectResults",
+                      "githubReads",
+                      "ids"
+                    ],
+                    "type": "object"
+                  },
+                  "infrastructure": {
+                    "const": "fake"
+                  },
+                  "pins": {
+                    "properties": {
+                      "agentProfileDigests": {
+                        "additionalProperties": {
+                          "type": "string"
+                        },
+                        "type": "object"
+                      },
+                      "definitionDigest": {
+                        "type": "string"
+                      },
+                      "flowDigest": {
+                        "type": "string"
+                      },
+                      "moduleManifestDigest": {
+                        "type": "string"
+                      },
+                      "skillDigests": {
+                        "additionalProperties": {
+                          "type": "string"
+                        },
+                        "type": "object"
+                      },
+                      "workflowVersionDigest": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "agentProfileDigests",
+                      "definitionDigest",
+                      "flowDigest",
+                      "moduleManifestDigest",
+                      "skillDigests",
+                      "workflowVersionDigest"
+                    ],
+                    "type": "object"
+                  },
+                  "redactionPolicy": {
+                    "properties": {
+                      "maxBytes": {
+                        "type": "integer"
+                      },
+                      "maxItems": {
+                        "type": "integer"
+                      },
+                      "maxStringBytes": {
+                        "type": "integer"
+                      },
+                      "privateRetention": {
+                        "enum": [
+                          "ephemeral",
+                          "retained"
+                        ]
+                      },
+                      "secretMarkers": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      }
+                    },
+                    "required": [
+                      "maxBytes",
+                      "maxItems",
+                      "maxStringBytes",
+                      "privateRetention",
+                      "secretMarkers"
+                    ],
+                    "type": "object"
+                  },
+                  "resultDocuments": {
+                    "items": {
+                      "properties": {
+                        "artifactDigests": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "result": {},
+                        "runId": {
+                          "type": "string"
+                        },
+                        "skillDigest": {
+                          "type": "string"
+                        },
+                        "skillId": {
+                          "type": "string"
+                        },
+                        "stepId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "artifactDigests",
+                        "result",
+                        "runId",
+                        "skillDigest",
+                        "skillId",
+                        "stepId"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "runId": {
+                    "type": "string"
+                  },
+                  "schemaVersion": {
+                    "const": 1
+                  },
+                  "transitions": {
+                    "items": {
+                      "properties": {
+                        "correlationToken": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "effectKey": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "sequence": {
+                          "type": "integer"
+                        },
+                        "stateId": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string"
+                        },
+                        "stepId": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "correlationToken",
+                        "effectKey",
+                        "sequence",
+                        "stateId",
+                        "status",
+                        "stepId"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "truncation": {
+                    "properties": {
+                      "bytes": {
+                        "type": "integer"
+                      },
+                      "items": {
+                        "type": "integer"
+                      },
+                      "strings": {
+                        "type": "integer"
+                      },
+                      "truncated": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "bytes",
+                      "items",
+                      "strings",
+                      "truncated"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "artifactDigests",
+                  "bundleDigest",
+                  "capabilities",
+                  "createdAt",
+                  "events",
+                  "fixtures",
+                  "infrastructure",
+                  "pins",
+                  "redactionPolicy",
+                  "resultDocuments",
+                  "runId",
+                  "schemaVersion",
+                  "transitions",
+                  "truncation"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "artifactDigest",
+              "bundle"
+            ],
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "provider": "operations"
+    },
+    {
+      "inputSchema": {
+        "properties": {
+          "checkedAt": {
+            "type": "string"
+          },
+          "pollLagMs": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "stuckAfterMs": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "checkedAt",
+          "stuckAfterMs"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "operations/getTelemetrySnapshot@v1",
+      "outputSchema": {
+        "properties": {
+          "checkedAt": {
+            "type": "string"
+          },
+          "correlationGaps": {
+            "items": {
+              "properties": {
+                "actual": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "eventId": {
+                  "type": "string"
+                },
+                "expected": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "runId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "actual",
+                "eventId",
+                "expected",
+                "kind",
+                "runId"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "durationsMs": {
+            "properties": {
+              "attempts": {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              "gateWait": {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              "runs": {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "attempts",
+              "gateWait",
+              "runs"
+            ],
+            "type": "object"
+          },
+          "effects": {
+            "properties": {
+              "applied": {
+                "type": "integer"
+              },
+              "failed": {
+                "type": "integer"
+              },
+              "requested": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "applied",
+              "failed",
+              "requested"
+            ],
+            "type": "object"
+          },
+          "infrastructureFailures": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object"
+          },
+          "outcomes": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object"
+          },
+          "pollLagMs": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "queueDepth": {
+            "type": "integer"
+          },
+          "retries": {
+            "type": "integer"
+          },
+          "schemaVersion": {
+            "const": 1
+          },
+          "stuck": {
+            "items": {
+              "properties": {
+                "ageMs": {
+                  "type": "integer"
+                },
+                "kind": {
+                  "enum": [
+                    "effect",
+                    "running",
+                    "waiting"
+                  ]
+                },
+                "runId": {
+                  "type": "string"
+                },
+                "since": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "ageMs",
+                "kind",
+                "runId",
+                "since"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "tokens": {
+            "properties": {
+              "costUsd": {
+                "type": "number"
+              },
+              "input": {
+                "type": "integer"
+              },
+              "output": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "costUsd",
+              "input",
+              "output"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "checkedAt",
+          "correlationGaps",
+          "durationsMs",
+          "effects",
+          "infrastructureFailures",
+          "outcomes",
+          "pollLagMs",
+          "queueDepth",
+          "retries",
+          "schemaVersion",
+          "stuck",
+          "tokens"
+        ],
+        "type": "object"
+      },
+      "provider": "operations"
+    },
+    {
+      "inputSchema": {
+        "properties": {
+          "bundle": {
+            "properties": {
+              "artifactDigests": {
+                "items": {
+                  "properties": {
+                    "classification": {
+                      "const": "public"
+                    },
+                    "contentBase64": {
+                      "type": "string"
+                    },
+                    "digest": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "size": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "classification",
+                    "contentBase64",
+                    "digest",
+                    "name",
+                    "size"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "bundleDigest": {
+                "type": "string"
+              },
+              "capabilities": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "createdAt": {
+                "type": "string"
+              },
+              "events": {
+                "items": {
+                  "properties": {
+                    "eventId": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "type": "string"
+                    },
+                    "occurredAt": {
+                      "type": "string"
+                    },
+                    "payload": {},
+                    "runId": {
+                      "type": "string"
+                    },
+                    "sequence": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "eventId",
+                    "kind",
+                    "occurredAt",
+                    "payload",
+                    "runId",
+                    "sequence"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "fixtures": {
+                "properties": {
+                  "agentResults": {
+                    "items": {},
+                    "type": "array"
+                  },
+                  "clock": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "effectResults": {
+                    "items": {},
+                    "type": "array"
+                  },
+                  "githubReads": {
+                    "items": {},
+                    "type": "array"
+                  },
+                  "ids": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "agentResults",
+                  "clock",
+                  "effectResults",
+                  "githubReads",
+                  "ids"
+                ],
+                "type": "object"
+              },
+              "infrastructure": {
+                "const": "fake"
+              },
+              "pins": {
+                "properties": {
+                  "agentProfileDigests": {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "type": "object"
+                  },
+                  "definitionDigest": {
+                    "type": "string"
+                  },
+                  "flowDigest": {
+                    "type": "string"
+                  },
+                  "moduleManifestDigest": {
+                    "type": "string"
+                  },
+                  "skillDigests": {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "type": "object"
+                  },
+                  "workflowVersionDigest": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "agentProfileDigests",
+                  "definitionDigest",
+                  "flowDigest",
+                  "moduleManifestDigest",
+                  "skillDigests",
+                  "workflowVersionDigest"
+                ],
+                "type": "object"
+              },
+              "redactionPolicy": {
+                "properties": {
+                  "maxBytes": {
+                    "type": "integer"
+                  },
+                  "maxItems": {
+                    "type": "integer"
+                  },
+                  "maxStringBytes": {
+                    "type": "integer"
+                  },
+                  "privateRetention": {
+                    "enum": [
+                      "ephemeral",
+                      "retained"
+                    ]
+                  },
+                  "secretMarkers": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "maxBytes",
+                  "maxItems",
+                  "maxStringBytes",
+                  "privateRetention",
+                  "secretMarkers"
+                ],
+                "type": "object"
+              },
+              "resultDocuments": {
+                "items": {
+                  "properties": {
+                    "artifactDigests": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "result": {},
+                    "runId": {
+                      "type": "string"
+                    },
+                    "skillDigest": {
+                      "type": "string"
+                    },
+                    "skillId": {
+                      "type": "string"
+                    },
+                    "stepId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "artifactDigests",
+                    "result",
+                    "runId",
+                    "skillDigest",
+                    "skillId",
+                    "stepId"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "runId": {
+                "type": "string"
+              },
+              "schemaVersion": {
+                "const": 1
+              },
+              "transitions": {
+                "items": {
+                  "properties": {
+                    "correlationToken": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "effectKey": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "sequence": {
+                      "type": "integer"
+                    },
+                    "stateId": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "stepId": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "correlationToken",
+                    "effectKey",
+                    "sequence",
+                    "stateId",
+                    "status",
+                    "stepId"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "truncation": {
+                "properties": {
+                  "bytes": {
+                    "type": "integer"
+                  },
+                  "items": {
+                    "type": "integer"
+                  },
+                  "strings": {
+                    "type": "integer"
+                  },
+                  "truncated": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "bytes",
+                  "items",
+                  "strings",
+                  "truncated"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "artifactDigests",
+              "bundleDigest",
+              "capabilities",
+              "createdAt",
+              "events",
+              "fixtures",
+              "infrastructure",
+              "pins",
+              "redactionPolicy",
+              "resultDocuments",
+              "runId",
+              "schemaVersion",
+              "transitions",
+              "truncation"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "bundle"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "operations/importReplayBundle@v1",
+      "outputSchema": {
+        "properties": {
+          "artifactDigest": {
+            "type": "string"
+          },
+          "bundle": {
+            "properties": {
+              "artifactDigests": {
+                "items": {
+                  "properties": {
+                    "classification": {
+                      "const": "public"
+                    },
+                    "contentBase64": {
+                      "type": "string"
+                    },
+                    "digest": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "size": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "classification",
+                    "contentBase64",
+                    "digest",
+                    "name",
+                    "size"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "bundleDigest": {
+                "type": "string"
+              },
+              "capabilities": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "createdAt": {
+                "type": "string"
+              },
+              "events": {
+                "items": {
+                  "properties": {
+                    "eventId": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "type": "string"
+                    },
+                    "occurredAt": {
+                      "type": "string"
+                    },
+                    "payload": {},
+                    "runId": {
+                      "type": "string"
+                    },
+                    "sequence": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "eventId",
+                    "kind",
+                    "occurredAt",
+                    "payload",
+                    "runId",
+                    "sequence"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "fixtures": {
+                "properties": {
+                  "agentResults": {
+                    "items": {},
+                    "type": "array"
+                  },
+                  "clock": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "effectResults": {
+                    "items": {},
+                    "type": "array"
+                  },
+                  "githubReads": {
+                    "items": {},
+                    "type": "array"
+                  },
+                  "ids": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "agentResults",
+                  "clock",
+                  "effectResults",
+                  "githubReads",
+                  "ids"
+                ],
+                "type": "object"
+              },
+              "infrastructure": {
+                "const": "fake"
+              },
+              "pins": {
+                "properties": {
+                  "agentProfileDigests": {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "type": "object"
+                  },
+                  "definitionDigest": {
+                    "type": "string"
+                  },
+                  "flowDigest": {
+                    "type": "string"
+                  },
+                  "moduleManifestDigest": {
+                    "type": "string"
+                  },
+                  "skillDigests": {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "type": "object"
+                  },
+                  "workflowVersionDigest": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "agentProfileDigests",
+                  "definitionDigest",
+                  "flowDigest",
+                  "moduleManifestDigest",
+                  "skillDigests",
+                  "workflowVersionDigest"
+                ],
+                "type": "object"
+              },
+              "redactionPolicy": {
+                "properties": {
+                  "maxBytes": {
+                    "type": "integer"
+                  },
+                  "maxItems": {
+                    "type": "integer"
+                  },
+                  "maxStringBytes": {
+                    "type": "integer"
+                  },
+                  "privateRetention": {
+                    "enum": [
+                      "ephemeral",
+                      "retained"
+                    ]
+                  },
+                  "secretMarkers": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "maxBytes",
+                  "maxItems",
+                  "maxStringBytes",
+                  "privateRetention",
+                  "secretMarkers"
+                ],
+                "type": "object"
+              },
+              "resultDocuments": {
+                "items": {
+                  "properties": {
+                    "artifactDigests": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "result": {},
+                    "runId": {
+                      "type": "string"
+                    },
+                    "skillDigest": {
+                      "type": "string"
+                    },
+                    "skillId": {
+                      "type": "string"
+                    },
+                    "stepId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "artifactDigests",
+                    "result",
+                    "runId",
+                    "skillDigest",
+                    "skillId",
+                    "stepId"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "runId": {
+                "type": "string"
+              },
+              "schemaVersion": {
+                "const": 1
+              },
+              "transitions": {
+                "items": {
+                  "properties": {
+                    "correlationToken": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "effectKey": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "sequence": {
+                      "type": "integer"
+                    },
+                    "stateId": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "stepId": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "correlationToken",
+                    "effectKey",
+                    "sequence",
+                    "stateId",
+                    "status",
+                    "stepId"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "truncation": {
+                "properties": {
+                  "bytes": {
+                    "type": "integer"
+                  },
+                  "items": {
+                    "type": "integer"
+                  },
+                  "strings": {
+                    "type": "integer"
+                  },
+                  "truncated": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "bytes",
+                  "items",
+                  "strings",
+                  "truncated"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "artifactDigests",
+              "bundleDigest",
+              "capabilities",
+              "createdAt",
+              "events",
+              "fixtures",
+              "infrastructure",
+              "pins",
+              "redactionPolicy",
+              "resultDocuments",
+              "runId",
+              "schemaVersion",
+              "transitions",
+              "truncation"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "artifactDigest",
+          "bundle"
+        ],
+        "type": "object"
       },
       "provider": "operations"
     },
@@ -31160,6 +34842,57 @@
       },
       "provider": "runs",
       "version": 2
+    },
+    {
+      "kind": "event",
+      "name": "stepRequested",
+      "payloadSchema": {
+        "properties": {
+          "agentProfileDigest": {
+            "type": "string"
+          },
+          "attemptId": {
+            "type": "string"
+          },
+          "correlationToken": {
+            "type": "string"
+          },
+          "inputArtifactDigests": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "skillDigests": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "skillId": {
+            "type": "string"
+          },
+          "stepId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "agentProfileDigest",
+          "attemptId",
+          "correlationToken",
+          "inputArtifactDigests",
+          "runId",
+          "skillDigests",
+          "skillId",
+          "stepId"
+        ],
+        "type": "object"
+      },
+      "provider": "runs",
+      "version": 3
     }
   ],
   "schemaVersion": 1,

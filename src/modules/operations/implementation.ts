@@ -4,7 +4,15 @@ import {
   defineChimpbaseModuleImplementation,
   defineChimpbaseModuleSubscription,
 } from "chimpbase/core";
-import { cron, type Infer, v } from "chimpbase/runtime";
+import {
+  type ChimpbaseLogger,
+  type ChimpbaseModuleCallReference,
+  type ChimpbaseTelemetryAttributes,
+  type ChimpbaseTraceSpan,
+  cron,
+  type Infer,
+  v,
+} from "chimpbase/runtime";
 import type { Kysely } from "kysely";
 import {
   effectReceipt,
@@ -21,8 +29,18 @@ import {
   operationsRunPage,
   operationsTimelineEntry,
   operatorCommandAudit,
+  type ReplayBundle,
+  replayBundleEnvelope,
+  replayEvent,
   run,
 } from "../../contracts/index.ts";
+import {
+  createReplayBundle,
+  parseReplayBundle,
+  projectOperationsTelemetry,
+  sha256Digest,
+  telemetryRecordsForEvent,
+} from "../../replay.ts";
 import {
   type OperationEffectProjectionRow,
   type OperationEventProjectionRow,
@@ -68,6 +86,23 @@ const maximumPageSize = 100;
 interface OperationsContext {
   readonly db: { readonly schema: string | null; kysely(): unknown };
   readonly module: { readonly name: string } | null;
+}
+
+interface OperationsTelemetryContext {
+  readonly log: ChimpbaseLogger;
+  metric(name: string, value: number, labels?: ChimpbaseTelemetryAttributes): void;
+  trace<TResult>(
+    name: string,
+    callback: (span: ChimpbaseTraceSpan) => TResult | Promise<TResult>,
+    attributes?: ChimpbaseTelemetryAttributes,
+  ): Promise<TResult>;
+}
+
+interface ReplayCallContext {
+  call<TInput, TOutput>(
+    contract: ChimpbaseModuleCallReference<TInput, TOutput>,
+    input: TInput,
+  ): Promise<TOutput>;
 }
 
 const runPageCursor = v.object({ runId: v.string(), startedAt: v.string() });
@@ -160,8 +195,33 @@ function factOrder(left: OperationEventProjectionRow, right: OperationEventProje
   return left.event_id.localeCompare(right.event_id);
 }
 
+async function emitFactTelemetry(
+  ctx: OperationsContext & OperationsTelemetryContext,
+  event: {
+    eventId: string;
+    kind: string;
+    occurredAt: string;
+    payload: SafeObject;
+    runId: string;
+    sequence: number;
+  },
+): Promise<void> {
+  const record = telemetryRecordsForEvent(event)[0];
+  if (record === undefined) throw new Error("factory telemetry record missing");
+  const labels = {
+    ...record.attributes,
+    failureCategory: record.failureCategory,
+    productOutcome: record.productOutcome,
+    schemaVersion: record.schemaVersion,
+    sourceModule: record.scope.module,
+  };
+  ctx.log.info("factory.event.v1", labels);
+  ctx.metric("factory.events", 1, labels);
+  await ctx.trace("factory.event.v1", async () => undefined, labels);
+}
+
 async function recordFact(
-  ctx: OperationsContext,
+  ctx: OperationsContext & OperationsTelemetryContext,
   kind: string,
   occurredAt: string,
   payload: SafeObject,
@@ -205,6 +265,14 @@ async function recordFact(
       source_key: sourceKey,
     })
     .execute();
+  await emitFactTelemetry(ctx, {
+    eventId,
+    kind,
+    occurredAt,
+    payload,
+    runId: runId ?? "global",
+    sequence,
+  });
   if (runId !== null) await rebuild(db, runId);
   else if (kind === "definition.published" || kind === "skill.pinned") await rebuild(db);
   else if (kind === "source.accepted" && sourceKey !== null) {
@@ -616,6 +684,95 @@ const workerHeartbeatCron = cron("projection-heartbeat", "* * * * *", async (ctx
   await refreshWorkerHeartbeat(ctx);
 });
 
+async function replayEventsForRun(
+  database: Kysely<OperationsDatabase>,
+  runId: string,
+): Promise<Infer<typeof replayEvent>[]> {
+  const rows = await database
+    .selectFrom("timeline_projections")
+    .selectAll()
+    .where("run_id", "=", runId)
+    .orderBy("sequence", "asc")
+    .orderBy("event_id", "asc")
+    .execute();
+  return rows.map((row) =>
+    replayEvent.parse({
+      eventId: row.event_id,
+      kind: row.kind,
+      occurredAt: row.occurred_at,
+      payload: JSON.parse(row.payload_json),
+      runId,
+      sequence: row.sequence,
+    }),
+  );
+}
+
+async function persistReplayBundle(ctx: ReplayCallContext, bundle: ReplayBundle) {
+  const bytes = Buffer.from(canonical(bundle));
+  const sourceDigest = sha256Digest(bytes);
+  const attemptId = `replay:${bundle.bundleDigest}`;
+  await ctx.call(assets.calls.storeArtifactV2, {
+    artifact: {
+      attemptId,
+      classification: "private",
+      createdAt: bundle.createdAt,
+      digest: sourceDigest,
+      kind: "metadata",
+      mediaType: "application/vnd.software-factory.replay+json",
+      name: "replay-bundle.json",
+      redaction: "raw-private",
+      retention: bundle.redactionPolicy.privateRetention,
+      runId: bundle.runId,
+      size: bytes.byteLength,
+    },
+    contentBase64: bytes.toString("base64"),
+  });
+  const published = await ctx.call(assets.calls.publishArtifactV2, {
+    attemptId,
+    createdAt: bundle.createdAt,
+    digest: sourceDigest,
+    runId: bundle.runId,
+  });
+  return replayBundleEnvelope.parse({
+    artifactDigest: published.artifact.digest,
+    bundle,
+  });
+}
+
+async function recordReplayStepSkill(
+  ctx: OperationsContext,
+  value: {
+    runId: string;
+    skillDigests: Record<string, string>;
+    skillId: string;
+    stepId: string;
+  },
+): Promise<void> {
+  const skillDigest = value.skillDigests[value.skillId];
+  if (skillDigest === undefined) throw new Error("projection_conflict: step skill digest missing");
+  const db = dbFrom(ctx);
+  const existing = await db
+    .selectFrom("step_replay_projections")
+    .selectAll()
+    .where("run_id", "=", value.runId)
+    .where("step_id", "=", value.stepId)
+    .executeTakeFirst();
+  if (existing !== undefined) {
+    if (existing.skill_id !== value.skillId || existing.skill_digest !== skillDigest)
+      throw new Error("projection_conflict: step skill revision changed");
+    return;
+  }
+  await db
+    .insertInto("step_replay_projections")
+    .values({
+      run_id: value.runId,
+      skill_digest: skillDigest,
+      skill_id: value.skillId,
+      step_id: value.stepId,
+    })
+    .execute();
+}
+
 function createSubscriptions() {
   return [
     defineChimpbaseModuleSubscription(
@@ -682,6 +839,11 @@ function createSubscriptions() {
         ),
     ),
     defineChimpbaseModuleSubscription(
+      runs.events.stepRequestedV3,
+      "project-step-v3",
+      async (ctx, value) => recordReplayStepSkill(ctx, value),
+    ),
+    defineChimpbaseModuleSubscription(
       execution.events.attemptFinishedV2,
       "project-attempt-v2",
       async (ctx, value) =>
@@ -696,6 +858,13 @@ function createSubscriptions() {
             failure: value.result.failure ?? null,
             finishedAt: value.finishedAt,
             outcome: value.result.outcome?.outcome ?? null,
+            resultDocument:
+              value.result.outcome === undefined
+                ? null
+                : {
+                    outcome: value.result.outcome.outcome,
+                    outputArtifactDigests: value.result.outcome.outputArtifactDigests,
+                  },
             runId: value.runId,
             startedAt: value.startedAt,
             status: value.result.status,
@@ -1196,6 +1365,142 @@ export function createOperationsImplementation(
       async refreshWorkerHeartbeat(ctx) {
         return await refreshWorkerHeartbeat(ctx);
       },
+      async getTelemetrySnapshot(ctx, input) {
+        if (!Number.isSafeInteger(input.stuckAfterMs) || input.stuckAfterMs < 0)
+          throw new Error("invalid_threshold");
+        const rows = await dbFrom(ctx)
+          .selectFrom("event_projections")
+          .selectAll()
+          .where("run_id", "is not", null)
+          .orderBy("sequence", "asc")
+          .orderBy("event_id", "asc")
+          .execute();
+        const events = rows.map((row) =>
+          replayEvent.parse({
+            eventId: row.event_id,
+            kind: row.kind,
+            occurredAt: row.occurred_at,
+            payload: JSON.parse(row.payload_json),
+            runId: row.run_id,
+            sequence: row.sequence,
+          }),
+        );
+        const projectedPollLag =
+          input.pollLagMs !== undefined
+            ? input.pollLagMs
+            : dependencies.pollLagMs === undefined
+              ? null
+              : await dependencies.pollLagMs();
+        return projectOperationsTelemetry(
+          events,
+          input.checkedAt,
+          input.stuckAfterMs,
+          projectedPollLag,
+        );
+      },
+      async exportReplayBundle(ctx, input) {
+        const events = await replayEventsForRun(dbFrom(ctx), input.runId);
+        const state = events.filter((event) => event.kind === "run.state").at(-1);
+        if (state === undefined) throw new Error(`run_not_found: ${input.runId}`);
+        const statePayload = state.payload as SafeObject;
+        const artifacts = await ctx.call(assets.calls.listRunArtifactsV2, { runId: input.runId });
+        const publicArtifacts = await Promise.all(
+          artifacts
+            .filter((artifact) => artifact.classification === "public")
+            .map(async (artifact) => {
+              const envelope = await ctx.call(assets.calls.getPublicArtifactV2, {
+                digest: artifact.digest,
+              });
+              if (envelope === null) throw new Error(`artifact_corrupt: ${artifact.digest}`);
+              return {
+                classification: "public" as const,
+                contentBase64: envelope.contentBase64,
+                digest: artifact.digest,
+                name: artifact.name,
+                size: artifact.size,
+              };
+            }),
+        );
+        const publicArtifactDigests = new Set(publicArtifacts.map((artifact) => artifact.digest));
+        const publishedBySource = new Map(
+          artifacts.flatMap((artifact) =>
+            artifact.classification === "public" && artifact.sourceDigest !== undefined
+              ? [[artifact.sourceDigest, artifact.digest] as const]
+              : [],
+          ),
+        );
+        const stepSkillRows = await dbFrom(ctx)
+          .selectFrom("step_replay_projections")
+          .selectAll()
+          .where("run_id", "=", input.runId)
+          .execute();
+        const stepSkills = new Map(
+          stepSkillRows.map(
+            (row) => [row.step_id, [row.skill_id, row.skill_digest] as [string, string]] as const,
+          ),
+        );
+        const resultDocuments = events.flatMap((event) => {
+          if (event.kind !== "attempt.finished") return [];
+          const payload = event.payload as SafeObject;
+          const selected = stepSkills.get(String(payload.stepId));
+          const resultDocument = payload.resultDocument;
+          if (selected === undefined || resultDocument === null || resultDocument === undefined)
+            return [];
+          const outputArtifactDigests = Array.isArray(
+            (resultDocument as SafeObject).outputArtifactDigests,
+          )
+            ? ((resultDocument as SafeObject).outputArtifactDigests as string[]).flatMap(
+                (digest) => {
+                  const published = publishedBySource.get(digest);
+                  if (published !== undefined) return [published];
+                  return publicArtifactDigests.has(digest) ? [digest] : [];
+                },
+              )
+            : [];
+          return [
+            {
+              artifactDigests: outputArtifactDigests,
+              result: resultDocument,
+              runId: input.runId,
+              skillDigest: selected[1],
+              skillId: selected[0],
+              stepId: String(payload.stepId),
+            },
+          ];
+        });
+        const bundle = createReplayBundle({
+          artifactDigests: publicArtifacts,
+          capabilities: input.capabilities,
+          createdAt: input.createdAt,
+          events,
+          fixtures: input.fixtures,
+          pins: {
+            agentProfileDigests: statePayload.agentProfileDigests as Record<string, string>,
+            definitionDigest: String(statePayload.definitionDigest),
+            flowDigest: String(statePayload.flowDigest),
+            moduleManifestDigest: String(statePayload.moduleManifestDigest),
+            skillDigests: statePayload.skillDigests as Record<string, string>,
+            workflowVersionDigest: String(statePayload.workflowVersionDigest),
+          },
+          redactionPolicy: input.redactionPolicy,
+          resultDocuments,
+          runId: input.runId,
+        });
+        return await persistReplayBundle(ctx, bundle);
+      },
+      async importReplayBundle(ctx, input) {
+        return await persistReplayBundle(ctx, parseReplayBundle(input.bundle));
+      },
+      async getReplayBundle(ctx, input) {
+        const envelope = await ctx.call(assets.calls.getPublicArtifactV2, {
+          digest: input.digest,
+        });
+        if (envelope === null) return null;
+        const bundle = parseReplayBundle(
+          Buffer.from(envelope.contentBase64, "base64").toString("utf8"),
+        );
+        return replayBundleEnvelope.parse({ artifactDigest: envelope.artifact.digest, bundle });
+      },
       async rebuildProjections(ctx) {
         return await rebuild(dbFrom(ctx));
       },
@@ -1208,6 +1513,7 @@ export function createOperationsImplementation(
         "operator_command_audit",
         "run_projections",
         "timeline_projections",
+        "step_replay_projections",
       ],
     },
   });

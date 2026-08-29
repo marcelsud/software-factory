@@ -2546,6 +2546,17 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
             skillDigests: plan.skillRevisions,
             stepId: step.id,
           });
+          if (step.skill !== undefined)
+            ctx.publish(runs.events.stepRequestedV3, {
+              agentProfileDigest: profile.digest,
+              attemptId,
+              correlationToken: token,
+              inputArtifactDigests: artifacts,
+              runId: row.run_id,
+              skillDigests: plan.skillRevisions,
+              skillId: step.skill,
+              stepId: step.id,
+            });
           await publishProjection(ctx, row, engine);
           return { kind: "wait" as const, signal: "resume" };
         }

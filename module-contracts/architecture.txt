@@ -4,6 +4,7 @@ assets v1
   depends: none
   call: assets/getArtifact@v1
   call: assets/getArtifactV2@v1
+  call: assets/getPublicArtifactV2@v1
   call: assets/getSkillBundle@v1
   call: assets/getSkillBundleV2@v1
   call: assets/listRunArtifacts@v1
@@ -80,9 +81,13 @@ intake v1
 operations v1
   depends: assets, definitions, effects, execution, intake, runs
   call: operations/applyOperatorCommand@v1
+  call: operations/exportReplayBundle@v1
   call: operations/getHealth@v1
   call: operations/getHealthV2@v1
   call: operations/getOperatorCommand@v1
+  call: operations/getReplayBundle@v1
+  call: operations/getTelemetrySnapshot@v1
+  call: operations/importReplayBundle@v1
   call: operations/listEffects@v1
   call: operations/listEffectsV2@v1
   call: operations/listEvents@v1
@@ -104,6 +109,7 @@ operations v1
   consumes: assets/skillRevisionPinned@v2 as project-skill-v2
   consumes: intake/factoryEventAccepted@v2 as project-source-event-v2
   consumes: runs/stepRequested@v2 as project-step-v2
+  consumes: runs/stepRequested@v3 as project-step-v3
 runs v1
   depends: assets, definitions, effects, execution, intake
   call: runs/applyOperatorCommand@v1
@@ -135,6 +141,7 @@ runs v1
   event: runs/runStateChanged@v4
   event: runs/stepRequested@v1
   event: runs/stepRequested@v2
+  event: runs/stepRequested@v3
   consumes: execution/attemptFinished@v1 as record-attempt-outcome-v1
   consumes: execution/attemptFinished@v2 as record-attempt-outcome-v2
   consumes: effects/effectFinished@v2 as record-effect-outcome

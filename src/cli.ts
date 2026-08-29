@@ -12,7 +12,10 @@ import moduleApp, {
   createSoftwareFactoryApp,
   FACTORY_RUNS_V2_WORKFLOW_DIGEST,
 } from "../chimpbase.app.ts";
-import { LocalArtifactByteDriver } from "./adapters/artifact-byte-driver.ts";
+import {
+  LocalArtifactByteDriver,
+  MemoryArtifactByteDriver,
+} from "./adapters/artifact-byte-driver.ts";
 import { GitHubEventNormalizer } from "./adapters/github-event-normalizer.ts";
 import {
   FetchGitHubReadTransport,
@@ -33,7 +36,29 @@ import {
   DefinitionCompileError,
   type FactoryDefinition,
 } from "./compiler.ts";
-import { type FactoryEvent, factoryEvent, type OperationsHealth } from "./contracts/index.ts";
+import {
+  agentResult,
+  effectResultV3,
+  type FactoryEvent,
+  factoryEvent,
+  type OperationsHealth,
+  type ReplayEvent,
+  replayEvent,
+} from "./contracts/index.ts";
+import {
+  DeterministicReplayClock,
+  DeterministicReplayIds,
+  parseReplayBundle,
+  type TrustedReplayPins,
+  verifyReplayBundle,
+  verifyReplayObservation,
+} from "./replay.ts";
+import {
+  FakeAgentRuntime,
+  FakeGitHubReadTransport,
+  FakeGitHubWriteTransport,
+  FakeGitPublisher,
+} from "./testing/fakes.ts";
 
 export interface CliIo {
   readonly stderr: (text: string) => void;
@@ -238,6 +263,7 @@ export async function runCli(
     if (command === "daemon") return await daemonCommand(rest, io, dependencies);
     if (command === "trigger") return await triggerCommand(rest, io, dependencies);
     if (command === "skills") return await skillsCommand(rest, io, dependencies);
+    if (command === "replay") return await replayCommand(rest, io, dependencies);
     if (
       command === "status" ||
       command === "runs" ||
@@ -262,7 +288,7 @@ export async function runCli(
       return 0;
     }
     io.stderr(
-      "Usage: factory validate|plan|skills|poll|daemon|trigger|status|runs|show|events|effects|pause|resume|retry|cancel|approve|reject|doctor|modules check\n",
+      "Usage: factory validate|plan|skills|poll|daemon|trigger|status|runs|show|events|effects|pause|resume|retry|cancel|approve|reject|doctor|replay|modules check\n",
     );
     return 2;
   } catch (error) {
@@ -276,6 +302,149 @@ export async function runCli(
     }
     io.stderr(`${error instanceof Error ? error.message : String(error)}\n`);
     return 1;
+  }
+}
+
+async function replayCommand(
+  argv: readonly string[],
+  io: CliIo,
+  dependencies: CliDependencies,
+): Promise<number> {
+  const { positionals, values } = parseArgs({
+    allowPositionals: true,
+    args: [...argv],
+    options: {
+      config: { type: "string", default: process.env.FACTORY_CONFIG ?? "factory.yaml" },
+      json: { type: "boolean", default: false },
+    },
+    strict: true,
+  });
+  if (positionals.length !== 1) throw new Error("replay requires exactly one bundle path");
+  const bundle = parseReplayBundle(await dependencies.readText(positionals[0] as string));
+  const definition = compileFactoryDefinition(await dependencies.readText(values.config), {
+    sourceName: values.config,
+  });
+  const plan = Object.values(definition.plansV3).find(
+    (candidate) => candidate.flowDigest === bundle.pins.flowDigest,
+  );
+  if (plan === undefined) throw new Error("digest_mismatch: flow");
+  const manifest = await readFile(new URL("../module-contracts/manifest.json", import.meta.url));
+  const allowedCapabilities = [
+    ...new Set([
+      ...Object.values(plan.agentProfiles).flatMap((profile) => profile.capabilities),
+      ...plan.effectPermissions.map((permission) => permission.capability),
+    ]),
+  ].sort();
+  const trusted: TrustedReplayPins = {
+    agentProfileDigests: plan.agentProfileDigests,
+    allowedCapabilities,
+    definitionDigest: definition.revision.definitionDigest,
+    flowDigest: plan.flowDigest,
+    moduleManifestDigest: createHash("sha256").update(manifest).digest("hex"),
+    skillDigests: plan.skillRevisions,
+    workflowVersionDigest: FACTORY_RUNS_V2_WORKFLOW_DIGEST,
+  };
+  verifyReplayBundle(bundle, trusted);
+
+  const ids = new DeterministicReplayIds(bundle.fixtures.ids);
+  const clock = new DeterministicReplayClock(bundle.fixtures.clock);
+  const pendingAgentResults = bundle.fixtures.agentResults.map((value) => agentResult.parse(value));
+  const agentRuntime =
+    pendingAgentResults.length === 0
+      ? new FakeAgentRuntime()
+      : new FakeAgentRuntime((request) => {
+          const next = pendingAgentResults.shift();
+          if (next === undefined) throw new Error("replay_fixture_exhausted: agentResults");
+          return agentResult.parse({
+            ...next,
+            attemptId: request.attemptId,
+            timing: { ...next.timing, startedAt: request.startedAt },
+          });
+        });
+  const effectResults = bundle.fixtures.effectResults.map((value) => effectResultV3.parse(value));
+  const readTransport = new FakeGitHubReadTransport();
+  const writeTransport = new FakeGitHubWriteTransport({ applies: effectResults });
+  const gitPublisher = new FakeGitPublisher();
+  const app = createSoftwareFactoryApp({
+    agentRuntime,
+    artifactByteDriver: new MemoryArtifactByteDriver(),
+    clock: clock.now,
+    credentialsPresent: () => false,
+    gitPublisher,
+    githubWriteTransport: writeTransport,
+    moduleManifestDigest: trusted.moduleManifestDigest,
+    now: clock.now,
+    random: () => 0,
+    readTransport,
+    repositoryReachability: () => ({}),
+    workflowVersionDigest: trusted.workflowVersionDigest,
+  });
+  const runtime =
+    "Bun" in globalThis
+      ? await import("chimpbase/runtime/bun")
+      : await import("chimpbase/runtime/node");
+  const host = await runtime.createChimpbase({
+    app,
+    projectDir: process.cwd(),
+    storage: { engine: "memory" },
+    subscriptions: { dispatch: "sync" },
+  });
+  try {
+    await activateCheckedDefinition(host, values.config, dependencies);
+    const projectedSources = bundle.events
+      .filter((event) => event.kind === "source.accepted")
+      .map((event) =>
+        factoryEvent.parse({ ...(event.payload as Record<string, unknown>), payload: {} }),
+      );
+    const fixtureSources = bundle.fixtures.githubReads.map((value) => factoryEvent.parse(value));
+    const sources = new Map<string, FactoryEvent>();
+    for (const event of [...projectedSources, ...fixtureSources])
+      sources.set(`${event.sourceId}\0${event.deliveryId}`, event);
+    for (const event of sources.values()) {
+      const cursor = (
+        await host.executeAction("intake/getSourceCursor@v1", { sourceId: event.sourceId })
+      ).result as { readonly cursor: string } | null;
+      await host.executeAction("intake/acceptSourceEventV2@v1", {
+        event,
+        expectedCursor: cursor?.cursor ?? null,
+        nextCursor: cursor?.cursor ?? event.sourceRevision,
+      });
+    }
+    await host.drain({ maxDurationMs: 30_000 });
+    const details = (await host.executeAction("operations/showRunV2@v1", { runId: bundle.runId }))
+      .result as { readonly timeline: readonly ReplayEvent[] } | null;
+    const observedEvents = (details?.timeline ?? []).map((event) => replayEvent.parse(event));
+    const fakeWrites =
+      writeTransport.calls.length +
+      gitPublisher.mutations.length +
+      gitPublisher.publications.length;
+    const adapters: Readonly<Record<string, "fake" | "live">> = {
+      agent: "fake",
+      git: "fake",
+      githubRead: "fake",
+      githubWrite: "fake",
+    };
+    const liveWrites = Object.values(adapters).some((adapter) => adapter !== "fake")
+      ? fakeWrites
+      : 0;
+    const result = verifyReplayObservation(bundle, trusted, observedEvents, {
+      fake: fakeWrites,
+      live: liveWrites,
+    });
+    const output = {
+      replayId: ids.next(),
+      ...result,
+      infrastructure: "fake",
+      storage: "memory",
+    };
+    io.stdout(
+      values.json
+        ? `${canonicalJson(output)}\n`
+        : `replayed ${result.bundleDigest}\ntransitions: ${result.transitions.length}\neffects: ${result.effectIntents.length}\nfake writes: ${result.fakeWrites}\nlive writes: ${result.liveWrites}\n`,
+    );
+    return 0;
+  } finally {
+    await host.close();
   }
 }
 
@@ -986,7 +1155,7 @@ async function loadDefinition(
 }
 
 async function activateCheckedDefinition(
-  host: CliHost,
+  host: Pick<CliHost, "executeAction">,
   config: string,
   dependencies: CliDependencies,
 ): Promise<void> {
