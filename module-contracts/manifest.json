@@ -8,6 +8,12 @@
     },
     {
       "consumer": "runs",
+      "event": "effects/effectFinished@v3",
+      "publisher": "effects",
+      "subscription": "record-effect-outcome-v3"
+    },
+    {
+      "consumer": "runs",
       "event": "execution/attemptFinished@v1",
       "publisher": "execution",
       "subscription": "record-attempt-outcome-v1"
@@ -3570,6 +3576,523 @@
             "module_unavailable"
           ],
           "guarantees": [
+            "correlates only factory-marked bot events to a committed receipt"
+          ],
+          "id": "effects/correlateBotEventV3@v1",
+          "inputSchema": {
+            "properties": {
+              "actorType": {
+                "enum": [
+                  "bot",
+                  "unknown",
+                  "user"
+                ]
+              },
+              "body": {
+                "type": "string"
+              },
+              "externalId": {
+                "type": "string"
+              },
+              "observedAt": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "actorType",
+              "body",
+              "externalId",
+              "observedAt"
+            ],
+            "type": "object"
+          },
+          "name": "correlateBotEventV3",
+          "outputSchema": {
+            "anyOf": [
+              {
+                "properties": {
+                  "correlationToken": {
+                    "type": "string"
+                  },
+                  "effectId": {
+                    "type": "string"
+                  },
+                  "externalId": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "externalRevision": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "externalUrl": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "failureCategory": {
+                    "anyOf": [
+                      {
+                        "enum": [
+                          "permission",
+                          "rate_limit",
+                          "conflict",
+                          "ambiguous_network",
+                          "validation",
+                          "provider",
+                          "unavailable"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "finishedAt": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "idempotencyKey": {
+                    "type": "string"
+                  },
+                  "outcome": {
+                    "anyOf": [
+                      {
+                        "enum": [
+                          "applied",
+                          "already_applied",
+                          "conflict",
+                          "rejected",
+                          "failed"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "recordedAt": {
+                    "type": "string"
+                  },
+                  "runId": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "enum": [
+                      "queued",
+                      "finished"
+                    ]
+                  }
+                },
+                "required": [
+                  "correlationToken",
+                  "effectId",
+                  "externalId",
+                  "externalRevision",
+                  "externalUrl",
+                  "failureCategory",
+                  "finishedAt",
+                  "idempotencyKey",
+                  "outcome",
+                  "recordedAt",
+                  "runId",
+                  "status"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "version": 1
+        },
+        {
+          "errors": [
+            "module_unavailable"
+          ],
+          "guarantees": [
+            "returns the exact persisted no-write plan"
+          ],
+          "id": "effects/getDryRunV3@v1",
+          "inputSchema": {
+            "properties": {
+              "idempotencyKey": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "idempotencyKey"
+            ],
+            "type": "object"
+          },
+          "name": "getDryRunV3",
+          "outputSchema": {
+            "anyOf": [
+              {
+                "properties": {
+                  "idempotencyKey": {
+                    "type": "string"
+                  },
+                  "operation": {
+                    "anyOf": [
+                      {
+                        "properties": {
+                          "kind": {
+                            "const": "add-label"
+                          },
+                          "payload": {
+                            "properties": {
+                              "issueNumber": {
+                                "type": "integer"
+                              },
+                              "label": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "issueNumber",
+                              "label"
+                            ],
+                            "type": "object"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "payload"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "properties": {
+                          "kind": {
+                            "const": "remove-label"
+                          },
+                          "payload": {
+                            "properties": {
+                              "issueNumber": {
+                                "type": "integer"
+                              },
+                              "label": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "issueNumber",
+                              "label"
+                            ],
+                            "type": "object"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "payload"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "properties": {
+                          "kind": {
+                            "const": "create-comment"
+                          },
+                          "payload": {
+                            "properties": {
+                              "artifactDigests": {
+                                "items": {
+                                  "type": "string"
+                                },
+                                "type": "array"
+                              },
+                              "issueNumber": {
+                                "type": "integer"
+                              }
+                            },
+                            "required": [
+                              "artifactDigests",
+                              "issueNumber"
+                            ],
+                            "type": "object"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "payload"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "properties": {
+                          "kind": {
+                            "const": "update-comment"
+                          },
+                          "payload": {
+                            "properties": {
+                              "artifactDigests": {
+                                "items": {
+                                  "type": "string"
+                                },
+                                "type": "array"
+                              },
+                              "commentId": {
+                                "type": "string"
+                              },
+                              "issueNumber": {
+                                "type": "integer"
+                              }
+                            },
+                            "required": [
+                              "artifactDigests",
+                              "issueNumber",
+                              "commentId"
+                            ],
+                            "type": "object"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "payload"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "properties": {
+                          "kind": {
+                            "const": "create-branch"
+                          },
+                          "payload": {
+                            "properties": {
+                              "baseRevision": {
+                                "type": "string"
+                              },
+                              "branch": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "baseRevision",
+                              "branch"
+                            ],
+                            "type": "object"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "payload"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "properties": {
+                          "kind": {
+                            "const": "delete-branch"
+                          },
+                          "payload": {
+                            "properties": {
+                              "branch": {
+                                "type": "string"
+                              },
+                              "headRevision": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "branch",
+                              "headRevision"
+                            ],
+                            "type": "object"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "payload"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "properties": {
+                          "kind": {
+                            "const": "push-verified-commit"
+                          },
+                          "payload": {
+                            "properties": {
+                              "baseRevision": {
+                                "type": "string"
+                              },
+                              "branch": {
+                                "type": "string"
+                              },
+                              "commitMessage": {
+                                "type": "string"
+                              },
+                              "treeDigest": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "verified": {
+                                "const": true
+                              }
+                            },
+                            "required": [
+                              "baseRevision",
+                              "branch",
+                              "commitMessage",
+                              "treeDigest",
+                              "verified"
+                            ],
+                            "type": "object"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "payload"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "properties": {
+                          "kind": {
+                            "const": "create-pull-request"
+                          },
+                          "payload": {
+                            "properties": {
+                              "artifactDigests": {
+                                "items": {
+                                  "type": "string"
+                                },
+                                "type": "array"
+                              },
+                              "base": {
+                                "type": "string"
+                              },
+                              "head": {
+                                "type": "string"
+                              },
+                              "title": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "artifactDigests",
+                              "base",
+                              "head",
+                              "title"
+                            ],
+                            "type": "object"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "payload"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "properties": {
+                          "kind": {
+                            "const": "update-pull-request"
+                          },
+                          "payload": {
+                            "properties": {
+                              "artifactDigests": {
+                                "items": {
+                                  "type": "string"
+                                },
+                                "type": "array"
+                              },
+                              "pullRequestNumber": {
+                                "type": "integer"
+                              },
+                              "title": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "artifactDigests",
+                              "pullRequestNumber"
+                            ],
+                            "type": "object"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "payload"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "payloadDigest": {
+                    "type": "string"
+                  },
+                  "plannedAt": {
+                    "type": "string"
+                  },
+                  "target": {
+                    "properties": {
+                      "repository": {
+                        "type": "string"
+                      },
+                      "subject": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "repository",
+                      "subject"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "idempotencyKey",
+                  "operation",
+                  "payloadDigest",
+                  "plannedAt",
+                  "target"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "version": 1
+        },
+        {
+          "errors": [
+            "module_unavailable"
+          ],
+          "guarantees": [
             "returns only committed receipts"
           ],
           "id": "effects/getReceipt@v1",
@@ -3709,6 +4232,149 @@
                   "outcome",
                   "recordedAt",
                   "runId"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "version": 1
+        },
+        {
+          "errors": [
+            "module_unavailable"
+          ],
+          "guarantees": [
+            "returns the sole strict committed receipt"
+          ],
+          "id": "effects/getReceiptV3@v1",
+          "inputSchema": {
+            "properties": {
+              "idempotencyKey": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "idempotencyKey"
+            ],
+            "type": "object"
+          },
+          "name": "getReceiptV3",
+          "outputSchema": {
+            "anyOf": [
+              {
+                "properties": {
+                  "correlationToken": {
+                    "type": "string"
+                  },
+                  "effectId": {
+                    "type": "string"
+                  },
+                  "externalId": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "externalRevision": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "externalUrl": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "failureCategory": {
+                    "anyOf": [
+                      {
+                        "enum": [
+                          "permission",
+                          "rate_limit",
+                          "conflict",
+                          "ambiguous_network",
+                          "validation",
+                          "provider",
+                          "unavailable"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "finishedAt": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "idempotencyKey": {
+                    "type": "string"
+                  },
+                  "outcome": {
+                    "anyOf": [
+                      {
+                        "enum": [
+                          "applied",
+                          "already_applied",
+                          "conflict",
+                          "rejected",
+                          "failed"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "recordedAt": {
+                    "type": "string"
+                  },
+                  "runId": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "enum": [
+                      "queued",
+                      "finished"
+                    ]
+                  }
+                },
+                "required": [
+                  "correlationToken",
+                  "effectId",
+                  "externalId",
+                  "externalRevision",
+                  "externalUrl",
+                  "failureCategory",
+                  "finishedAt",
+                  "idempotencyKey",
+                  "outcome",
+                  "recordedAt",
+                  "runId",
+                  "status"
                 ],
                 "type": "object"
               },
@@ -3866,6 +4532,148 @@
               "outcome",
               "recordedAt",
               "runId"
+            ],
+            "type": "object"
+          },
+          "version": 1
+        },
+        {
+          "errors": [
+            "module_unavailable",
+            "receipt_not_found",
+            "reconciliation_failed"
+          ],
+          "guarantees": [
+            "probes the idempotency marker without repeating the external write"
+          ],
+          "id": "effects/reconcileEffectV3@v1",
+          "inputSchema": {
+            "properties": {
+              "idempotencyKey": {
+                "type": "string"
+              },
+              "observedAt": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "idempotencyKey",
+              "observedAt"
+            ],
+            "type": "object"
+          },
+          "name": "reconcileEffectV3",
+          "outputSchema": {
+            "properties": {
+              "correlationToken": {
+                "type": "string"
+              },
+              "effectId": {
+                "type": "string"
+              },
+              "externalId": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "externalRevision": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "externalUrl": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "failureCategory": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "permission",
+                      "rate_limit",
+                      "conflict",
+                      "ambiguous_network",
+                      "validation",
+                      "provider",
+                      "unavailable"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "finishedAt": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "idempotencyKey": {
+                "type": "string"
+              },
+              "outcome": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "applied",
+                      "already_applied",
+                      "conflict",
+                      "rejected",
+                      "failed"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "recordedAt": {
+                "type": "string"
+              },
+              "runId": {
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "queued",
+                  "finished"
+                ]
+              }
+            },
+            "required": [
+              "correlationToken",
+              "effectId",
+              "externalId",
+              "externalRevision",
+              "externalUrl",
+              "failureCategory",
+              "finishedAt",
+              "idempotencyKey",
+              "outcome",
+              "recordedAt",
+              "runId",
+              "status"
             ],
             "type": "object"
           },
@@ -4088,6 +4896,529 @@
             "type": "object"
           },
           "version": 1
+        },
+        {
+          "errors": [
+            "module_unavailable",
+            "effect_forbidden",
+            "stale_external_revision",
+            "payload_digest_mismatch"
+          ],
+          "guarantees": [
+            "persists strict intent, precondition, and receipt before durable execution",
+            "never accepts executable credentials"
+          ],
+          "id": "effects/requestEffectV3@v1",
+          "inputSchema": {
+            "properties": {
+              "capability": {
+                "type": "string"
+              },
+              "correlationToken": {
+                "type": "string"
+              },
+              "dryRun": {
+                "type": "boolean"
+              },
+              "expectedExternalRevision": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "idempotencyKey": {
+                "type": "string"
+              },
+              "operation": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "add-label"
+                      },
+                      "payload": {
+                        "properties": {
+                          "issueNumber": {
+                            "type": "integer"
+                          },
+                          "label": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "issueNumber",
+                          "label"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "payload"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "remove-label"
+                      },
+                      "payload": {
+                        "properties": {
+                          "issueNumber": {
+                            "type": "integer"
+                          },
+                          "label": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "issueNumber",
+                          "label"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "payload"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "create-comment"
+                      },
+                      "payload": {
+                        "properties": {
+                          "artifactDigests": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "issueNumber": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "artifactDigests",
+                          "issueNumber"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "payload"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "update-comment"
+                      },
+                      "payload": {
+                        "properties": {
+                          "artifactDigests": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "commentId": {
+                            "type": "string"
+                          },
+                          "issueNumber": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "artifactDigests",
+                          "issueNumber",
+                          "commentId"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "payload"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "create-branch"
+                      },
+                      "payload": {
+                        "properties": {
+                          "baseRevision": {
+                            "type": "string"
+                          },
+                          "branch": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "baseRevision",
+                          "branch"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "payload"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "delete-branch"
+                      },
+                      "payload": {
+                        "properties": {
+                          "branch": {
+                            "type": "string"
+                          },
+                          "headRevision": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "branch",
+                          "headRevision"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "payload"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "push-verified-commit"
+                      },
+                      "payload": {
+                        "properties": {
+                          "baseRevision": {
+                            "type": "string"
+                          },
+                          "branch": {
+                            "type": "string"
+                          },
+                          "commitMessage": {
+                            "type": "string"
+                          },
+                          "treeDigest": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "verified": {
+                            "const": true
+                          }
+                        },
+                        "required": [
+                          "baseRevision",
+                          "branch",
+                          "commitMessage",
+                          "treeDigest",
+                          "verified"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "payload"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "create-pull-request"
+                      },
+                      "payload": {
+                        "properties": {
+                          "artifactDigests": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "base": {
+                            "type": "string"
+                          },
+                          "head": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "artifactDigests",
+                          "base",
+                          "head",
+                          "title"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "payload"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "update-pull-request"
+                      },
+                      "payload": {
+                        "properties": {
+                          "artifactDigests": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "pullRequestNumber": {
+                            "type": "integer"
+                          },
+                          "title": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "artifactDigests",
+                          "pullRequestNumber"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "payload"
+                    ],
+                    "type": "object"
+                  }
+                ]
+              },
+              "payloadDigest": {
+                "type": "string"
+              },
+              "provenance": {
+                "properties": {
+                  "agentProfileId": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "definitionDigest": {
+                    "type": "string"
+                  },
+                  "flowId": {
+                    "type": "string"
+                  },
+                  "requestedBy": {
+                    "enum": [
+                      "operator",
+                      "runs"
+                    ]
+                  },
+                  "runId": {
+                    "type": "string"
+                  },
+                  "stepId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "agentProfileId",
+                  "definitionDigest",
+                  "flowId",
+                  "requestedBy",
+                  "runId",
+                  "stepId"
+                ],
+                "type": "object"
+              },
+              "requestedAt": {
+                "type": "string"
+              },
+              "target": {
+                "properties": {
+                  "repository": {
+                    "type": "string"
+                  },
+                  "subject": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "repository",
+                  "subject"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "capability",
+              "correlationToken",
+              "dryRun",
+              "expectedExternalRevision",
+              "idempotencyKey",
+              "operation",
+              "payloadDigest",
+              "provenance",
+              "requestedAt",
+              "target"
+            ],
+            "type": "object"
+          },
+          "name": "requestEffectV3",
+          "outputSchema": {
+            "properties": {
+              "correlationToken": {
+                "type": "string"
+              },
+              "effectId": {
+                "type": "string"
+              },
+              "externalId": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "externalRevision": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "externalUrl": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "failureCategory": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "permission",
+                      "rate_limit",
+                      "conflict",
+                      "ambiguous_network",
+                      "validation",
+                      "provider",
+                      "unavailable"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "finishedAt": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "idempotencyKey": {
+                "type": "string"
+              },
+              "outcome": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "applied",
+                      "already_applied",
+                      "conflict",
+                      "rejected",
+                      "failed"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "recordedAt": {
+                "type": "string"
+              },
+              "runId": {
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "queued",
+                  "finished"
+                ]
+              }
+            },
+            "required": [
+              "correlationToken",
+              "effectId",
+              "externalId",
+              "externalRevision",
+              "externalUrl",
+              "failureCategory",
+              "finishedAt",
+              "idempotencyKey",
+              "outcome",
+              "recordedAt",
+              "runId",
+              "status"
+            ],
+            "type": "object"
+          },
+          "version": 1
         }
       ],
       "dependencies": [
@@ -4202,6 +5533,104 @@
           "version": 2
         },
         {
+          "id": "effects/effectFinished@v3",
+          "name": "effectFinished",
+          "payloadSchema": {
+            "properties": {
+              "correlationToken": {
+                "type": "string"
+              },
+              "effectId": {
+                "type": "string"
+              },
+              "externalId": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "externalRevision": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "externalUrl": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "failureCategory": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "permission",
+                      "rate_limit",
+                      "conflict",
+                      "ambiguous_network",
+                      "validation",
+                      "provider",
+                      "unavailable"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "finishedAt": {
+                "type": "string"
+              },
+              "idempotencyKey": {
+                "type": "string"
+              },
+              "outcome": {
+                "enum": [
+                  "applied",
+                  "already_applied",
+                  "conflict",
+                  "rejected",
+                  "failed"
+                ]
+              },
+              "recordedAt": {
+                "type": "string"
+              },
+              "runId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "correlationToken",
+              "effectId",
+              "externalId",
+              "externalRevision",
+              "externalUrl",
+              "failureCategory",
+              "finishedAt",
+              "idempotencyKey",
+              "outcome",
+              "recordedAt",
+              "runId"
+            ],
+            "type": "object"
+          },
+          "version": 3
+        },
+        {
           "id": "effects/effectQueued@v1",
           "name": "effectQueued",
           "payloadSchema": {
@@ -4255,33 +5684,443 @@
             "type": "object"
           },
           "version": 1
+        },
+        {
+          "id": "effects/effectQueued@v2",
+          "name": "effectQueued",
+          "payloadSchema": {
+            "properties": {
+              "capability": {
+                "type": "string"
+              },
+              "correlationToken": {
+                "type": "string"
+              },
+              "dryRun": {
+                "type": "boolean"
+              },
+              "expectedExternalRevision": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "idempotencyKey": {
+                "type": "string"
+              },
+              "operation": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "add-label"
+                      },
+                      "payload": {
+                        "properties": {
+                          "issueNumber": {
+                            "type": "integer"
+                          },
+                          "label": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "issueNumber",
+                          "label"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "payload"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "remove-label"
+                      },
+                      "payload": {
+                        "properties": {
+                          "issueNumber": {
+                            "type": "integer"
+                          },
+                          "label": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "issueNumber",
+                          "label"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "payload"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "create-comment"
+                      },
+                      "payload": {
+                        "properties": {
+                          "artifactDigests": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "issueNumber": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "artifactDigests",
+                          "issueNumber"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "payload"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "update-comment"
+                      },
+                      "payload": {
+                        "properties": {
+                          "artifactDigests": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "commentId": {
+                            "type": "string"
+                          },
+                          "issueNumber": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "artifactDigests",
+                          "issueNumber",
+                          "commentId"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "payload"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "create-branch"
+                      },
+                      "payload": {
+                        "properties": {
+                          "baseRevision": {
+                            "type": "string"
+                          },
+                          "branch": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "baseRevision",
+                          "branch"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "payload"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "delete-branch"
+                      },
+                      "payload": {
+                        "properties": {
+                          "branch": {
+                            "type": "string"
+                          },
+                          "headRevision": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "branch",
+                          "headRevision"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "payload"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "push-verified-commit"
+                      },
+                      "payload": {
+                        "properties": {
+                          "baseRevision": {
+                            "type": "string"
+                          },
+                          "branch": {
+                            "type": "string"
+                          },
+                          "commitMessage": {
+                            "type": "string"
+                          },
+                          "treeDigest": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "verified": {
+                            "const": true
+                          }
+                        },
+                        "required": [
+                          "baseRevision",
+                          "branch",
+                          "commitMessage",
+                          "treeDigest",
+                          "verified"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "payload"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "create-pull-request"
+                      },
+                      "payload": {
+                        "properties": {
+                          "artifactDigests": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "base": {
+                            "type": "string"
+                          },
+                          "head": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "artifactDigests",
+                          "base",
+                          "head",
+                          "title"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "payload"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "update-pull-request"
+                      },
+                      "payload": {
+                        "properties": {
+                          "artifactDigests": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "pullRequestNumber": {
+                            "type": "integer"
+                          },
+                          "title": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "artifactDigests",
+                          "pullRequestNumber"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "payload"
+                    ],
+                    "type": "object"
+                  }
+                ]
+              },
+              "payloadDigest": {
+                "type": "string"
+              },
+              "provenance": {
+                "properties": {
+                  "agentProfileId": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "definitionDigest": {
+                    "type": "string"
+                  },
+                  "flowId": {
+                    "type": "string"
+                  },
+                  "requestedBy": {
+                    "enum": [
+                      "operator",
+                      "runs"
+                    ]
+                  },
+                  "runId": {
+                    "type": "string"
+                  },
+                  "stepId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "agentProfileId",
+                  "definitionDigest",
+                  "flowId",
+                  "requestedBy",
+                  "runId",
+                  "stepId"
+                ],
+                "type": "object"
+              },
+              "requestedAt": {
+                "type": "string"
+              },
+              "target": {
+                "properties": {
+                  "repository": {
+                    "type": "string"
+                  },
+                  "subject": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "repository",
+                  "subject"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "capability",
+              "correlationToken",
+              "dryRun",
+              "expectedExternalRevision",
+              "idempotencyKey",
+              "operation",
+              "payloadDigest",
+              "provenance",
+              "requestedAt",
+              "target"
+            ],
+            "type": "object"
+          },
+          "version": 2
         }
       ],
       "migrations": {
         "postgres": [
           "001_ledger",
-          "002_receipts"
+          "002_receipts",
+          "003_strict_effects"
         ],
         "sqlite": [
           "001_ledger",
-          "002_receipts"
+          "002_receipts",
+          "003_strict_effects"
         ]
       },
       "name": "effects",
       "resources": {
         "collections": [
+          "effect-bot-correlations",
+          "effect-dry-runs",
           "effect-intents",
           "effect-receipts",
           "effect-reconciliation"
         ],
         "queues": [
-          "effect-workers"
+          "effect-workers",
+          "effect-workers.dlq"
         ],
         "tables": [
+          "effect_bot_correlations_v3",
+          "effect_dry_runs_v3",
           "effect_intents",
+          "effect_intents_v3",
           "effect_preconditions",
+          "effect_preconditions_v3",
           "effect_receipts",
-          "effect_reconciliation"
+          "effect_receipts_v3",
+          "effect_reconciliation",
+          "effect_reconciliation_v3"
         ]
       },
       "subscriptions": [],
@@ -4408,6 +6247,38 @@
                   "stepId"
                 ],
                 "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "version": 1
+        },
+        {
+          "errors": [
+            "module_unavailable"
+          ],
+          "guarantees": [
+            "returns only the trusted git tree pinned from the isolated workspace"
+          ],
+          "id": "execution/getAttemptGitTreeV1@v1",
+          "inputSchema": {
+            "properties": {
+              "attemptId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "attemptId"
+            ],
+            "type": "object"
+          },
+          "name": "getAttemptGitTreeV1",
+          "outputSchema": {
+            "anyOf": [
+              {
+                "type": "string"
               },
               {
                 "type": "null"
@@ -9950,6 +11821,405 @@
           "version": 2
         },
         {
+          "id": "runs/effectRequested@v3",
+          "name": "effectRequested",
+          "payloadSchema": {
+            "properties": {
+              "capability": {
+                "type": "string"
+              },
+              "correlationToken": {
+                "type": "string"
+              },
+              "dryRun": {
+                "type": "boolean"
+              },
+              "expectedExternalRevision": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "idempotencyKey": {
+                "type": "string"
+              },
+              "operation": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "add-label"
+                      },
+                      "payload": {
+                        "properties": {
+                          "issueNumber": {
+                            "type": "integer"
+                          },
+                          "label": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "issueNumber",
+                          "label"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "payload"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "remove-label"
+                      },
+                      "payload": {
+                        "properties": {
+                          "issueNumber": {
+                            "type": "integer"
+                          },
+                          "label": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "issueNumber",
+                          "label"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "payload"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "create-comment"
+                      },
+                      "payload": {
+                        "properties": {
+                          "artifactDigests": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "issueNumber": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "artifactDigests",
+                          "issueNumber"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "payload"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "update-comment"
+                      },
+                      "payload": {
+                        "properties": {
+                          "artifactDigests": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "commentId": {
+                            "type": "string"
+                          },
+                          "issueNumber": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "artifactDigests",
+                          "issueNumber",
+                          "commentId"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "payload"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "create-branch"
+                      },
+                      "payload": {
+                        "properties": {
+                          "baseRevision": {
+                            "type": "string"
+                          },
+                          "branch": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "baseRevision",
+                          "branch"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "payload"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "delete-branch"
+                      },
+                      "payload": {
+                        "properties": {
+                          "branch": {
+                            "type": "string"
+                          },
+                          "headRevision": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "branch",
+                          "headRevision"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "payload"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "push-verified-commit"
+                      },
+                      "payload": {
+                        "properties": {
+                          "baseRevision": {
+                            "type": "string"
+                          },
+                          "branch": {
+                            "type": "string"
+                          },
+                          "commitMessage": {
+                            "type": "string"
+                          },
+                          "treeDigest": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "verified": {
+                            "const": true
+                          }
+                        },
+                        "required": [
+                          "baseRevision",
+                          "branch",
+                          "commitMessage",
+                          "treeDigest",
+                          "verified"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "payload"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "create-pull-request"
+                      },
+                      "payload": {
+                        "properties": {
+                          "artifactDigests": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "base": {
+                            "type": "string"
+                          },
+                          "head": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "artifactDigests",
+                          "base",
+                          "head",
+                          "title"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "payload"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "update-pull-request"
+                      },
+                      "payload": {
+                        "properties": {
+                          "artifactDigests": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "pullRequestNumber": {
+                            "type": "integer"
+                          },
+                          "title": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "artifactDigests",
+                          "pullRequestNumber"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "payload"
+                    ],
+                    "type": "object"
+                  }
+                ]
+              },
+              "payloadDigest": {
+                "type": "string"
+              },
+              "provenance": {
+                "properties": {
+                  "agentProfileId": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "definitionDigest": {
+                    "type": "string"
+                  },
+                  "flowId": {
+                    "type": "string"
+                  },
+                  "requestedBy": {
+                    "enum": [
+                      "operator",
+                      "runs"
+                    ]
+                  },
+                  "runId": {
+                    "type": "string"
+                  },
+                  "stepId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "agentProfileId",
+                  "definitionDigest",
+                  "flowId",
+                  "requestedBy",
+                  "runId",
+                  "stepId"
+                ],
+                "type": "object"
+              },
+              "requestedAt": {
+                "type": "string"
+              },
+              "target": {
+                "properties": {
+                  "repository": {
+                    "type": "string"
+                  },
+                  "subject": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "repository",
+                  "subject"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "capability",
+              "correlationToken",
+              "dryRun",
+              "expectedExternalRevision",
+              "idempotencyKey",
+              "operation",
+              "payloadDigest",
+              "provenance",
+              "requestedAt",
+              "target"
+            ],
+            "type": "object"
+          },
+          "version": 3
+        },
+        {
           "id": "runs/runFinished@v1",
           "name": "runFinished",
           "payloadSchema": {
@@ -10595,14 +12865,16 @@
           "002_audit_and_gates",
           "003_engine_state_and_admission",
           "004_atomic_admission_and_generations",
-          "005_execution_request_pins"
+          "005_execution_request_pins",
+          "006_effect_tree_pin"
         ],
         "sqlite": [
           "001_ledger",
           "002_audit_and_gates",
           "003_engine_state_and_admission",
           "004_atomic_admission_and_generations",
-          "005_execution_request_pins"
+          "005_execution_request_pins",
+          "006_effect_tree_pin"
         ]
       },
       "name": "runs",
@@ -10621,6 +12893,7 @@
           "run_admission_slots",
           "run_admissions",
           "run_audit",
+          "run_effect_tree_pins",
           "run_engine_state",
           "run_execution_pins",
           "run_gates",
@@ -10645,6 +12918,10 @@
         {
           "event": "effects/effectFinished@v2",
           "name": "record-effect-outcome"
+        },
+        {
+          "event": "effects/effectFinished@v3",
+          "name": "record-effect-outcome-v3"
         },
         {
           "event": "intake/factoryEventAccepted@v2",
@@ -13959,6 +16236,511 @@
     {
       "inputSchema": {
         "properties": {
+          "actorType": {
+            "enum": [
+              "bot",
+              "unknown",
+              "user"
+            ]
+          },
+          "body": {
+            "type": "string"
+          },
+          "externalId": {
+            "type": "string"
+          },
+          "observedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "actorType",
+          "body",
+          "externalId",
+          "observedAt"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "effects/correlateBotEventV3@v1",
+      "outputSchema": {
+        "anyOf": [
+          {
+            "properties": {
+              "correlationToken": {
+                "type": "string"
+              },
+              "effectId": {
+                "type": "string"
+              },
+              "externalId": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "externalRevision": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "externalUrl": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "failureCategory": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "permission",
+                      "rate_limit",
+                      "conflict",
+                      "ambiguous_network",
+                      "validation",
+                      "provider",
+                      "unavailable"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "finishedAt": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "idempotencyKey": {
+                "type": "string"
+              },
+              "outcome": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "applied",
+                      "already_applied",
+                      "conflict",
+                      "rejected",
+                      "failed"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "recordedAt": {
+                "type": "string"
+              },
+              "runId": {
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "queued",
+                  "finished"
+                ]
+              }
+            },
+            "required": [
+              "correlationToken",
+              "effectId",
+              "externalId",
+              "externalRevision",
+              "externalUrl",
+              "failureCategory",
+              "finishedAt",
+              "idempotencyKey",
+              "outcome",
+              "recordedAt",
+              "runId",
+              "status"
+            ],
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "provider": "effects"
+    },
+    {
+      "inputSchema": {
+        "properties": {
+          "idempotencyKey": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "idempotencyKey"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "effects/getDryRunV3@v1",
+      "outputSchema": {
+        "anyOf": [
+          {
+            "properties": {
+              "idempotencyKey": {
+                "type": "string"
+              },
+              "operation": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "add-label"
+                      },
+                      "payload": {
+                        "properties": {
+                          "issueNumber": {
+                            "type": "integer"
+                          },
+                          "label": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "issueNumber",
+                          "label"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "payload"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "remove-label"
+                      },
+                      "payload": {
+                        "properties": {
+                          "issueNumber": {
+                            "type": "integer"
+                          },
+                          "label": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "issueNumber",
+                          "label"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "payload"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "create-comment"
+                      },
+                      "payload": {
+                        "properties": {
+                          "artifactDigests": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "issueNumber": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "artifactDigests",
+                          "issueNumber"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "payload"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "update-comment"
+                      },
+                      "payload": {
+                        "properties": {
+                          "artifactDigests": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "commentId": {
+                            "type": "string"
+                          },
+                          "issueNumber": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "artifactDigests",
+                          "issueNumber",
+                          "commentId"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "payload"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "create-branch"
+                      },
+                      "payload": {
+                        "properties": {
+                          "baseRevision": {
+                            "type": "string"
+                          },
+                          "branch": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "baseRevision",
+                          "branch"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "payload"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "delete-branch"
+                      },
+                      "payload": {
+                        "properties": {
+                          "branch": {
+                            "type": "string"
+                          },
+                          "headRevision": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "branch",
+                          "headRevision"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "payload"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "push-verified-commit"
+                      },
+                      "payload": {
+                        "properties": {
+                          "baseRevision": {
+                            "type": "string"
+                          },
+                          "branch": {
+                            "type": "string"
+                          },
+                          "commitMessage": {
+                            "type": "string"
+                          },
+                          "treeDigest": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "verified": {
+                            "const": true
+                          }
+                        },
+                        "required": [
+                          "baseRevision",
+                          "branch",
+                          "commitMessage",
+                          "treeDigest",
+                          "verified"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "payload"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "create-pull-request"
+                      },
+                      "payload": {
+                        "properties": {
+                          "artifactDigests": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "base": {
+                            "type": "string"
+                          },
+                          "head": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "artifactDigests",
+                          "base",
+                          "head",
+                          "title"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "payload"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "update-pull-request"
+                      },
+                      "payload": {
+                        "properties": {
+                          "artifactDigests": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "pullRequestNumber": {
+                            "type": "integer"
+                          },
+                          "title": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "artifactDigests",
+                          "pullRequestNumber"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "payload"
+                    ],
+                    "type": "object"
+                  }
+                ]
+              },
+              "payloadDigest": {
+                "type": "string"
+              },
+              "plannedAt": {
+                "type": "string"
+              },
+              "target": {
+                "properties": {
+                  "repository": {
+                    "type": "string"
+                  },
+                  "subject": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "repository",
+                  "subject"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "idempotencyKey",
+              "operation",
+              "payloadDigest",
+              "plannedAt",
+              "target"
+            ],
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "provider": "effects"
+    },
+    {
+      "inputSchema": {
+        "properties": {
           "idempotencyKey": {
             "type": "string"
           }
@@ -14103,6 +16885,143 @@
         "properties": {
           "idempotencyKey": {
             "type": "string"
+          }
+        },
+        "required": [
+          "idempotencyKey"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "effects/getReceiptV3@v1",
+      "outputSchema": {
+        "anyOf": [
+          {
+            "properties": {
+              "correlationToken": {
+                "type": "string"
+              },
+              "effectId": {
+                "type": "string"
+              },
+              "externalId": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "externalRevision": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "externalUrl": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "failureCategory": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "permission",
+                      "rate_limit",
+                      "conflict",
+                      "ambiguous_network",
+                      "validation",
+                      "provider",
+                      "unavailable"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "finishedAt": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "idempotencyKey": {
+                "type": "string"
+              },
+              "outcome": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "applied",
+                      "already_applied",
+                      "conflict",
+                      "rejected",
+                      "failed"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "recordedAt": {
+                "type": "string"
+              },
+              "runId": {
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "queued",
+                  "finished"
+                ]
+              }
+            },
+            "required": [
+              "correlationToken",
+              "effectId",
+              "externalId",
+              "externalRevision",
+              "externalUrl",
+              "failureCategory",
+              "finishedAt",
+              "idempotencyKey",
+              "outcome",
+              "recordedAt",
+              "runId",
+              "status"
+            ],
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "provider": "effects"
+    },
+    {
+      "inputSchema": {
+        "properties": {
+          "idempotencyKey": {
+            "type": "string"
           },
           "observedAt": {
             "type": "string"
@@ -14229,6 +17148,140 @@
           "outcome",
           "recordedAt",
           "runId"
+        ],
+        "type": "object"
+      },
+      "provider": "effects"
+    },
+    {
+      "inputSchema": {
+        "properties": {
+          "idempotencyKey": {
+            "type": "string"
+          },
+          "observedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "idempotencyKey",
+          "observedAt"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "effects/reconcileEffectV3@v1",
+      "outputSchema": {
+        "properties": {
+          "correlationToken": {
+            "type": "string"
+          },
+          "effectId": {
+            "type": "string"
+          },
+          "externalId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "externalRevision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "externalUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "failureCategory": {
+            "anyOf": [
+              {
+                "enum": [
+                  "permission",
+                  "rate_limit",
+                  "conflict",
+                  "ambiguous_network",
+                  "validation",
+                  "provider",
+                  "unavailable"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "finishedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "idempotencyKey": {
+            "type": "string"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "enum": [
+                  "applied",
+                  "already_applied",
+                  "conflict",
+                  "rejected",
+                  "failed"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "recordedAt": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "queued",
+              "finished"
+            ]
+          }
+        },
+        "required": [
+          "correlationToken",
+          "effectId",
+          "externalId",
+          "externalRevision",
+          "externalUrl",
+          "failureCategory",
+          "finishedAt",
+          "idempotencyKey",
+          "outcome",
+          "recordedAt",
+          "runId",
+          "status"
         ],
         "type": "object"
       },
@@ -14437,6 +17490,519 @@
       "provider": "effects"
     },
     {
+      "inputSchema": {
+        "properties": {
+          "capability": {
+            "type": "string"
+          },
+          "correlationToken": {
+            "type": "string"
+          },
+          "dryRun": {
+            "type": "boolean"
+          },
+          "expectedExternalRevision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "idempotencyKey": {
+            "type": "string"
+          },
+          "operation": {
+            "anyOf": [
+              {
+                "properties": {
+                  "kind": {
+                    "const": "add-label"
+                  },
+                  "payload": {
+                    "properties": {
+                      "issueNumber": {
+                        "type": "integer"
+                      },
+                      "label": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "issueNumber",
+                      "label"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "payload"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "kind": {
+                    "const": "remove-label"
+                  },
+                  "payload": {
+                    "properties": {
+                      "issueNumber": {
+                        "type": "integer"
+                      },
+                      "label": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "issueNumber",
+                      "label"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "payload"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "kind": {
+                    "const": "create-comment"
+                  },
+                  "payload": {
+                    "properties": {
+                      "artifactDigests": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "issueNumber": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "artifactDigests",
+                      "issueNumber"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "payload"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "kind": {
+                    "const": "update-comment"
+                  },
+                  "payload": {
+                    "properties": {
+                      "artifactDigests": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "commentId": {
+                        "type": "string"
+                      },
+                      "issueNumber": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "artifactDigests",
+                      "issueNumber",
+                      "commentId"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "payload"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "kind": {
+                    "const": "create-branch"
+                  },
+                  "payload": {
+                    "properties": {
+                      "baseRevision": {
+                        "type": "string"
+                      },
+                      "branch": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "baseRevision",
+                      "branch"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "payload"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "kind": {
+                    "const": "delete-branch"
+                  },
+                  "payload": {
+                    "properties": {
+                      "branch": {
+                        "type": "string"
+                      },
+                      "headRevision": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "branch",
+                      "headRevision"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "payload"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "kind": {
+                    "const": "push-verified-commit"
+                  },
+                  "payload": {
+                    "properties": {
+                      "baseRevision": {
+                        "type": "string"
+                      },
+                      "branch": {
+                        "type": "string"
+                      },
+                      "commitMessage": {
+                        "type": "string"
+                      },
+                      "treeDigest": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "verified": {
+                        "const": true
+                      }
+                    },
+                    "required": [
+                      "baseRevision",
+                      "branch",
+                      "commitMessage",
+                      "treeDigest",
+                      "verified"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "payload"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "kind": {
+                    "const": "create-pull-request"
+                  },
+                  "payload": {
+                    "properties": {
+                      "artifactDigests": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "base": {
+                        "type": "string"
+                      },
+                      "head": {
+                        "type": "string"
+                      },
+                      "title": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "artifactDigests",
+                      "base",
+                      "head",
+                      "title"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "payload"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "kind": {
+                    "const": "update-pull-request"
+                  },
+                  "payload": {
+                    "properties": {
+                      "artifactDigests": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "pullRequestNumber": {
+                        "type": "integer"
+                      },
+                      "title": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "artifactDigests",
+                      "pullRequestNumber"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "payload"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "payloadDigest": {
+            "type": "string"
+          },
+          "provenance": {
+            "properties": {
+              "agentProfileId": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "definitionDigest": {
+                "type": "string"
+              },
+              "flowId": {
+                "type": "string"
+              },
+              "requestedBy": {
+                "enum": [
+                  "operator",
+                  "runs"
+                ]
+              },
+              "runId": {
+                "type": "string"
+              },
+              "stepId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "agentProfileId",
+              "definitionDigest",
+              "flowId",
+              "requestedBy",
+              "runId",
+              "stepId"
+            ],
+            "type": "object"
+          },
+          "requestedAt": {
+            "type": "string"
+          },
+          "target": {
+            "properties": {
+              "repository": {
+                "type": "string"
+              },
+              "subject": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "repository",
+              "subject"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "capability",
+          "correlationToken",
+          "dryRun",
+          "expectedExternalRevision",
+          "idempotencyKey",
+          "operation",
+          "payloadDigest",
+          "provenance",
+          "requestedAt",
+          "target"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "effects/requestEffectV3@v1",
+      "outputSchema": {
+        "properties": {
+          "correlationToken": {
+            "type": "string"
+          },
+          "effectId": {
+            "type": "string"
+          },
+          "externalId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "externalRevision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "externalUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "failureCategory": {
+            "anyOf": [
+              {
+                "enum": [
+                  "permission",
+                  "rate_limit",
+                  "conflict",
+                  "ambiguous_network",
+                  "validation",
+                  "provider",
+                  "unavailable"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "finishedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "idempotencyKey": {
+            "type": "string"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "enum": [
+                  "applied",
+                  "already_applied",
+                  "conflict",
+                  "rejected",
+                  "failed"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "recordedAt": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "queued",
+              "finished"
+            ]
+          }
+        },
+        "required": [
+          "correlationToken",
+          "effectId",
+          "externalId",
+          "externalRevision",
+          "externalUrl",
+          "failureCategory",
+          "finishedAt",
+          "idempotencyKey",
+          "outcome",
+          "recordedAt",
+          "runId",
+          "status"
+        ],
+        "type": "object"
+      },
+      "provider": "effects"
+    },
+    {
       "kind": "event",
       "name": "effectFinished",
       "payloadSchema": {
@@ -14546,6 +18112,105 @@
     },
     {
       "kind": "event",
+      "name": "effectFinished",
+      "payloadSchema": {
+        "properties": {
+          "correlationToken": {
+            "type": "string"
+          },
+          "effectId": {
+            "type": "string"
+          },
+          "externalId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "externalRevision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "externalUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "failureCategory": {
+            "anyOf": [
+              {
+                "enum": [
+                  "permission",
+                  "rate_limit",
+                  "conflict",
+                  "ambiguous_network",
+                  "validation",
+                  "provider",
+                  "unavailable"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "finishedAt": {
+            "type": "string"
+          },
+          "idempotencyKey": {
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "applied",
+              "already_applied",
+              "conflict",
+              "rejected",
+              "failed"
+            ]
+          },
+          "recordedAt": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "correlationToken",
+          "effectId",
+          "externalId",
+          "externalRevision",
+          "externalUrl",
+          "failureCategory",
+          "finishedAt",
+          "idempotencyKey",
+          "outcome",
+          "recordedAt",
+          "runId"
+        ],
+        "type": "object"
+      },
+      "provider": "effects",
+      "version": 3
+    },
+    {
+      "kind": "event",
       "name": "effectQueued",
       "payloadSchema": {
         "properties": {
@@ -14599,6 +18264,406 @@
       },
       "provider": "effects",
       "version": 1
+    },
+    {
+      "kind": "event",
+      "name": "effectQueued",
+      "payloadSchema": {
+        "properties": {
+          "capability": {
+            "type": "string"
+          },
+          "correlationToken": {
+            "type": "string"
+          },
+          "dryRun": {
+            "type": "boolean"
+          },
+          "expectedExternalRevision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "idempotencyKey": {
+            "type": "string"
+          },
+          "operation": {
+            "anyOf": [
+              {
+                "properties": {
+                  "kind": {
+                    "const": "add-label"
+                  },
+                  "payload": {
+                    "properties": {
+                      "issueNumber": {
+                        "type": "integer"
+                      },
+                      "label": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "issueNumber",
+                      "label"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "payload"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "kind": {
+                    "const": "remove-label"
+                  },
+                  "payload": {
+                    "properties": {
+                      "issueNumber": {
+                        "type": "integer"
+                      },
+                      "label": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "issueNumber",
+                      "label"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "payload"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "kind": {
+                    "const": "create-comment"
+                  },
+                  "payload": {
+                    "properties": {
+                      "artifactDigests": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "issueNumber": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "artifactDigests",
+                      "issueNumber"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "payload"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "kind": {
+                    "const": "update-comment"
+                  },
+                  "payload": {
+                    "properties": {
+                      "artifactDigests": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "commentId": {
+                        "type": "string"
+                      },
+                      "issueNumber": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "artifactDigests",
+                      "issueNumber",
+                      "commentId"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "payload"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "kind": {
+                    "const": "create-branch"
+                  },
+                  "payload": {
+                    "properties": {
+                      "baseRevision": {
+                        "type": "string"
+                      },
+                      "branch": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "baseRevision",
+                      "branch"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "payload"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "kind": {
+                    "const": "delete-branch"
+                  },
+                  "payload": {
+                    "properties": {
+                      "branch": {
+                        "type": "string"
+                      },
+                      "headRevision": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "branch",
+                      "headRevision"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "payload"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "kind": {
+                    "const": "push-verified-commit"
+                  },
+                  "payload": {
+                    "properties": {
+                      "baseRevision": {
+                        "type": "string"
+                      },
+                      "branch": {
+                        "type": "string"
+                      },
+                      "commitMessage": {
+                        "type": "string"
+                      },
+                      "treeDigest": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "verified": {
+                        "const": true
+                      }
+                    },
+                    "required": [
+                      "baseRevision",
+                      "branch",
+                      "commitMessage",
+                      "treeDigest",
+                      "verified"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "payload"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "kind": {
+                    "const": "create-pull-request"
+                  },
+                  "payload": {
+                    "properties": {
+                      "artifactDigests": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "base": {
+                        "type": "string"
+                      },
+                      "head": {
+                        "type": "string"
+                      },
+                      "title": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "artifactDigests",
+                      "base",
+                      "head",
+                      "title"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "payload"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "kind": {
+                    "const": "update-pull-request"
+                  },
+                  "payload": {
+                    "properties": {
+                      "artifactDigests": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "pullRequestNumber": {
+                        "type": "integer"
+                      },
+                      "title": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "artifactDigests",
+                      "pullRequestNumber"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "payload"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "payloadDigest": {
+            "type": "string"
+          },
+          "provenance": {
+            "properties": {
+              "agentProfileId": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "definitionDigest": {
+                "type": "string"
+              },
+              "flowId": {
+                "type": "string"
+              },
+              "requestedBy": {
+                "enum": [
+                  "operator",
+                  "runs"
+                ]
+              },
+              "runId": {
+                "type": "string"
+              },
+              "stepId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "agentProfileId",
+              "definitionDigest",
+              "flowId",
+              "requestedBy",
+              "runId",
+              "stepId"
+            ],
+            "type": "object"
+          },
+          "requestedAt": {
+            "type": "string"
+          },
+          "target": {
+            "properties": {
+              "repository": {
+                "type": "string"
+              },
+              "subject": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "repository",
+              "subject"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "capability",
+          "correlationToken",
+          "dryRun",
+          "expectedExternalRevision",
+          "idempotencyKey",
+          "operation",
+          "payloadDigest",
+          "provenance",
+          "requestedAt",
+          "target"
+        ],
+        "type": "object"
+      },
+      "provider": "effects",
+      "version": 2
     },
     {
       "inputSchema": {
@@ -14707,6 +18772,32 @@
               "stepId"
             ],
             "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "provider": "execution"
+    },
+    {
+      "inputSchema": {
+        "properties": {
+          "attemptId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "attemptId"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "execution/getAttemptGitTreeV1@v1",
+      "outputSchema": {
+        "anyOf": [
+          {
+            "type": "string"
           },
           {
             "type": "null"
@@ -19927,6 +24018,406 @@
       },
       "provider": "runs",
       "version": 2
+    },
+    {
+      "kind": "event",
+      "name": "effectRequested",
+      "payloadSchema": {
+        "properties": {
+          "capability": {
+            "type": "string"
+          },
+          "correlationToken": {
+            "type": "string"
+          },
+          "dryRun": {
+            "type": "boolean"
+          },
+          "expectedExternalRevision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "idempotencyKey": {
+            "type": "string"
+          },
+          "operation": {
+            "anyOf": [
+              {
+                "properties": {
+                  "kind": {
+                    "const": "add-label"
+                  },
+                  "payload": {
+                    "properties": {
+                      "issueNumber": {
+                        "type": "integer"
+                      },
+                      "label": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "issueNumber",
+                      "label"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "payload"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "kind": {
+                    "const": "remove-label"
+                  },
+                  "payload": {
+                    "properties": {
+                      "issueNumber": {
+                        "type": "integer"
+                      },
+                      "label": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "issueNumber",
+                      "label"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "payload"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "kind": {
+                    "const": "create-comment"
+                  },
+                  "payload": {
+                    "properties": {
+                      "artifactDigests": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "issueNumber": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "artifactDigests",
+                      "issueNumber"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "payload"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "kind": {
+                    "const": "update-comment"
+                  },
+                  "payload": {
+                    "properties": {
+                      "artifactDigests": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "commentId": {
+                        "type": "string"
+                      },
+                      "issueNumber": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "artifactDigests",
+                      "issueNumber",
+                      "commentId"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "payload"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "kind": {
+                    "const": "create-branch"
+                  },
+                  "payload": {
+                    "properties": {
+                      "baseRevision": {
+                        "type": "string"
+                      },
+                      "branch": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "baseRevision",
+                      "branch"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "payload"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "kind": {
+                    "const": "delete-branch"
+                  },
+                  "payload": {
+                    "properties": {
+                      "branch": {
+                        "type": "string"
+                      },
+                      "headRevision": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "branch",
+                      "headRevision"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "payload"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "kind": {
+                    "const": "push-verified-commit"
+                  },
+                  "payload": {
+                    "properties": {
+                      "baseRevision": {
+                        "type": "string"
+                      },
+                      "branch": {
+                        "type": "string"
+                      },
+                      "commitMessage": {
+                        "type": "string"
+                      },
+                      "treeDigest": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "verified": {
+                        "const": true
+                      }
+                    },
+                    "required": [
+                      "baseRevision",
+                      "branch",
+                      "commitMessage",
+                      "treeDigest",
+                      "verified"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "payload"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "kind": {
+                    "const": "create-pull-request"
+                  },
+                  "payload": {
+                    "properties": {
+                      "artifactDigests": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "base": {
+                        "type": "string"
+                      },
+                      "head": {
+                        "type": "string"
+                      },
+                      "title": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "artifactDigests",
+                      "base",
+                      "head",
+                      "title"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "payload"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "kind": {
+                    "const": "update-pull-request"
+                  },
+                  "payload": {
+                    "properties": {
+                      "artifactDigests": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "pullRequestNumber": {
+                        "type": "integer"
+                      },
+                      "title": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "artifactDigests",
+                      "pullRequestNumber"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "payload"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "payloadDigest": {
+            "type": "string"
+          },
+          "provenance": {
+            "properties": {
+              "agentProfileId": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "definitionDigest": {
+                "type": "string"
+              },
+              "flowId": {
+                "type": "string"
+              },
+              "requestedBy": {
+                "enum": [
+                  "operator",
+                  "runs"
+                ]
+              },
+              "runId": {
+                "type": "string"
+              },
+              "stepId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "agentProfileId",
+              "definitionDigest",
+              "flowId",
+              "requestedBy",
+              "runId",
+              "stepId"
+            ],
+            "type": "object"
+          },
+          "requestedAt": {
+            "type": "string"
+          },
+          "target": {
+            "properties": {
+              "repository": {
+                "type": "string"
+              },
+              "subject": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "repository",
+              "subject"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "capability",
+          "correlationToken",
+          "dryRun",
+          "expectedExternalRevision",
+          "idempotencyKey",
+          "operation",
+          "payloadDigest",
+          "provenance",
+          "requestedAt",
+          "target"
+        ],
+        "type": "object"
+      },
+      "provider": "runs",
+      "version": 3
     },
     {
       "kind": "event",

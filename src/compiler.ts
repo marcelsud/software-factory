@@ -144,13 +144,19 @@ export interface FlowDefinition {
   }[];
 }
 
+export interface EffectPermissionDefinition {
+  readonly agentProfiles?: readonly string[];
+  readonly capability: string;
+  readonly effects?: readonly string[];
+  readonly flows?: readonly string[];
+  readonly targets: readonly string[];
+}
+
 export interface FactoryDefinition {
   readonly agentProfiles: readonly AgentProfileDefinition[];
   readonly capabilities: readonly { readonly description: string; readonly id: string }[];
-  readonly effectPermissions: readonly {
-    readonly capability: string;
-    readonly targets: readonly string[];
-  }[];
+  readonly dryRun?: boolean;
+  readonly effectPermissions: readonly EffectPermissionDefinition[];
   readonly flows: readonly FlowDefinition[];
   readonly repositories: readonly RepositoryDefinition[];
   readonly skills: readonly SkillDefinition[];
@@ -166,6 +172,18 @@ export interface CompiledDefinition {
 }
 
 type DataRecord = Record<string, unknown>;
+
+const EFFECT_KIND_NAMES: Readonly<Record<string, true>> = {
+  "add-label": true,
+  "remove-label": true,
+  "create-comment": true,
+  "update-comment": true,
+  "create-branch": true,
+  "delete-branch": true,
+  "push-verified-commit": true,
+  "create-pull-request": true,
+  "update-pull-request": true,
+};
 
 export function compileFactoryDefinition(
   source: string,
@@ -418,6 +436,7 @@ function parseDefinition(
     "skills",
     "capabilities",
     "effectPermissions",
+    "dryRun",
   ]);
   const version = integerAt(record.version, "$.version");
   if (version !== 1)
@@ -430,6 +449,7 @@ function parseDefinition(
   return Object.freeze({
     agentProfiles: listAt(record.agentProfiles, "$.agentProfiles").map(parseAgentProfile),
     capabilities: listAt(record.capabilities, "$.capabilities").map(parseCapability),
+    ...(record.dryRun === undefined ? {} : { dryRun: booleanAt(record.dryRun, "$.dryRun") }),
     effectPermissions: listAt(record.effectPermissions, "$.effectPermissions").map(parsePermission),
     flows: listAt(record.flows, "$.flows").map(parseFlow),
     repositories: listAt(record.repositories, "$.repositories").map(parseRepository),
@@ -508,14 +528,28 @@ function parseCapability(
   });
 }
 
-function parsePermission(
-  value: unknown,
-  index: number,
-): { readonly capability: string; readonly targets: readonly string[] } {
+function parsePermission(value: unknown, index: number): EffectPermissionDefinition {
   const path = `$.effectPermissions[${index}]`;
-  const record = objectAt(value, path, ["capability", "targets"]);
+  const record = objectAt(value, path, [
+    "capability",
+    "targets",
+    "flows",
+    "agentProfiles",
+    "effects",
+  ]);
   return Object.freeze({
+    ...(record.agentProfiles === undefined
+      ? {}
+      : {
+          agentProfiles: Object.freeze(stringListAt(record.agentProfiles, `${path}.agentProfiles`)),
+        }),
     capability: idAt(record.capability, `${path}.capability`),
+    ...(record.effects === undefined
+      ? {}
+      : { effects: Object.freeze(stringListAt(record.effects, `${path}.effects`)) }),
+    ...(record.flows === undefined
+      ? {}
+      : { flows: Object.freeze(stringListAt(record.flows, `${path}.flows`)) }),
     targets: Object.freeze(stringListAt(record.targets, `${path}.targets`)),
   });
 }
@@ -1001,7 +1035,7 @@ function validateDefinition(definition: FactoryDefinition): void {
   const skills = uniqueIds(definition.skills, "$.skills");
   const profiles = uniqueIds(definition.agentProfiles, "$.agentProfiles");
   const capabilities = uniqueIds(definition.capabilities, "$.capabilities");
-  uniqueIds(definition.flows, "$.flows");
+  const flows = uniqueIds(definition.flows, "$.flows");
   definition.capabilities.forEach((capability, index) => {
     requireCapabilityOwner(capability.id, `$.capabilities[${index}].id`);
   });
@@ -1068,6 +1102,27 @@ function validateDefinition(definition: FactoryDefinition): void {
       if (!repositories.has(target)) {
         missingRef(`$.effectPermissions[${index}].targets[${child}]`, "repository", target);
       }
+    });
+    permission.flows?.forEach((flow, child) => {
+      if (!flows.has(flow))
+        missingRef(`$.effectPermissions[${index}].flows[${child}]`, "flow", flow);
+    });
+    permission.agentProfiles?.forEach((profile, child) => {
+      if (!profiles.has(profile))
+        missingRef(
+          `$.effectPermissions[${index}].agentProfiles[${child}]`,
+          "agent profile",
+          profile,
+        );
+    });
+    permission.effects?.forEach((effect, child) => {
+      if (EFFECT_KIND_NAMES[effect] !== true)
+        fail(
+          `$.effectPermissions[${index}].effects[${child}]`,
+          `unknown effect kind ${JSON.stringify(effect)}`,
+          "use a supported strict effect kind",
+          "invalid_effect_kind",
+        );
     });
     permittedCapabilities.add(permission.capability);
   });
@@ -1596,6 +1651,12 @@ function idAt(value: unknown, path: string): string {
 function integerAt(value: unknown, path: string): number {
   if (typeof value !== "number" || !Number.isSafeInteger(value))
     fail(path, "expected a safe integer", "set an integer value", "invalid_type");
+  return value;
+}
+
+function booleanAt(value: unknown, path: string): boolean {
+  if (typeof value !== "boolean")
+    fail(path, "expected a boolean", "set true or false", "invalid_type");
   return value;
 }
 

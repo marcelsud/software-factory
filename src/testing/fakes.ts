@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import type {
   AgentRuntime,
+  GitBranchMutation,
   GitHubIssueCommentRecord,
   GitHubIssueRecord,
   GitHubListInput,
@@ -9,13 +10,20 @@ import type {
   GitHubRateLimitRecord,
   GitHubReadPermissionDiagnostic,
   GitHubReadTransport,
+  GitHubWriteInput,
+  GitHubWriteTransport,
   GitPublication,
   GitPublisher,
 } from "../adapters/seams.ts";
 
 export { MemoryArtifactByteDriver } from "../adapters/artifact-byte-driver.ts";
 
-import type { AgentRequest, AgentRequestV2, AgentResult } from "../contracts/index.ts";
+import type {
+  AgentRequest,
+  AgentRequestV2,
+  AgentResult,
+  EffectResultV3,
+} from "../contracts/index.ts";
 
 type AnyAgentRequest = AgentRequest | AgentRequestV2;
 
@@ -91,6 +99,54 @@ export class FakeGitHubReadTransport implements GitHubReadTransport {
       },
       "permission diagnostic",
     );
+  }
+}
+
+export interface FakeGitHubWriteTransportScript {
+  readonly applies?: ReadonlyArray<Error | EffectResultV3>;
+  readonly inspections?: ReadonlyArray<Error | { readonly revision: string | null }>;
+  readonly probes?: ReadonlyArray<Error | EffectResultV3 | null>;
+}
+
+export class FakeGitHubWriteTransport implements GitHubWriteTransport {
+  readonly calls: Array<{ readonly input: GitHubWriteInput; readonly method: string }> = [];
+  readonly #applies: Array<Error | EffectResultV3>;
+  readonly #inspections: Array<Error | { readonly revision: string | null }>;
+  readonly #probes: Array<Error | EffectResultV3 | null>;
+
+  constructor(script: FakeGitHubWriteTransportScript = {}) {
+    this.#applies = [...(script.applies ?? [])];
+    this.#inspections = [...(script.inspections ?? [])];
+    this.#probes = [...(script.probes ?? [])];
+  }
+
+  async apply(input: GitHubWriteInput): Promise<EffectResultV3> {
+    this.calls.push({ input, method: "apply" });
+    return take(
+      this.#applies,
+      {
+        externalId: `external:${input.intent.idempotencyKey}`,
+        externalRevision: `revision:${input.intent.idempotencyKey}`,
+        externalUrl: `https://example.invalid/${input.intent.idempotencyKey}`,
+        failureCategory: null,
+        outcome: "applied",
+      },
+      "write result",
+    );
+  }
+
+  async inspect(input: GitHubWriteInput): Promise<{ readonly revision: string | null }> {
+    this.calls.push({ input, method: "inspect" });
+    return take(
+      this.#inspections,
+      { revision: input.intent.expectedExternalRevision },
+      "write inspection",
+    );
+  }
+
+  async probe(input: GitHubWriteInput): Promise<EffectResultV3 | null> {
+    this.calls.push({ input, method: "probe" });
+    return take(this.#probes, null, "write probe");
   }
 }
 
@@ -173,17 +229,92 @@ function fakeInfrastructureResult(
 }
 
 export class FakeGitPublisher implements GitPublisher {
+  readonly branches = new Map<string, string>();
+  readonly mutations: GitBranchMutation[] = [];
+  readonly observations: Array<GitBranchMutation | GitPublication> = [];
   readonly publications: GitPublication[] = [];
+
+  async createBranch(input: GitBranchMutation): Promise<EffectResultV3> {
+    this.mutations.push(input);
+    const key = `${input.repository}:${input.branch}`;
+    const existing = this.branches.get(key);
+    if (existing !== undefined && existing !== input.expectedRevision)
+      throw new Error("git_publish_branch_conflict");
+    this.branches.set(key, input.expectedRevision);
+    return fakeGitResult(
+      input.expectedRevision,
+      existing === undefined ? "applied" : "already_applied",
+    );
+  }
+
+  async deleteBranch(input: GitBranchMutation): Promise<EffectResultV3> {
+    this.mutations.push(input);
+    const key = `${input.repository}:${input.branch}`;
+    const existing = this.branches.get(key);
+    if (existing !== undefined && existing !== input.expectedRevision)
+      throw new Error("git_publish_stale_head");
+    this.branches.delete(key);
+    return fakeGitResult(
+      input.expectedRevision,
+      existing === undefined ? "already_applied" : "applied",
+    );
+  }
 
   async publish(publication: GitPublication): Promise<{ readonly revision: string }> {
     this.publications.push(publication);
-    const identity = [
-      publication.repository,
-      publication.branch,
-      publication.baseRevision,
-      publication.treeDigest,
-      publication.commitMessage,
-    ].join("\0");
-    return { revision: createHash("sha256").update(identity, "utf8").digest("hex") };
+    return { revision: publicationRevision(publication) };
   }
+
+  async pushVerifiedCommit(publication: GitPublication): Promise<EffectResultV3> {
+    if (publication.verified !== true) throw new Error("git_publish_unverified_commit");
+    this.publications.push(publication);
+    const revision = publicationRevision(publication);
+    this.branches.set(`${publication.repository}:${publication.branch}`, revision);
+    return fakeGitResult(revision, "applied");
+  }
+
+  async observeRevision(input: GitBranchMutation | GitPublication): Promise<string | null> {
+    this.observations.push(input);
+    return this.branches.get(`${input.repository}:${input.branch}`) ?? null;
+  }
+
+  async probe(input: GitBranchMutation | GitPublication): Promise<EffectResultV3 | null> {
+    const revision = this.branches.get(`${input.repository}:${input.branch}`);
+    if ("kind" in input) {
+      if (input.kind === "delete")
+        return revision === undefined
+          ? fakeGitResult(input.expectedRevision, "already_applied")
+          : null;
+      return revision === input.expectedRevision
+        ? fakeGitResult(revision, "already_applied")
+        : null;
+    }
+    const applied = this.publications.find(
+      (publication) => publicationRevision(publication) === publicationRevision(input),
+    );
+    return applied === undefined
+      ? null
+      : fakeGitResult(publicationRevision(applied), "already_applied");
+  }
+}
+
+function publicationRevision(publication: GitPublication): string {
+  const identity = [
+    publication.repository,
+    publication.branch,
+    publication.baseRevision,
+    publication.treeDigest,
+    publication.commitMessage,
+  ].join("\0");
+  return createHash("sha256").update(identity, "utf8").digest("hex");
+}
+
+function fakeGitResult(revision: string, outcome: "applied" | "already_applied"): EffectResultV3 {
+  return {
+    externalId: revision,
+    externalRevision: revision,
+    externalUrl: null,
+    failureCategory: null,
+    outcome,
+  };
 }

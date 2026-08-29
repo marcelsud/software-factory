@@ -12,6 +12,9 @@ import {
   type AttemptFinished,
   CAPABILITY_PRESETS,
   CAPABILITY_PRESETS_V2,
+  type EffectFinishedV2,
+  type EffectFinishedV3,
+  type EffectOperationV3,
   type ExecutionPlanV2,
   type FactoryEvent,
   isDataRecord,
@@ -27,8 +30,10 @@ import {
   runV2,
   runV3,
 } from "../../contracts/index.ts";
+import { effectPayloadDigest } from "../../effects/policy.ts";
 import {
   type RunEngineStateRow,
+  type RunExecutionPinRow,
   type RunRow,
   type RunsDatabase,
   runsMigrations,
@@ -131,11 +136,13 @@ const genericRunWorkflow = workflow<Infer<typeof workflowInput>, GenericWorkflow
 export interface RunsImplementationDependencies {
   readonly moduleManifestDigest?: string;
   readonly workflowVersionDigest?: string;
+  readonly strictEffects?: boolean;
   readonly repositoryPins?: Readonly<Record<string, string>>;
 }
 
 type StartRunV2Input = Infer<typeof runs.calls.startRunV2.input>;
 interface RunsContext {
+  readonly call: ChimpbaseContext["call"];
   readonly db: { readonly schema: string | null; kysely(): unknown };
   readonly module: { readonly name: string } | null;
   readonly publish: ChimpbaseContext["publish"];
@@ -754,7 +761,6 @@ function validResult(
     return expected === "unknown" || typeof data[key] === expected;
   });
 }
-
 type AttemptCompletion = Omit<AttemptFinished, "result"> & {
   readonly failure?: unknown;
   readonly result?: AttemptFinished["result"];
@@ -773,6 +779,21 @@ async function consumeAttemptFinished(
     loaded.row.current_correlation_token !== outcome.correlationToken
   )
     return false;
+  const treeDigest = await ctx.call(execution.calls.getAttemptGitTreeV1, {
+    attemptId: outcome.attemptId,
+  });
+  if (treeDigest !== null)
+    await db
+      .insertInto("run_effect_tree_pins")
+      .values({
+        run_id: outcome.runId,
+        step_id: outcome.stepId,
+        tree_digest: treeDigest,
+      })
+      .onConflict((conflict) =>
+        conflict.columns(["run_id", "step_id"]).doUpdateSet({ tree_digest: treeDigest }),
+      )
+      .execute();
   if (loaded.engine === null) {
     const failed = outcome.outcome === "failed";
     const updated = await appendAudit(
@@ -830,6 +851,92 @@ async function consumeAttemptFinished(
   return true;
 }
 
+type EffectCompletion = EffectFinishedV2 | EffectFinishedV3;
+
+async function consumeEffectFinished(
+  ctx: RunsContext,
+  outcome: EffectCompletion,
+): Promise<boolean> {
+  const db = runsDb(ctx);
+  const loaded = await loadRows(db, outcome.runId);
+  if (
+    loaded === null ||
+    isTerminal(loaded.row.status) ||
+    loaded.row.current_effect_key !== outcome.idempotencyKey ||
+    loaded.row.current_correlation_token !== outcome.correlationToken
+  )
+    return false;
+  const transitionOutcome =
+    outcome.outcome === "already_applied"
+      ? "applied"
+      : outcome.outcome === "conflict" || outcome.outcome === "failed"
+        ? "rejected"
+        : outcome.outcome;
+  if (loaded.engine === null) {
+    const failed = transitionOutcome === "rejected";
+    const ambiguous =
+      outcome.outcome === "ambiguous" ||
+      ("failureCategory" in outcome && outcome.failureCategory === "ambiguous_network");
+    const updated = await appendAudit(
+      db,
+      loaded.row,
+      `effect.${outcome.outcome}`,
+      outcome.finishedAt,
+      outcome,
+      {
+        current_attempt_id: failed ? null : loaded.row.current_attempt_id,
+        current_correlation_token: failed ? null : loaded.row.current_correlation_token,
+        current_effect_key: ambiguous ? loaded.row.current_effect_key : null,
+        current_gate_id: failed ? null : loaded.row.current_gate_id,
+        current_gate_status: failed ? null : loaded.row.current_gate_status,
+        current_step_id: failed ? null : loaded.row.current_step_id,
+        finished_at: failed ? outcome.finishedAt : loaded.row.finished_at,
+        status: failed ? "failed" : ambiguous ? "waiting" : "running",
+      },
+    );
+    await publishProjection(ctx, updated);
+    if (failed) {
+      await ctx.workflow.signal(updated.workflow_id, "finish", {});
+      const projection = runFromRow(updated);
+      ctx.publish(runs.events.runFinishedV1, finishedV1(projection));
+      ctx.publish(runs.events.runFinishedV2, finishedV2(projection));
+    }
+    return true;
+  }
+  const identity = `effect:${outcome.idempotencyKey}:${outcome.finishedAt}`;
+  if (
+    !(await recordWorkflowSignal(
+      ctx,
+      loaded.row,
+      identity,
+      "effect.finished",
+      outcome.correlationToken,
+      outcome.finishedAt,
+      outcome,
+    ))
+  )
+    return false;
+  const row = await appendAudit(
+    db,
+    loaded.row,
+    `effect.${outcome.outcome}`,
+    outcome.finishedAt,
+    outcome,
+  );
+  await db
+    .updateTable("run_engine_state")
+    .set({
+      pending_json: JSON.stringify({
+        kind: "effect",
+        outcome: { ...outcome, outcome: transitionOutcome },
+      }),
+    })
+    .where("run_id", "=", row.run_id)
+    .execute();
+  await signalResume(ctx, row, identity, outcome.finishedAt, "effect.finished");
+  return true;
+}
+
 function createSubscriptions(dependencies: RunsImplementationDependencies) {
   const attemptFinishedStrict = defineChimpbaseModuleSubscription(
     execution.events.attemptFinishedV2,
@@ -868,73 +975,12 @@ function createSubscriptions(dependencies: RunsImplementationDependencies) {
   const effectFinished = defineChimpbaseModuleSubscription(
     effects.events.effectFinishedV2,
     "record-effect-outcome",
-    async (ctx, outcome) => {
-      const db = runsDb(ctx);
-      const loaded = await loadRows(db, outcome.runId);
-      if (
-        loaded === null ||
-        isTerminal(loaded.row.status) ||
-        loaded.row.current_effect_key !== outcome.idempotencyKey ||
-        loaded.row.current_correlation_token !== outcome.correlationToken
-      )
-        return false;
-      if (loaded.engine === null) {
-        const failed = outcome.outcome === "rejected";
-        const updated = await appendAudit(
-          db,
-          loaded.row,
-          `effect.${outcome.outcome}`,
-          outcome.finishedAt,
-          outcome,
-          {
-            current_attempt_id: failed ? null : loaded.row.current_attempt_id,
-            current_correlation_token: failed ? null : loaded.row.current_correlation_token,
-            current_effect_key:
-              outcome.outcome === "ambiguous" ? loaded.row.current_effect_key : null,
-            current_gate_id: failed ? null : loaded.row.current_gate_id,
-            current_gate_status: failed ? null : loaded.row.current_gate_status,
-            current_step_id: failed ? null : loaded.row.current_step_id,
-            finished_at: failed ? outcome.finishedAt : loaded.row.finished_at,
-            status: failed ? "failed" : outcome.outcome === "ambiguous" ? "waiting" : "running",
-          },
-        );
-        await publishProjection(ctx, updated);
-        if (failed) {
-          await ctx.workflow.signal(updated.workflow_id, "finish", {});
-          const projection = runFromRow(updated);
-          ctx.publish(runs.events.runFinishedV1, finishedV1(projection));
-          ctx.publish(runs.events.runFinishedV2, finishedV2(projection));
-        }
-        return true;
-      }
-      const identity = `effect:${outcome.idempotencyKey}:${outcome.finishedAt}`;
-      if (
-        !(await recordWorkflowSignal(
-          ctx,
-          loaded.row,
-          identity,
-          "effect.finished",
-          outcome.correlationToken,
-          outcome.finishedAt,
-          outcome,
-        ))
-      )
-        return false;
-      const row = await appendAudit(
-        db,
-        loaded.row,
-        `effect.${outcome.outcome}`,
-        outcome.finishedAt,
-        outcome,
-      );
-      await db
-        .updateTable("run_engine_state")
-        .set({ pending_json: JSON.stringify({ kind: "effect", outcome }) })
-        .where("run_id", "=", row.run_id)
-        .execute();
-      await signalResume(ctx, row, identity, outcome.finishedAt, "effect.finished");
-      return true;
-    },
+    consumeEffectFinished,
+  );
+  const effectFinishedStrict = defineChimpbaseModuleSubscription(
+    effects.events.effectFinishedV3,
+    "record-effect-outcome-v3",
+    consumeEffectFinished,
   );
 
   const acceptedEvent = defineChimpbaseModuleSubscription(
@@ -1024,7 +1070,41 @@ function createSubscriptions(dependencies: RunsImplementationDependencies) {
       return started;
     },
   );
-  return [attemptFinishedStrict, attemptFinishedLegacy, effectFinished, acceptedEvent] as const;
+  return [
+    attemptFinishedStrict,
+    attemptFinishedLegacy,
+    effectFinished,
+    effectFinishedStrict,
+    acceptedEvent,
+  ] as const;
+}
+
+function strictEffectOperation(
+  step: ExecutionPlanV2["steps"][number],
+  row: RunRow,
+  engine: RunEngineStateRow & RunExecutionPinRow,
+  artifacts: readonly string[],
+  treeDigest: string | null,
+): EffectOperationV3 {
+  const branch = `factory/${row.run_id.replace(/[^A-Za-z0-9._-]/g, "-").slice(0, 80)}`;
+  if (step.effectCapability === "repository.write") {
+    return {
+      kind: "push-verified-commit",
+      payload: {
+        baseRevision: engine.repository_sha,
+        branch,
+        commitMessage: `Factory run ${row.run_id}, step ${step.id}`,
+        treeDigest,
+        verified: true,
+      },
+    };
+  }
+  const issueNumber = Number(/^issue:(\d+)$/.exec(engine.subject)?.[1]);
+  if (!Number.isSafeInteger(issueNumber) || issueNumber < 1)
+    throw new Error("invalid_revision_pin: effect issue subject is not numeric");
+  if (step.effectCapability === "issue.comment")
+    return { kind: "create-comment", payload: { artifactDigests: [...artifacts], issueNumber } };
+  throw new Error(`invalid_revision_pin: unsupported effect capability ${step.effectCapability}`);
 }
 
 export function createRunsImplementation(dependencies: RunsImplementationDependencies = {}) {
@@ -1046,6 +1126,7 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
       tables: [
         "operator_commands",
         "run_admission_slots",
+        "run_effect_tree_pins",
         "run_execution_pins",
         "run_admissions",
         "run_audit",
@@ -2278,7 +2359,7 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
           .set({ attempt_count: number, engine_phase: "running" })
           .where("run_id", "=", row.run_id)
           .execute();
-        const intent = {
+        const legacyIntent = {
           capability: step.effectCapability ?? "",
           correlationToken: token,
           expectedExternalRevision: null,
@@ -2289,8 +2370,52 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
           runId: row.run_id,
           target: step.effectTarget ?? "",
         };
+        let treeDigest: string | null = null;
+        if (dependencies.strictEffects === true) {
+          const sourceSteps = plan.artifactHandoffs
+            .filter((handoff) => handoff.toStep === step.id)
+            .map((handoff) => handoff.fromStep);
+          if (sourceSteps.length > 0) {
+            const treePins = await db
+              .selectFrom("run_effect_tree_pins")
+              .select(["step_id", "tree_digest"])
+              .where("run_id", "=", row.run_id)
+              .where("step_id", "in", sourceSteps)
+              .execute();
+            for (const sourceStep of sourceSteps) {
+              const pin = treePins.find((candidate) => candidate.step_id === sourceStep);
+              if (pin !== undefined) treeDigest = pin.tree_digest;
+            }
+          }
+        }
+        const strictIntent =
+          dependencies.strictEffects === true
+            ? (() => {
+                const operation = strictEffectOperation(step, row, engine, artifacts, treeDigest);
+                return {
+                  capability: step.effectCapability ?? "",
+                  correlationToken: token,
+                  dryRun: false,
+                  expectedExternalRevision: null,
+                  idempotencyKey,
+                  operation,
+                  payloadDigest: effectPayloadDigest(operation),
+                  provenance: {
+                    agentProfileId: null,
+                    definitionDigest: row.definition_digest,
+                    flowId: row.flow_id,
+                    requestedBy: "runs" as const,
+                    runId: row.run_id,
+                    stepId: step.id,
+                  },
+                  requestedAt: input.now,
+                  target: { repository: step.effectTarget ?? "", subject: engine.subject },
+                };
+              })()
+            : null;
         try {
-          await ctx.call(effects.calls.requestEffectV2, intent);
+          await ctx.call(effects.calls.requestEffectV2, legacyIntent);
+          if (strictIntent !== null) await ctx.call(effects.calls.requestEffectV3, strictIntent);
         } catch (error) {
           row = await appendAudit(db, row, "infrastructure.failed", input.now, {
             message: error instanceof Error ? error.message : String(error),
@@ -2305,16 +2430,17 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
           return { delayMs: retry.delayMs, kind: "sleep" as const };
         }
         ctx.publish(runs.events.effectRequestedV1, {
-          capability: intent.capability,
-          correlationToken: intent.correlationToken,
-          expectedExternalRevision: intent.expectedExternalRevision,
-          idempotencyKey: intent.idempotencyKey,
-          payloadDigest: intent.payloadDigest,
-          provenance: intent.provenance,
-          runId: intent.runId,
-          target: intent.target,
+          capability: legacyIntent.capability,
+          correlationToken: legacyIntent.correlationToken,
+          expectedExternalRevision: legacyIntent.expectedExternalRevision,
+          idempotencyKey: legacyIntent.idempotencyKey,
+          payloadDigest: legacyIntent.payloadDigest,
+          provenance: legacyIntent.provenance,
+          runId: legacyIntent.runId,
+          target: legacyIntent.target,
         });
-        ctx.publish(runs.events.effectRequestedV2, intent);
+        ctx.publish(runs.events.effectRequestedV2, legacyIntent);
+        if (strictIntent !== null) ctx.publish(runs.events.effectRequestedV3, strictIntent);
         await publishProjection(ctx, row, engine);
         return { kind: "wait" as const, signal: "resume" };
       },

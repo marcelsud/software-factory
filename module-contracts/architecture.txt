@@ -34,19 +34,27 @@ definitions v1
   event: definitions/definitionPublished@v1
 effects v1
   depends: assets, definitions
+  call: effects/correlateBotEventV3@v1
+  call: effects/getDryRunV3@v1
   call: effects/getReceipt@v1
   call: effects/getReceiptV2@v1
+  call: effects/getReceiptV3@v1
   call: effects/reconcileEffect@v1
   call: effects/reconcileEffectV2@v1
+  call: effects/reconcileEffectV3@v1
   call: effects/requestEffect@v1
   call: effects/requestEffectV2@v1
+  call: effects/requestEffectV3@v1
   event: effects/effectFinished@v1
   event: effects/effectFinished@v2
+  event: effects/effectFinished@v3
   event: effects/effectQueued@v1
+  event: effects/effectQueued@v2
 execution v1
   depends: assets
   call: execution/cancelAttempt@v1
   call: execution/getAttempt@v1
+  call: execution/getAttemptGitTreeV1@v1
   call: execution/getAttemptProtocol@v1
   call: execution/getAttemptProtocolV2@v1
   call: execution/getAttemptV2@v1
@@ -90,6 +98,7 @@ runs v1
   call: runs/startRunV3@v1
   event: runs/effectRequested@v1
   event: runs/effectRequested@v2
+  event: runs/effectRequested@v3
   event: runs/runFinished@v1
   event: runs/runFinished@v2
   event: runs/runFinished@v3
@@ -101,4 +110,5 @@ runs v1
   consumes: execution/attemptFinished@v1 as record-attempt-outcome-v1
   consumes: execution/attemptFinished@v2 as record-attempt-outcome-v2
   consumes: effects/effectFinished@v2 as record-effect-outcome
+  consumes: effects/effectFinished@v3 as record-effect-outcome-v3
   consumes: intake/factoryEventAccepted@v2 as start-matching-runs

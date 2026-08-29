@@ -808,6 +808,24 @@ export function createExecutionImplementation(
           .executeTakeFirst();
         return row === undefined ? null : await attemptFromRowV3(db, row);
       },
+      async getAttemptGitTreeV1(ctx, input) {
+        const row = await (ctx.db.kysely() as unknown as Kysely<ExecutionDatabase>)
+          .selectFrom("attempt_result_metadata")
+          .select("commit_json")
+          .where("attempt_id", "=", input.attemptId)
+          .executeTakeFirst();
+        if (row?.commit_json === null || row?.commit_json === undefined) return null;
+        const commit: unknown = JSON.parse(row.commit_json);
+        if (
+          commit !== null &&
+          typeof commit === "object" &&
+          !Array.isArray(commit) &&
+          "sha" in commit &&
+          typeof commit.sha === "string"
+        )
+          return commit.sha;
+        return null;
+      },
     },
   });
 }
