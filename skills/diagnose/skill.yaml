@@ -7,10 +7,15 @@ inputArtifacts: [reproduction, result.json]
 resultSchema:
   type: object
   properties:
+    schemaVersion: { type: number }
+    outcome: { type: string }
+    summary: { type: string }
     rootCause: { type: string }
-    evidence: { type: string }
+    evidence: { type: string-array }
     confidence: { type: number }
-  required: [rootCause, evidence, confidence]
+    architectureChecked: { type: boolean }
+    docsChecked: { type: boolean }
+  required: [schemaVersion, outcome, summary, rootCause, evidence, confidence, architectureChecked, docsChecked]
   additionalProperties: false
 capabilities: [repository.read]
 customizable: false

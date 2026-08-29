@@ -3,13 +3,18 @@ version: 1
 compatibility: 1
 instruction: instructions.md
 includes: [guidance.md]
-inputArtifacts: [patch, report.md, test-result]
+inputArtifacts: [patch, report.md, result.json, test-result]
 resultSchema:
   type: object
   properties:
+    schemaVersion: { type: number }
+    issueNumber: { type: number }
     title: { type: string }
     body: { type: string }
-  required: [title, body]
+    base: { type: string }
+    head: { type: string }
+    linkedIssue: { type: string }
+  required: [schemaVersion, issueNumber, title, body, base, head, linkedIssue]
   additionalProperties: false
 capabilities: [repository.read]
 customizable: false

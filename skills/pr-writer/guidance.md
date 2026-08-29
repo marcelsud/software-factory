@@ -1,1 +1,1 @@
-Do not publish the pull request. Do not include credentials, private logs, or hidden reasoning.
+Return the strict PR metadata report and one redacted public artifact. Keep any quoted reporter text under an `UNTRUSTED REPORTER CONTENT` heading and test instructions under a separate trusted-results heading.

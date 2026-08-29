@@ -15,7 +15,7 @@ import {
   type EffectFinishedV2,
   type EffectFinishedV3,
   type EffectOperationV3,
-  type ExecutionPlanV2,
+  type ExecutionPlanV3,
   type FactoryEvent,
   isDataRecord,
   type PinnedSkillBundle,
@@ -23,12 +23,15 @@ import {
   type Run,
   type RunV2,
   type RunV3,
+  type RunV4,
   run,
   runFinished,
   runFinishedV2,
   runFinishedV3,
+  runFinishedV4,
   runV2,
   runV3,
+  runV4,
 } from "../../contracts/index.ts";
 import { effectPayloadDigest } from "../../effects/policy.ts";
 import {
@@ -96,7 +99,7 @@ const genericRunWorkflow = workflow<Infer<typeof workflowInput>, GenericWorkflow
   signalSchemas: { resume: workflowSignal },
   initialState: (input) => ({ logicalNow: input.startedAt, phase: "drive" }),
   async run(ctx) {
-    const directive = await ctx.call(runs.calls.driveRun, {
+    const directive = await ctx.call(runs.calls.driveRunV2, {
       now: ctx.state.logicalNow,
       runId: ctx.input.runId,
       ...(ctx.state.wakeKind === undefined ? {} : { wakeKind: ctx.state.wakeKind }),
@@ -224,7 +227,15 @@ function runV1FromV2(value: RunV2): Run {
   });
 }
 
-function runV3FromRows(row: RunRow, engine: RunEngineStateRow): RunV3 {
+function legacyRunOutcome(outcome: RunV4["outcome"]): RunV3["outcome"] {
+  if (outcome === "skipped" || outcome === "intended_behavior") return "not_actionable";
+  if (outcome === "fix_pending") return "waiting";
+  if (outcome === "fix_rejected") return "unable_to_fix";
+  if (outcome === "fix_verified") return "completed";
+  return outcome;
+}
+
+function runV4FromRows(row: RunRow, engine: RunEngineStateRow): RunV4 {
   const base = runFromRow(row);
   const status =
     engine.engine_phase === "queued"
@@ -232,7 +243,12 @@ function runV3FromRows(row: RunRow, engine: RunEngineStateRow): RunV3 {
       : engine.engine_phase === "retrying"
         ? "retrying"
         : base.status;
-  return runV3.parse({ ...base, outcome: engine.outcome, status });
+  return runV4.parse({ ...base, outcome: engine.outcome, status });
+}
+
+function runV3FromRows(row: RunRow, engine: RunEngineStateRow): RunV3 {
+  const current = runV4FromRows(row, engine);
+  return runV3.parse({ ...current, outcome: legacyRunOutcome(current.outcome) });
 }
 
 function finishedV2(value: RunV2) {
@@ -281,6 +297,30 @@ function finishedV3(value: RunV3) {
   if (value.finishedAt === undefined || !isTerminal(value.status))
     throw new Error("run is not terminal");
   return runFinishedV3.parse({
+    agentProfileDigests: value.agentProfileDigests,
+    auditSequence: value.auditSequence,
+    definitionDigest: value.definitionDigest,
+    factoryEventId: value.factoryEventId,
+    finishedAt: value.finishedAt,
+    flowDigest: value.flowDigest,
+    flowId: value.flowId,
+    moduleManifestDigest: value.moduleManifestDigest,
+    outcome: value.outcome,
+    runId: value.runId,
+    skillDigests: value.skillDigests,
+    startedAt: value.startedAt,
+    stateId: value.stateId,
+    status: value.status,
+    workflowId: value.workflowId,
+    workflowVersion: value.workflowVersion,
+    workflowVersionDigest: value.workflowVersionDigest,
+  });
+}
+
+function finishedV4(value: RunV4) {
+  if (value.finishedAt === undefined || !isTerminal(value.status))
+    throw new Error("run is not terminal");
+  return runFinishedV4.parse({
     agentProfileDigests: value.agentProfileDigests,
     auditSequence: value.auditSequence,
     definitionDigest: value.definitionDigest,
@@ -389,7 +429,7 @@ async function loadInitialCorrelation(db: Kysely<RunsDatabase>, runId: string): 
   return identity.initial_correlation_json;
 }
 
-function triggerMatches(plan: ExecutionPlanV2, event: FactoryEvent): boolean {
+function triggerMatches(plan: ExecutionPlanV3, event: FactoryEvent): boolean {
   return plan.triggers.some((trigger) => {
     if (trigger.sourceId !== event.sourceId) return false;
     return trigger.predicates.every((predicate) => {
@@ -413,7 +453,7 @@ function triggerMatches(plan: ExecutionPlanV2, event: FactoryEvent): boolean {
 }
 
 function admissionScope(
-  plan: ExecutionPlanV2,
+  plan: ExecutionPlanV3,
   event: Pick<FactoryEvent, "repository" | "subject">,
 ): string {
   const agent = plan.steps.find((step) => step.agentProfile !== undefined)?.agentProfile ?? "none";
@@ -442,7 +482,10 @@ async function publishProjection(
   const projection = runFromRow(row);
   ctx.publish(runs.events.runStateChangedV1, runV1FromV2(projection));
   ctx.publish(runs.events.runStateChangedV2, projection);
-  if (engine !== undefined) ctx.publish(runs.events.runStateChangedV3, runV3FromRows(row, engine));
+  if (engine !== undefined) {
+    ctx.publish(runs.events.runStateChangedV3, runV3FromRows(row, engine));
+    ctx.publish(runs.events.runStateChangedV4, runV4FromRows(row, engine));
+  }
 }
 
 async function signalResume(
@@ -490,7 +533,7 @@ async function finishEngineRun(
   row: RunRow,
   engine: RunEngineStateRow,
   stateId: string,
-  outcome: RunV3["outcome"],
+  outcome: RunV4["outcome"],
   occurredAt: string,
   terminal?: "success" | "failure",
 ): Promise<{ engine: RunEngineStateRow; row: RunRow }> {
@@ -577,11 +620,12 @@ async function finishEngineRun(
   ctx.publish(runs.events.runFinishedV1, finishedV1(projection));
   ctx.publish(runs.events.runFinishedV2, finishedV2(projection));
   ctx.publish(runs.events.runFinishedV3, finishedV3(runV3FromRows(updatedRow, updatedEngine)));
+  ctx.publish(runs.events.runFinishedV4, finishedV4(runV4FromRows(updatedRow, updatedEngine)));
   return { engine: updatedEngine, row: updatedRow };
 }
 
 function inputArtifacts(
-  plan: ExecutionPlanV2,
+  plan: ExecutionPlanV3,
   stepId: string,
   engine: RunEngineStateRow,
 ): string[] {
@@ -599,7 +643,7 @@ async function transition(
   db: Kysely<RunsDatabase>,
   row: RunRow,
   engine: RunEngineStateRow,
-  plan: ExecutionPlanV2,
+  plan: ExecutionPlanV3,
   outcome: string,
   occurredAt: string,
   outputDigests: readonly string[] = [],
@@ -613,15 +657,44 @@ async function transition(
   );
   if (edge === undefined) return null;
   const outputs = JSON.parse(engine.artifact_outputs_json) as Record<string, string[]>;
-  if (row.current_step_id !== null) outputs[row.current_step_id] = [...outputDigests];
-  const target = plan.states.find((state) => state.id === edge.to);
+  if (row.current_step_id !== null) {
+    outputs[row.current_step_id] = [
+      ...new Set([...(outputs[row.current_step_id] ?? []), ...outputDigests]),
+    ].sort();
+  }
+  let targetId = edge.to;
+  let auditKind = "state.transitioned";
+  let retriageAttempt: number | undefined;
+  if (edge.retriage) {
+    if (plan.retriage === undefined)
+      throw new Error("invalid_revision_pin: retriage transition has no bound");
+    const prior = await db
+      .selectFrom("run_audit")
+      .select("sequence")
+      .where("run_id", "=", row.run_id)
+      .where("kind", "=", "retriage.started")
+      .execute();
+    if (prior.length >= plan.retriage.maxAttempts) {
+      targetId = plan.retriage.exhaustedState;
+      auditKind = "retriage.exhausted";
+    } else {
+      retriageAttempt = prior.length + 1;
+      auditKind = "retriage.started";
+    }
+  }
+  const target = plan.states.find((state) => state.id === targetId);
   if (target === undefined) return null;
   const nextRow = await appendAudit(
     db,
     row,
-    "state.transitioned",
+    auditKind,
     occurredAt,
-    { from: row.state_id, on: outcome, to: edge.to },
+    {
+      from: row.state_id,
+      on: outcome,
+      ...(retriageAttempt === undefined ? {} : { retriageAttempt }),
+      to: targetId,
+    },
     {
       current_attempt_id: null,
       current_correlation_token: null,
@@ -667,7 +740,7 @@ async function scheduleRetry(
   db: Kysely<RunsDatabase>,
   row: RunRow,
   engine: RunEngineStateRow,
-  plan: ExecutionPlanV2,
+  plan: ExecutionPlanV3,
   occurredAt: string,
 ): Promise<{ delayMs: number; engine: RunEngineStateRow; row: RunRow } | null> {
   const state = plan.states.find((candidate) => candidate.id === row.state_id);
@@ -730,8 +803,9 @@ function legacyCapabilityPresetFor(
 }
 
 function validResult(
-  step: ExecutionPlanV2["steps"][number],
+  step: ExecutionPlanV3["steps"][number],
   result: unknown,
+  legacy: boolean,
 ): result is {
   data: Record<string, unknown>;
   outcome: string;
@@ -750,16 +824,26 @@ function validResult(
   const data = result.data;
   const outputArtifactDigests = result.outputArtifactDigests;
   const contract = step.resultContracts.find((candidate) => candidate.outcome === result.outcome);
+  if (contract === undefined || (contract.legacyOnly === true && !legacy)) return false;
   if (
-    contract === undefined ||
     new Set(outputArtifactDigests).size < contract.requiredArtifactCount ||
     !contract.requiredData.every((key) => Object.hasOwn(data, key))
   )
     return false;
-  return Object.entries(contract.dataTypes).every(([key, expected]) => {
+  const dataTypesMatch = Object.entries(contract.dataTypes).every(([key, expected]) => {
     if (!Object.hasOwn(data, key)) return false;
     return expected === "unknown" || typeof data[key] === expected;
   });
+  if (!dataTypesMatch) return false;
+  if (contract.behavioralTest === "failing-then-passing") {
+    return data.failingTestObserved === true && data.passingTestObserved === true;
+  }
+  if (contract.behavioralTest === "reproduction-exception") {
+    return (
+      typeof data.reproductionException === "string" && data.reproductionException.trim() !== ""
+    );
+  }
+  return true;
 }
 type AttemptCompletion = Omit<AttemptFinished, "result"> & {
   readonly failure?: unknown;
@@ -937,6 +1021,26 @@ async function consumeEffectFinished(
   return true;
 }
 
+function gateSignalsForEvent(event: FactoryEvent): string[] {
+  const signals = [event.eventType, `event.${event.eventType}`];
+  if (!isDataRecord(event.payload) || !isDataRecord(event.payload.untrusted)) return signals;
+  const untrusted = event.payload.untrusted;
+  if (event.eventType.startsWith("issue_comment.") && isDataRecord(untrusted.comment)) {
+    const body = untrusted.comment.body;
+    if (typeof body === "string") {
+      const command = body.trim().toLowerCase();
+      if (command === "/factory approve") signals.push("comment:approve");
+      else if (command === "/factory reject") signals.push("comment:reject");
+      else signals.push("comment:new-evidence");
+    }
+  }
+  if (event.eventType === "issue.label_added" && typeof untrusted.label === "string") {
+    if (untrusted.label === "factory:approved") signals.push("label:factory:approved");
+    if (untrusted.label === "factory:rejected") signals.push("label:factory:rejected");
+  }
+  return [...new Set(signals)];
+}
+
 function createSubscriptions(dependencies: RunsImplementationDependencies) {
   const attemptFinishedStrict = defineChimpbaseModuleSubscription(
     execution.events.attemptFinishedV2,
@@ -996,7 +1100,7 @@ function createSubscriptions(dependencies: RunsImplementationDependencies) {
       if (active === null) return 0;
       let started = 0;
       for (const flowId of Object.keys(active.flowDigests).sort()) {
-        const plan = await ctx.call(definitions.calls.getExecutionPlanV2, {
+        const plan = await ctx.call(definitions.calls.getExecutionPlanV3, {
           definitionDigest: active.definitionDigest,
           flowId,
         });
@@ -1008,7 +1112,7 @@ function createSubscriptions(dependencies: RunsImplementationDependencies) {
         );
         const runId = digestIdentity("run", active.definitionDigest, plan.flowDigest, identity);
         const repositorySha = dependencies.repositoryPins?.[accepted.event.repository];
-        await ctx.call(runs.calls.startRunV3, {
+        await ctx.call(runs.calls.startRunV4, {
           definitionDigest: active.definitionDigest,
           factoryEventId: `${identity}:${flowId}`,
           flowId,
@@ -1025,47 +1129,57 @@ function createSubscriptions(dependencies: RunsImplementationDependencies) {
         started += 1;
       }
       const db = runsDb(ctx);
-      const waiting = await db
+      const candidates = await db
         .selectFrom("run_engine_state")
         .select("run_id")
-        .where("engine_phase", "=", "waiting")
+        .where("repository", "=", accepted.event.repository)
+        .where("subject", "=", accepted.event.subject)
         .execute();
-      for (const candidate of waiting) {
+      const eventSignals = gateSignalsForEvent(accepted.event);
+      for (const candidate of candidates) {
         const loaded = await loadRows(db, candidate.run_id);
-        if (
-          loaded === null ||
-          loaded.engine === null ||
-          loaded.engine.repository !== accepted.event.repository ||
-          loaded.engine.subject !== accepted.event.subject ||
-          loaded.row.current_gate_id === null ||
-          loaded.row.current_correlation_token === null
-        )
-          continue;
-        const plan = await ctx.call(definitions.calls.getExecutionPlanV2, {
-          definitionDigest: loaded.row.definition_digest,
-          flowId: loaded.row.flow_id,
-        });
-        const state = plan?.states.find((entry) => entry.id === loaded.row.state_id);
-        const gate = plan?.gates.find((entry) => entry.id === state?.gate);
-        if (gate?.kind !== "event") continue;
-        const signal = gate.accepted.find(
-          (entry) =>
-            entry === accepted.event.eventType || entry === `event.${accepted.event.eventType}`,
-        );
-        if (signal === undefined) continue;
-        await ctx.call(runs.calls.signalRun, {
-          correlationToken: loaded.row.current_correlation_token,
-          gateId: loaded.row.current_gate_id,
-          identity: digestIdentity(
-            "gate-event",
-            accepted.event.sourceId,
-            accepted.event.deliveryId,
-            loaded.row.run_id,
-          ),
-          occurredAt: accepted.event.observedAt,
-          runId: loaded.row.run_id,
-          signal,
-        });
+        if (loaded === null || loaded.engine === null || isTerminal(loaded.row.status)) continue;
+        if (loaded.row.current_gate_id !== null && loaded.row.current_correlation_token !== null) {
+          const plan = await ctx.call(definitions.calls.getExecutionPlanV3, {
+            definitionDigest: loaded.row.definition_digest,
+            flowId: loaded.row.flow_id,
+          });
+          const state = plan?.states.find((entry) => entry.id === loaded.row.state_id);
+          const gate = plan?.gates.find((entry) => entry.id === state?.gate);
+          const signal =
+            gate?.kind === "event"
+              ? gate.accepted.find((entry) => eventSignals.includes(entry))
+              : undefined;
+          if (signal !== undefined) {
+            await ctx.call(runs.calls.signalRunV2, {
+              correlationToken: loaded.row.current_correlation_token,
+              gateId: loaded.row.current_gate_id,
+              identity: digestIdentity(
+                "gate-event",
+                accepted.event.sourceId,
+                accepted.event.deliveryId,
+                loaded.row.run_id,
+              ),
+              occurredAt: accepted.event.observedAt,
+              runId: loaded.row.run_id,
+              signal,
+            });
+            continue;
+          }
+        }
+        if (accepted.event.eventType === "issue.closed") {
+          await ctx.call(runs.calls.applyOperatorCommandV3, {
+            commandId: digestIdentity(
+              "issue-close",
+              accepted.event.sourceId,
+              accepted.event.deliveryId,
+              loaded.row.run_id,
+            ),
+            issuedAt: accepted.event.observedAt,
+            kind: "cancel",
+            runId: loaded.row.run_id,
+          });
+        }
       }
       return started;
     },
@@ -1078,18 +1192,28 @@ function createSubscriptions(dependencies: RunsImplementationDependencies) {
     acceptedEvent,
   ] as const;
 }
-
 function strictEffectOperation(
-  step: ExecutionPlanV2["steps"][number],
+  step: ExecutionPlanV3["steps"][number],
   row: RunRow,
   engine: RunEngineStateRow & RunExecutionPinRow,
   artifacts: readonly string[],
   treeDigest: string | null,
+  priorEffectRevision: string | null,
 ): EffectOperationV3 {
   const branch = `factory/${row.run_id.replace(/[^A-Za-z0-9._-]/g, "-").slice(0, 80)}`;
-  if (step.effectCapability === "repository.write") {
+  const issueNumber = Number(/^issue:(\d+)$/.exec(engine.subject)?.[1]);
+  const kind =
+    step.effectKind ??
+    (step.effectCapability === "repository.write"
+      ? "push-verified-commit"
+      : step.effectCapability === "issue.comment"
+        ? "create-comment"
+        : undefined);
+  if (kind === "push-verified-commit") {
+    if (step.effectKind !== undefined && treeDigest === null)
+      throw new Error("invalid_revision_pin: verified commit requires a recorded tree pin");
     return {
-      kind: "push-verified-commit",
+      kind,
       payload: {
         baseRevision: engine.repository_sha,
         branch,
@@ -1099,12 +1223,34 @@ function strictEffectOperation(
       },
     };
   }
-  const issueNumber = Number(/^issue:(\d+)$/.exec(engine.subject)?.[1]);
+  if (kind === "create-branch")
+    return { kind, payload: { baseRevision: engine.repository_sha, branch } };
+  if (kind === "delete-branch") {
+    if (priorEffectRevision === null)
+      throw new Error("invalid_revision_pin: branch cleanup requires the published head revision");
+    return { kind, payload: { branch, headRevision: priorEffectRevision } };
+  }
   if (!Number.isSafeInteger(issueNumber) || issueNumber < 1)
     throw new Error("invalid_revision_pin: effect issue subject is not numeric");
-  if (step.effectCapability === "issue.comment")
-    return { kind: "create-comment", payload: { artifactDigests: [...artifacts], issueNumber } };
-  throw new Error(`invalid_revision_pin: unsupported effect capability ${step.effectCapability}`);
+  if (kind === "create-comment")
+    return { kind, payload: { artifactDigests: [...artifacts], issueNumber } };
+  if (kind === "add-label" || kind === "remove-label") {
+    if (step.effectLabel === undefined)
+      throw new Error("invalid_revision_pin: label effect requires effectLabel");
+    return { kind, payload: { issueNumber, label: step.effectLabel } };
+  }
+  if (kind === "create-pull-request") {
+    return {
+      kind,
+      payload: {
+        artifactDigests: [...artifacts],
+        base: step.effectBase ?? "main",
+        head: branch,
+        title: step.effectTitle ?? `Fix issue #${issueNumber}`,
+      },
+    };
+  }
+  throw new Error(`invalid_revision_pin: unsupported effect kind ${String(kind)}`);
 }
 
 export function createRunsImplementation(dependencies: RunsImplementationDependencies = {}) {
@@ -1272,6 +1418,10 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
         return runFromRow(row);
       },
       async startRunV3(ctx, input) {
+        const current = await ctx.call(runs.calls.startRunV4, input);
+        return runV3.parse({ ...current, outcome: legacyRunOutcome(current.outcome) });
+      },
+      async startRunV4(ctx, input) {
         if (
           dependencies.moduleManifestDigest === undefined ||
           dependencies.workflowVersionDigest === undefined ||
@@ -1299,12 +1449,12 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
             existing.engine.task_payload_json !== JSON.stringify(input.taskPayload ?? null)
           )
             throw new Error("run_exists: immutable run identity has different pins");
-          return runV3FromRows(existing.row, existing.engine);
+          return runV4FromRows(existing.row, existing.engine);
         }
         const active = await ctx.call(definitions.calls.getActiveDefinition, {});
         if (active === null || active.definitionDigest !== input.definitionDigest)
           throw new Error("invalid_revision_pin: definition is not active");
-        const plan = await ctx.call(definitions.calls.getExecutionPlanV2, {
+        const plan = await ctx.call(definitions.calls.getExecutionPlanV3, {
           definitionDigest: input.definitionDigest,
           flowId: input.flowId,
         });
@@ -1402,7 +1552,7 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
           { workflowId: input.workflowId },
         );
         await publishProjection(ctx, row, engine);
-        return runV3FromRows(row, engine);
+        return runV4FromRows(row, engine);
       },
       async getRun(ctx, input) {
         const loaded = await loadRows(runsDb(ctx), input.runId);
@@ -1417,6 +1567,12 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
         return loaded === null || loaded.engine === null
           ? null
           : runV3FromRows(loaded.row, loaded.engine);
+      },
+      async getRunV4(ctx, input) {
+        const loaded = await loadRows(runsDb(ctx), input.runId);
+        return loaded === null || loaded.engine === null
+          ? null
+          : runV4FromRows(loaded.row, loaded.engine);
       },
       async getRunAudit(ctx, input) {
         const db = runsDb(ctx);
@@ -1617,31 +1773,55 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
           };
           enginePatch = { engine_phase: resumedPhase, paused_from_phase: null };
         } else if (input.kind === "cancel") {
-          await db
-            .insertInto("operator_commands")
-            .values({
-              command_id: input.commandId,
-              command_json: JSON.stringify(input),
-              issued_at: input.issuedAt,
-              kind: input.kind,
-              run_id: input.runId,
-            })
-            .execute();
-          if (loaded.row.current_attempt_id !== null)
-            await ctx.call(execution.calls.cancelAttempt, {
-              attemptId: loaded.row.current_attempt_id,
-              cancelledAt: input.issuedAt,
-            });
-          await finishEngineRun(
-            ctx,
-            loaded.row,
-            engine,
-            loaded.row.state_id,
-            "cancelled",
-            input.issuedAt,
-          );
-          await signalResume(ctx, loaded.row, input.commandId, input.issuedAt, "cancel");
-          return runFromRow((await loadRows(db, input.runId))?.row ?? loaded.row);
+          const gate =
+            loaded.row.current_gate_id === null ||
+            loaded.row.current_correlation_token === null ||
+            loaded.row.current_gate_status !== "pending"
+              ? undefined
+              : await db
+                  .selectFrom("run_gates")
+                  .select("accepted_json")
+                  .where("run_id", "=", loaded.row.run_id)
+                  .where("gate_id", "=", loaded.row.current_gate_id)
+                  .where("correlation_token", "=", loaded.row.current_correlation_token)
+                  .executeTakeFirst();
+          if (
+            gate !== undefined &&
+            (JSON.parse(gate.accepted_json) as string[]).includes("operator.cancel")
+          ) {
+            patch = { current_gate_status: "rejected", status: "running" };
+            enginePatch = {
+              engine_phase: "runnable",
+              pending_json: JSON.stringify({ kind: "gate", outcome: "operator.cancel" }),
+            };
+            wakeKind = "gate";
+          } else {
+            await db
+              .insertInto("operator_commands")
+              .values({
+                command_id: input.commandId,
+                command_json: JSON.stringify(input),
+                issued_at: input.issuedAt,
+                kind: input.kind,
+                run_id: input.runId,
+              })
+              .execute();
+            if (loaded.row.current_attempt_id !== null)
+              await ctx.call(execution.calls.cancelAttempt, {
+                attemptId: loaded.row.current_attempt_id,
+                cancelledAt: input.issuedAt,
+              });
+            await finishEngineRun(
+              ctx,
+              loaded.row,
+              engine,
+              loaded.row.state_id,
+              "cancelled",
+              input.issuedAt,
+            );
+            await signalResume(ctx, loaded.row, input.commandId, input.issuedAt, "cancel");
+            return runFromRow((await loadRows(db, input.runId))?.row ?? loaded.row);
+          }
         } else if (input.kind === "retry") {
           if (engine.engine_phase !== "retrying" || loaded.row.current_gate_status === "pending")
             throw new Error("command_not_allowed: no retryable work");
@@ -1728,7 +1908,17 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
         await publishProjection(ctx, row, { ...engine, ...enginePatch });
         return runFromRow(row);
       },
+      async applyOperatorCommandV3(ctx, input) {
+        await ctx.call(runs.calls.applyOperatorCommandV2, input);
+        const current = await ctx.call(runs.calls.getRunV4, { runId: input.runId });
+        if (current === null) throw new Error("run_not_found");
+        return current;
+      },
       async signalRun(ctx, input) {
+        const current = await ctx.call(runs.calls.signalRunV2, input);
+        return runV3.parse({ ...current, outcome: legacyRunOutcome(current.outcome) });
+      },
+      async signalRunV2(ctx, input) {
         const db = runsDb(ctx);
         const loaded = await loadRows(db, input.runId);
         if (loaded === null || loaded.engine === null) throw new Error("run_not_found");
@@ -1744,7 +1934,7 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
           ) {
             throw new Error("signal_not_allowed: signal identity has different fields");
           }
-          return runV3FromRows(loaded.row, loaded.engine);
+          return runV4FromRows(loaded.row, loaded.engine);
         }
         if (
           loaded.row.current_gate_id !== input.gateId ||
@@ -1804,15 +1994,18 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
         );
         await signalResume(ctx, row, input.identity, input.occurredAt, "gate");
         await publishProjection(ctx, row, engine);
-        return runV3FromRows(row, engine);
+        return runV4FromRows(row, engine);
       },
       async driveRun(ctx, input) {
+        return await ctx.call(runs.calls.driveRunV2, input);
+      },
+      async driveRunV2(ctx, input) {
         const db = runsDb(ctx);
         const loaded = await loadRows(db, input.runId);
         if (loaded === null || loaded.engine === null) throw new Error("run_not_found");
         let { engine, row } = loaded;
         if (isTerminal(row.status)) return { kind: "complete" as const };
-        const plan = await ctx.call(definitions.calls.getExecutionPlanV2, {
+        const plan = await ctx.call(definitions.calls.getExecutionPlanV3, {
           definitionDigest: row.definition_digest,
           flowId: row.flow_id,
         });
@@ -1963,7 +2156,31 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
               return { delayMs: retry.delayMs, kind: "sleep" as const };
             }
             const result = pending.outcome.result;
-            if (!validResult(step, result)) {
+            if (!validResult(step, result, engine.execution_protocol === "v1")) {
+              if (
+                step.skill === "fix" &&
+                isDataRecord(result) &&
+                typeof result.outcome === "string" &&
+                result.outcome.startsWith("fix_pending")
+              ) {
+                const rejected = await transition(
+                  db,
+                  row,
+                  engine,
+                  plan,
+                  "fix_rejected",
+                  input.now,
+                  Array.isArray(result.outputArtifactDigests)
+                    ? result.outputArtifactDigests.filter(
+                        (digest): digest is string => typeof digest === "string",
+                      )
+                    : [],
+                );
+                if (rejected !== null) {
+                  await publishProjection(ctx, rejected.row, rejected.engine);
+                  return { delayMs: 0, kind: "sleep" as const };
+                }
+              }
               await finishEngineRun(ctx, row, engine, state.id, "failed", input.now);
               return { kind: "complete" as const };
             }
@@ -2388,15 +2605,46 @@ export function createRunsImplementation(dependencies: RunsImplementationDepende
             }
           }
         }
+        let priorEffectRevision: string | null = null;
+        if (dependencies.strictEffects === true && step.effectRevisionStep !== undefined) {
+          const effectRequests = await db
+            .selectFrom("run_audit")
+            .select("audit_json")
+            .where("run_id", "=", row.run_id)
+            .where("kind", "=", "effect.requested")
+            .orderBy("sequence", "desc")
+            .execute();
+          for (const request of effectRequests) {
+            const payload = JSON.parse(request.audit_json) as Record<string, unknown>;
+            if (
+              payload.stepId !== step.effectRevisionStep ||
+              typeof payload.idempotencyKey !== "string"
+            )
+              continue;
+            const receipt = await ctx.call(effects.calls.getReceiptV3, {
+              idempotencyKey: payload.idempotencyKey,
+            });
+            priorEffectRevision = receipt?.externalRevision ?? null;
+            break;
+          }
+        }
         const strictIntent =
           dependencies.strictEffects === true
             ? (() => {
-                const operation = strictEffectOperation(step, row, engine, artifacts, treeDigest);
+                const operation = strictEffectOperation(
+                  step,
+                  row,
+                  engine,
+                  artifacts,
+                  treeDigest,
+                  priorEffectRevision,
+                );
                 return {
                   capability: step.effectCapability ?? "",
                   correlationToken: token,
                   dryRun: false,
-                  expectedExternalRevision: null,
+                  expectedExternalRevision:
+                    operation.kind === "delete-branch" ? priorEffectRevision : null,
                   idempotencyKey,
                   operation,
                   payloadDigest: effectPayloadDigest(operation),

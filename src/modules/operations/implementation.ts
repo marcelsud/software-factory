@@ -657,8 +657,8 @@ function createSubscriptions() {
         }),
     ),
     defineChimpbaseModuleSubscription(
-      runs.events.runStateChangedV3,
-      "project-run-state-v3",
+      runs.events.runStateChangedV4,
+      "project-run-state-v4",
       async (ctx, value) =>
         recordFact(
           ctx,
@@ -751,8 +751,8 @@ function createSubscriptions() {
         ),
     ),
     defineChimpbaseModuleSubscription(
-      runs.events.runFinishedV3,
-      "project-run-finished-v3",
+      runs.events.runFinishedV4,
+      "project-run-finished-v4",
       async (ctx, value) =>
         recordFact(
           ctx,

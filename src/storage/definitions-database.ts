@@ -12,6 +12,7 @@ export interface ExecutionPlanRow {
 }
 
 export interface ExecutionPlanV2Row extends ExecutionPlanRow {}
+export interface ExecutionPlanV3Row extends ExecutionPlanRow {}
 
 export interface ActiveDefinitionRow {
   definition_digest: string;
@@ -36,6 +37,7 @@ export interface DefinitionsDatabase {
   definition_revisions: DefinitionRevisionRow;
   execution_plans: ExecutionPlanRow;
   execution_plans_v2: ExecutionPlanV2Row;
+  execution_plans_v3: ExecutionPlanV3Row;
   flow_revisions: FlowRevisionRow;
 }
 
@@ -94,6 +96,19 @@ export const definitionsMigrations = {
         );
       `,
     },
+    {
+      name: "004_v3_plans",
+      sql: `
+        CREATE TABLE IF NOT EXISTS execution_plans_v3 (
+          definition_digest TEXT NOT NULL,
+          flow_id TEXT NOT NULL,
+          flow_digest TEXT NOT NULL,
+          plan_json TEXT NOT NULL,
+          PRIMARY KEY (definition_digest, flow_id),
+          FOREIGN KEY (definition_digest) REFERENCES definition_revisions(definition_digest)
+        );
+      `,
+    },
   ],
   postgres: [
     {
@@ -142,6 +157,18 @@ export const definitionsMigrations = {
         CREATE TABLE IF NOT EXISTS chimpbase_definitions.active_definition (
           singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
           definition_digest TEXT NOT NULL REFERENCES chimpbase_definitions.definition_revisions(definition_digest)
+        );
+      `,
+    },
+    {
+      name: "004_v3_plans",
+      sql: `
+        CREATE TABLE IF NOT EXISTS chimpbase_definitions.execution_plans_v3 (
+          definition_digest TEXT NOT NULL REFERENCES chimpbase_definitions.definition_revisions(definition_digest),
+          flow_id TEXT NOT NULL,
+          flow_digest TEXT NOT NULL,
+          plan_json TEXT NOT NULL,
+          PRIMARY KEY (definition_digest, flow_id)
         );
       `,
     },

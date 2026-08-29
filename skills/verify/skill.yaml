@@ -3,14 +3,18 @@ version: 1
 compatibility: 1
 instruction: instructions.md
 includes: [guidance.md]
-inputArtifacts: [patch, report.md]
+inputArtifacts: [patch, report.md, result.json, test-result]
 resultSchema:
   type: object
   properties:
-    passed: { type: boolean }
-    evidence: { type: string }
-    testResults: { type: string-array }
-  required: [passed, evidence, testResults]
+    schemaVersion: { type: number }
+    decision: { type: string }
+    summary: { type: string }
+    evidence: { type: string-array }
+    checks: { type: string-array }
+    producerAttemptId: { type: string }
+    approvedAttemptId: { type: string }
+  required: [schemaVersion, decision, summary, evidence, checks, producerAttemptId, approvedAttemptId]
   additionalProperties: false
 capabilities: [repository.read, process.test]
 customizable: false

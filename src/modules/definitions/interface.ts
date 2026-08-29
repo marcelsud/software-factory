@@ -1,7 +1,12 @@
 import { defineChimpbaseModuleInterface } from "chimpbase/core";
 import { v } from "chimpbase/runtime";
 
-import { definitionRevision, executionPlan, executionPlanV2 } from "../../contracts/index.ts";
+import {
+  definitionRevision,
+  executionPlan,
+  executionPlanV2,
+  executionPlanV3,
+} from "../../contracts/index.ts";
 import type { DefinitionsDatabase } from "../../storage/definitions-database.ts";
 
 const calls = {
@@ -28,6 +33,14 @@ const calls = {
     output: executionPlanV2.nullable(),
     errors: [],
     guarantees: ["returns the strict orchestration plan pinned to the requested revisions"],
+  },
+  getExecutionPlanV3: {
+    input: v.object({ definitionDigest: v.string(), flowId: v.string() }),
+    output: executionPlanV3.nullable(),
+    errors: [],
+    guarantees: [
+      "returns the additive triage orchestration plan pinned to the requested revisions",
+    ],
   },
   activateDefinition: {
     input: v.object({ definitionDigest: v.string() }),

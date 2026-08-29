@@ -74,15 +74,15 @@
     },
     {
       "consumer": "operations",
-      "event": "runs/runFinished@v3",
+      "event": "runs/runFinished@v4",
       "publisher": "runs",
-      "subscription": "project-run-finished-v3"
+      "subscription": "project-run-finished-v4"
     },
     {
       "consumer": "operations",
-      "event": "runs/runStateChanged@v3",
+      "event": "runs/runStateChanged@v4",
       "publisher": "runs",
-      "subscription": "project-run-state-v3"
+      "subscription": "project-run-state-v4"
     },
     {
       "consumer": "operations",
@@ -3510,6 +3510,540 @@
         {
           "errors": [],
           "guarantees": [
+            "returns the additive triage orchestration plan pinned to the requested revisions"
+          ],
+          "id": "definitions/getExecutionPlanV3@v1",
+          "inputSchema": {
+            "properties": {
+              "definitionDigest": {
+                "type": "string"
+              },
+              "flowId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "definitionDigest",
+              "flowId"
+            ],
+            "type": "object"
+          },
+          "name": "getExecutionPlanV3",
+          "outputSchema": {
+            "anyOf": [
+              {
+                "properties": {
+                  "agentProfileDigests": {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "type": "object"
+                  },
+                  "agentProfiles": {
+                    "additionalProperties": {
+                      "properties": {
+                        "capabilities": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "command": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "digest": {
+                          "type": "string"
+                        },
+                        "instructions": {
+                          "type": "string"
+                        },
+                        "limits": {
+                          "properties": {
+                            "maxOutputBytes": {
+                              "type": "integer"
+                            },
+                            "timeoutMs": {
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "maxOutputBytes",
+                            "timeoutMs"
+                          ],
+                          "type": "object"
+                        },
+                        "model": {
+                          "type": "string"
+                        },
+                        "skills": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        }
+                      },
+                      "required": [
+                        "capabilities",
+                        "command",
+                        "digest",
+                        "instructions",
+                        "limits",
+                        "model",
+                        "skills"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "object"
+                  },
+                  "artifactHandoffs": {
+                    "items": {
+                      "properties": {
+                        "fromStep": {
+                          "type": "string"
+                        },
+                        "toStep": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "fromStep",
+                        "toStep"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "calls": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "concurrency": {
+                    "properties": {
+                      "key": {
+                        "type": "string"
+                      },
+                      "limit": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "key",
+                      "limit"
+                    ],
+                    "type": "object"
+                  },
+                  "definitionDigest": {
+                    "type": "string"
+                  },
+                  "effectPermissions": {
+                    "items": {
+                      "properties": {
+                        "capability": {
+                          "type": "string"
+                        },
+                        "targets": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        }
+                      },
+                      "required": [
+                        "capability",
+                        "targets"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "events": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "flowDigest": {
+                    "type": "string"
+                  },
+                  "flowId": {
+                    "type": "string"
+                  },
+                  "gates": {
+                    "items": {
+                      "properties": {
+                        "accepted": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "enum": [
+                            "approval",
+                            "event",
+                            "signal"
+                          ]
+                        },
+                        "requiredArtifactCount": {
+                          "type": "integer"
+                        },
+                        "requiredArtifactSteps": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "requiredOutcome": {
+                          "type": "string"
+                        },
+                        "timeoutMs": {
+                          "type": "integer"
+                        },
+                        "timeoutOutcome": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "accepted",
+                        "id",
+                        "kind",
+                        "requiredArtifactCount",
+                        "requiredArtifactSteps"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "initialState": {
+                    "type": "string"
+                  },
+                  "normalizedJson": {
+                    "type": "string"
+                  },
+                  "retriage": {
+                    "properties": {
+                      "exhaustedState": {
+                        "type": "string"
+                      },
+                      "maxAttempts": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "exhaustedState",
+                      "maxAttempts"
+                    ],
+                    "type": "object"
+                  },
+                  "skillRevisions": {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "type": "object"
+                  },
+                  "states": {
+                    "items": {
+                      "properties": {
+                        "gate": {
+                          "type": "string"
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "step": {
+                          "type": "string"
+                        },
+                        "terminal": {
+                          "enum": [
+                            "success",
+                            "failure"
+                          ]
+                        },
+                        "terminalOutcome": {
+                          "enum": [
+                            "not_actionable",
+                            "needs_reproduction",
+                            "skipped",
+                            "unable_to_reproduce",
+                            "intended_behavior",
+                            "unable_to_fix",
+                            "fix_pending",
+                            "fix_rejected",
+                            "fix_verified",
+                            "failed",
+                            "waiting",
+                            "completed",
+                            "cancelled"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "id"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "steps": {
+                    "items": {
+                      "properties": {
+                        "agentProfile": {
+                          "type": "string"
+                        },
+                        "capabilities": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "deterministicOutcome": {
+                          "type": "string"
+                        },
+                        "effectBase": {
+                          "type": "string"
+                        },
+                        "effectCapability": {
+                          "type": "string"
+                        },
+                        "effectKind": {
+                          "enum": [
+                            "add-label",
+                            "remove-label",
+                            "create-comment",
+                            "update-comment",
+                            "create-branch",
+                            "delete-branch",
+                            "push-verified-commit",
+                            "create-pull-request",
+                            "update-pull-request"
+                          ]
+                        },
+                        "effectLabel": {
+                          "type": "string"
+                        },
+                        "effectPayloadDigest": {
+                          "type": "string"
+                        },
+                        "effectRevisionStep": {
+                          "type": "string"
+                        },
+                        "effectTarget": {
+                          "type": "string"
+                        },
+                        "effectTitle": {
+                          "type": "string"
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "enum": [
+                            "agent",
+                            "deterministic",
+                            "effect"
+                          ]
+                        },
+                        "resultContracts": {
+                          "items": {
+                            "properties": {
+                              "behavioralTest": {
+                                "enum": [
+                                  "failing-then-passing",
+                                  "reproduction-exception"
+                                ]
+                              },
+                              "dataTypes": {
+                                "additionalProperties": {
+                                  "enum": [
+                                    "boolean",
+                                    "number",
+                                    "string",
+                                    "unknown"
+                                  ]
+                                },
+                                "type": "object"
+                              },
+                              "legacyOnly": {
+                                "type": "boolean"
+                              },
+                              "outcome": {
+                                "type": "string"
+                              },
+                              "requiredArtifactCount": {
+                                "type": "integer"
+                              },
+                              "requiredData": {
+                                "items": {
+                                  "type": "string"
+                                },
+                                "type": "array"
+                              }
+                            },
+                            "required": [
+                              "dataTypes",
+                              "outcome",
+                              "requiredArtifactCount",
+                              "requiredData"
+                            ],
+                            "type": "object"
+                          },
+                          "type": "array"
+                        },
+                        "retry": {
+                          "properties": {
+                            "backoffMs": {
+                              "type": "integer"
+                            },
+                            "maxAttempts": {
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "backoffMs",
+                            "maxAttempts"
+                          ],
+                          "type": "object"
+                        },
+                        "skill": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "capabilities",
+                        "id",
+                        "kind",
+                        "resultContracts",
+                        "retry"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "transitions": {
+                    "items": {
+                      "properties": {
+                        "from": {
+                          "type": "string"
+                        },
+                        "mode": {
+                          "enum": [
+                            "immediate",
+                            "signal"
+                          ]
+                        },
+                        "on": {
+                          "type": "string"
+                        },
+                        "retriage": {
+                          "type": "boolean"
+                        },
+                        "to": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "from",
+                        "mode",
+                        "on",
+                        "to"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "triggers": {
+                    "items": {
+                      "properties": {
+                        "predicates": {
+                          "items": {
+                            "properties": {
+                              "field": {
+                                "type": "string"
+                              },
+                              "operator": {
+                                "enum": [
+                                  "equals",
+                                  "not_equals",
+                                  "in",
+                                  "not_in",
+                                  "exists"
+                                ]
+                              },
+                              "value": {
+                                "type": "string"
+                              },
+                              "values": {
+                                "items": {
+                                  "type": "string"
+                                },
+                                "type": "array"
+                              }
+                            },
+                            "required": [
+                              "field",
+                              "operator"
+                            ],
+                            "type": "object"
+                          },
+                          "type": "array"
+                        },
+                        "source": {
+                          "type": "string"
+                        },
+                        "sourceId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "predicates",
+                        "source",
+                        "sourceId"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "agentProfileDigests",
+                  "agentProfiles",
+                  "artifactHandoffs",
+                  "calls",
+                  "concurrency",
+                  "definitionDigest",
+                  "effectPermissions",
+                  "events",
+                  "flowDigest",
+                  "flowId",
+                  "gates",
+                  "initialState",
+                  "normalizedJson",
+                  "skillRevisions",
+                  "states",
+                  "steps",
+                  "transitions",
+                  "triggers"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "version": 1
+        },
+        {
+          "errors": [],
+          "guarantees": [
             "never mutates a published revision"
           ],
           "id": "definitions/resolveRevision@v1",
@@ -3599,12 +4133,14 @@
         "postgres": [
           "001_ledger",
           "002_compiled_metadata",
-          "003_active_v2_plans"
+          "003_active_v2_plans",
+          "004_v3_plans"
         ],
         "sqlite": [
           "001_ledger",
           "002_compiled_metadata",
-          "003_active_v2_plans"
+          "003_active_v2_plans",
+          "004_v3_plans"
         ]
       },
       "name": "definitions",
@@ -3615,6 +4151,7 @@
           "definition-revisions",
           "execution-plans",
           "execution-plans-v2",
+          "execution-plans-v3",
           "flow-revisions"
         ],
         "tables": [
@@ -3623,6 +4160,7 @@
           "definition_revisions",
           "execution_plans",
           "execution_plans_v2",
+          "execution_plans_v3",
           "flow_revisions"
         ]
       },
@@ -11889,12 +12427,12 @@
           "name": "project-effect-request-v3"
         },
         {
-          "event": "runs/runFinished@v3",
-          "name": "project-run-finished-v3"
+          "event": "runs/runFinished@v4",
+          "name": "project-run-finished-v4"
         },
         {
-          "event": "runs/runStateChanged@v3",
-          "name": "project-run-state-v3"
+          "event": "runs/runStateChanged@v4",
+          "name": "project-run-state-v4"
         },
         {
           "event": "assets/skillRevisionPinned@v2",
@@ -12182,6 +12720,180 @@
           "errors": [
             "module_unavailable",
             "run_not_found",
+            "command_not_allowed"
+          ],
+          "guarantees": [
+            "applies correlated commands idempotently and returns the additive outcome"
+          ],
+          "id": "runs/applyOperatorCommandV3@v1",
+          "inputSchema": {
+            "properties": {
+              "commandId": {
+                "type": "string"
+              },
+              "correlationToken": {
+                "type": "string"
+              },
+              "gateId": {
+                "type": "string"
+              },
+              "issuedAt": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "approve",
+                  "reject",
+                  "cancel",
+                  "retry",
+                  "pause",
+                  "resume"
+                ]
+              },
+              "runId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "commandId",
+              "issuedAt",
+              "kind",
+              "runId"
+            ],
+            "type": "object"
+          },
+          "name": "applyOperatorCommandV3",
+          "outputSchema": {
+            "properties": {
+              "agentProfileDigests": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "auditSequence": {
+                "type": "integer"
+              },
+              "currentAttemptId": {
+                "type": "string"
+              },
+              "currentCorrelationToken": {
+                "type": "string"
+              },
+              "currentEffectKey": {
+                "type": "string"
+              },
+              "currentGateId": {
+                "type": "string"
+              },
+              "currentGateStatus": {
+                "enum": [
+                  "pending",
+                  "approved",
+                  "rejected"
+                ]
+              },
+              "currentStepId": {
+                "type": "string"
+              },
+              "definitionDigest": {
+                "type": "string"
+              },
+              "factoryEventId": {
+                "type": "string"
+              },
+              "finishedAt": {
+                "type": "string"
+              },
+              "flowDigest": {
+                "type": "string"
+              },
+              "flowId": {
+                "type": "string"
+              },
+              "moduleManifestDigest": {
+                "type": "string"
+              },
+              "outcome": {
+                "enum": [
+                  "not_actionable",
+                  "needs_reproduction",
+                  "skipped",
+                  "unable_to_reproduce",
+                  "intended_behavior",
+                  "unable_to_fix",
+                  "fix_pending",
+                  "fix_rejected",
+                  "fix_verified",
+                  "failed",
+                  "waiting",
+                  "completed",
+                  "cancelled"
+                ]
+              },
+              "runId": {
+                "type": "string"
+              },
+              "skillDigests": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "startedAt": {
+                "type": "string"
+              },
+              "stateId": {
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "queued",
+                  "running",
+                  "retrying",
+                  "waiting",
+                  "paused",
+                  "succeeded",
+                  "failed",
+                  "cancelled"
+                ]
+              },
+              "workflowId": {
+                "type": "string"
+              },
+              "workflowVersion": {
+                "type": "integer"
+              },
+              "workflowVersionDigest": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "agentProfileDigests",
+              "auditSequence",
+              "definitionDigest",
+              "factoryEventId",
+              "flowDigest",
+              "flowId",
+              "moduleManifestDigest",
+              "outcome",
+              "runId",
+              "skillDigests",
+              "startedAt",
+              "stateId",
+              "status",
+              "workflowId",
+              "workflowVersion",
+              "workflowVersionDigest"
+            ],
+            "type": "object"
+          },
+          "version": 1
+        },
+        {
+          "errors": [
+            "module_unavailable",
+            "run_not_found",
             "invalid_revision_pin"
           ],
           "guarantees": [
@@ -12207,6 +12919,61 @@
             "type": "object"
           },
           "name": "driveRun",
+          "outputSchema": {
+            "properties": {
+              "delayMs": {
+                "type": "integer"
+              },
+              "kind": {
+                "enum": [
+                  "complete",
+                  "sleep",
+                  "wait"
+                ]
+              },
+              "signal": {
+                "type": "string"
+              },
+              "timeoutMs": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          "version": 1
+        },
+        {
+          "errors": [
+            "module_unavailable",
+            "run_not_found",
+            "invalid_revision_pin"
+          ],
+          "guarantees": [
+            "advances only the pinned additive declarative state machine"
+          ],
+          "id": "runs/driveRunV2@v1",
+          "inputSchema": {
+            "properties": {
+              "now": {
+                "type": "string"
+              },
+              "runId": {
+                "type": "string"
+              },
+              "wakeKind": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "now",
+              "runId"
+            ],
+            "type": "object"
+          },
+          "name": "driveRunV2",
           "outputSchema": {
             "properties": {
               "delayMs": {
@@ -12665,6 +13432,160 @@
         },
         {
           "errors": [
+            "module_unavailable"
+          ],
+          "guarantees": [
+            "returns the additive triage outcome without widening predecessor contracts"
+          ],
+          "id": "runs/getRunV4@v1",
+          "inputSchema": {
+            "properties": {
+              "runId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "runId"
+            ],
+            "type": "object"
+          },
+          "name": "getRunV4",
+          "outputSchema": {
+            "anyOf": [
+              {
+                "properties": {
+                  "agentProfileDigests": {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "type": "object"
+                  },
+                  "auditSequence": {
+                    "type": "integer"
+                  },
+                  "currentAttemptId": {
+                    "type": "string"
+                  },
+                  "currentCorrelationToken": {
+                    "type": "string"
+                  },
+                  "currentEffectKey": {
+                    "type": "string"
+                  },
+                  "currentGateId": {
+                    "type": "string"
+                  },
+                  "currentGateStatus": {
+                    "enum": [
+                      "pending",
+                      "approved",
+                      "rejected"
+                    ]
+                  },
+                  "currentStepId": {
+                    "type": "string"
+                  },
+                  "definitionDigest": {
+                    "type": "string"
+                  },
+                  "factoryEventId": {
+                    "type": "string"
+                  },
+                  "finishedAt": {
+                    "type": "string"
+                  },
+                  "flowDigest": {
+                    "type": "string"
+                  },
+                  "flowId": {
+                    "type": "string"
+                  },
+                  "moduleManifestDigest": {
+                    "type": "string"
+                  },
+                  "outcome": {
+                    "enum": [
+                      "not_actionable",
+                      "needs_reproduction",
+                      "skipped",
+                      "unable_to_reproduce",
+                      "intended_behavior",
+                      "unable_to_fix",
+                      "fix_pending",
+                      "fix_rejected",
+                      "fix_verified",
+                      "failed",
+                      "waiting",
+                      "completed",
+                      "cancelled"
+                    ]
+                  },
+                  "runId": {
+                    "type": "string"
+                  },
+                  "skillDigests": {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "type": "object"
+                  },
+                  "startedAt": {
+                    "type": "string"
+                  },
+                  "stateId": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "enum": [
+                      "queued",
+                      "running",
+                      "retrying",
+                      "waiting",
+                      "paused",
+                      "succeeded",
+                      "failed",
+                      "cancelled"
+                    ]
+                  },
+                  "workflowId": {
+                    "type": "string"
+                  },
+                  "workflowVersion": {
+                    "type": "integer"
+                  },
+                  "workflowVersionDigest": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "agentProfileDigests",
+                  "auditSequence",
+                  "definitionDigest",
+                  "factoryEventId",
+                  "flowDigest",
+                  "flowId",
+                  "moduleManifestDigest",
+                  "outcome",
+                  "runId",
+                  "skillDigests",
+                  "startedAt",
+                  "stateId",
+                  "status",
+                  "workflowId",
+                  "workflowVersion",
+                  "workflowVersionDigest"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "version": 1
+        },
+        {
+          "errors": [
             "module_unavailable",
             "run_not_found",
             "signal_not_allowed"
@@ -12762,6 +13683,175 @@
                   "needs_reproduction",
                   "unable_to_reproduce",
                   "unable_to_fix",
+                  "failed",
+                  "waiting",
+                  "completed",
+                  "cancelled"
+                ]
+              },
+              "runId": {
+                "type": "string"
+              },
+              "skillDigests": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "startedAt": {
+                "type": "string"
+              },
+              "stateId": {
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "queued",
+                  "running",
+                  "retrying",
+                  "waiting",
+                  "paused",
+                  "succeeded",
+                  "failed",
+                  "cancelled"
+                ]
+              },
+              "workflowId": {
+                "type": "string"
+              },
+              "workflowVersion": {
+                "type": "integer"
+              },
+              "workflowVersionDigest": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "agentProfileDigests",
+              "auditSequence",
+              "definitionDigest",
+              "factoryEventId",
+              "flowDigest",
+              "flowId",
+              "moduleManifestDigest",
+              "outcome",
+              "runId",
+              "skillDigests",
+              "startedAt",
+              "stateId",
+              "status",
+              "workflowId",
+              "workflowVersion",
+              "workflowVersionDigest"
+            ],
+            "type": "object"
+          },
+          "version": 1
+        },
+        {
+          "errors": [
+            "module_unavailable",
+            "run_not_found",
+            "signal_not_allowed"
+          ],
+          "guarantees": [
+            "advances only the current additive gate correlation idempotently"
+          ],
+          "id": "runs/signalRunV2@v1",
+          "inputSchema": {
+            "properties": {
+              "correlationToken": {
+                "type": "string"
+              },
+              "gateId": {
+                "type": "string"
+              },
+              "identity": {
+                "type": "string"
+              },
+              "occurredAt": {
+                "type": "string"
+              },
+              "runId": {
+                "type": "string"
+              },
+              "signal": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "correlationToken",
+              "gateId",
+              "identity",
+              "occurredAt",
+              "runId",
+              "signal"
+            ],
+            "type": "object"
+          },
+          "name": "signalRunV2",
+          "outputSchema": {
+            "properties": {
+              "agentProfileDigests": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "auditSequence": {
+                "type": "integer"
+              },
+              "currentAttemptId": {
+                "type": "string"
+              },
+              "currentCorrelationToken": {
+                "type": "string"
+              },
+              "currentEffectKey": {
+                "type": "string"
+              },
+              "currentGateId": {
+                "type": "string"
+              },
+              "currentGateStatus": {
+                "enum": [
+                  "pending",
+                  "approved",
+                  "rejected"
+                ]
+              },
+              "currentStepId": {
+                "type": "string"
+              },
+              "definitionDigest": {
+                "type": "string"
+              },
+              "factoryEventId": {
+                "type": "string"
+              },
+              "finishedAt": {
+                "type": "string"
+              },
+              "flowDigest": {
+                "type": "string"
+              },
+              "flowId": {
+                "type": "string"
+              },
+              "moduleManifestDigest": {
+                "type": "string"
+              },
+              "outcome": {
+                "enum": [
+                  "not_actionable",
+                  "needs_reproduction",
+                  "skipped",
+                  "unable_to_reproduce",
+                  "intended_behavior",
+                  "unable_to_fix",
+                  "fix_pending",
+                  "fix_rejected",
+                  "fix_verified",
                   "failed",
                   "waiting",
                   "completed",
@@ -13285,6 +14375,196 @@
                   "needs_reproduction",
                   "unable_to_reproduce",
                   "unable_to_fix",
+                  "failed",
+                  "waiting",
+                  "completed",
+                  "cancelled"
+                ]
+              },
+              "runId": {
+                "type": "string"
+              },
+              "skillDigests": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "startedAt": {
+                "type": "string"
+              },
+              "stateId": {
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "queued",
+                  "running",
+                  "retrying",
+                  "waiting",
+                  "paused",
+                  "succeeded",
+                  "failed",
+                  "cancelled"
+                ]
+              },
+              "workflowId": {
+                "type": "string"
+              },
+              "workflowVersion": {
+                "type": "integer"
+              },
+              "workflowVersionDigest": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "agentProfileDigests",
+              "auditSequence",
+              "definitionDigest",
+              "factoryEventId",
+              "flowDigest",
+              "flowId",
+              "moduleManifestDigest",
+              "outcome",
+              "runId",
+              "skillDigests",
+              "startedAt",
+              "stateId",
+              "status",
+              "workflowId",
+              "workflowVersion",
+              "workflowVersionDigest"
+            ],
+            "type": "object"
+          },
+          "version": 1
+        },
+        {
+          "errors": [
+            "module_unavailable",
+            "run_exists",
+            "invalid_revision_pin",
+            "admission_failed"
+          ],
+          "guarantees": [
+            "pins the additive triage plan and trusted composition digests"
+          ],
+          "id": "runs/startRunV4@v1",
+          "inputSchema": {
+            "properties": {
+              "definitionDigest": {
+                "type": "string"
+              },
+              "factoryEventId": {
+                "type": "string"
+              },
+              "flowId": {
+                "type": "string"
+              },
+              "moduleManifestDigest": {
+                "type": "string"
+              },
+              "repository": {
+                "type": "string"
+              },
+              "repositorySha": {
+                "type": "string"
+              },
+              "runId": {
+                "type": "string"
+              },
+              "startedAt": {
+                "type": "string"
+              },
+              "subject": {
+                "type": "string"
+              },
+              "taskPayload": {},
+              "workflowId": {
+                "type": "string"
+              },
+              "workflowVersionDigest": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "definitionDigest",
+              "factoryEventId",
+              "flowId",
+              "moduleManifestDigest",
+              "repository",
+              "runId",
+              "startedAt",
+              "subject",
+              "workflowId",
+              "workflowVersionDigest"
+            ],
+            "type": "object"
+          },
+          "name": "startRunV4",
+          "outputSchema": {
+            "properties": {
+              "agentProfileDigests": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "auditSequence": {
+                "type": "integer"
+              },
+              "currentAttemptId": {
+                "type": "string"
+              },
+              "currentCorrelationToken": {
+                "type": "string"
+              },
+              "currentEffectKey": {
+                "type": "string"
+              },
+              "currentGateId": {
+                "type": "string"
+              },
+              "currentGateStatus": {
+                "enum": [
+                  "pending",
+                  "approved",
+                  "rejected"
+                ]
+              },
+              "currentStepId": {
+                "type": "string"
+              },
+              "definitionDigest": {
+                "type": "string"
+              },
+              "factoryEventId": {
+                "type": "string"
+              },
+              "finishedAt": {
+                "type": "string"
+              },
+              "flowDigest": {
+                "type": "string"
+              },
+              "flowId": {
+                "type": "string"
+              },
+              "moduleManifestDigest": {
+                "type": "string"
+              },
+              "outcome": {
+                "enum": [
+                  "not_actionable",
+                  "needs_reproduction",
+                  "skipped",
+                  "unable_to_reproduce",
+                  "intended_behavior",
+                  "unable_to_fix",
+                  "fix_pending",
+                  "fix_rejected",
+                  "fix_verified",
                   "failed",
                   "waiting",
                   "completed",
@@ -14124,6 +15404,110 @@
           "version": 3
         },
         {
+          "id": "runs/runFinished@v4",
+          "name": "runFinished",
+          "payloadSchema": {
+            "properties": {
+              "agentProfileDigests": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "auditSequence": {
+                "type": "integer"
+              },
+              "definitionDigest": {
+                "type": "string"
+              },
+              "factoryEventId": {
+                "type": "string"
+              },
+              "finishedAt": {
+                "type": "string"
+              },
+              "flowDigest": {
+                "type": "string"
+              },
+              "flowId": {
+                "type": "string"
+              },
+              "moduleManifestDigest": {
+                "type": "string"
+              },
+              "outcome": {
+                "enum": [
+                  "not_actionable",
+                  "needs_reproduction",
+                  "skipped",
+                  "unable_to_reproduce",
+                  "intended_behavior",
+                  "unable_to_fix",
+                  "fix_pending",
+                  "fix_rejected",
+                  "fix_verified",
+                  "failed",
+                  "waiting",
+                  "completed",
+                  "cancelled"
+                ]
+              },
+              "runId": {
+                "type": "string"
+              },
+              "skillDigests": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "startedAt": {
+                "type": "string"
+              },
+              "stateId": {
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "succeeded",
+                  "failed",
+                  "cancelled"
+                ]
+              },
+              "workflowId": {
+                "type": "string"
+              },
+              "workflowVersion": {
+                "type": "integer"
+              },
+              "workflowVersionDigest": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "agentProfileDigests",
+              "auditSequence",
+              "definitionDigest",
+              "factoryEventId",
+              "finishedAt",
+              "flowDigest",
+              "flowId",
+              "moduleManifestDigest",
+              "outcome",
+              "runId",
+              "skillDigests",
+              "startedAt",
+              "stateId",
+              "status",
+              "workflowId",
+              "workflowVersion",
+              "workflowVersionDigest"
+            ],
+            "type": "object"
+          },
+          "version": 4
+        },
+        {
           "id": "runs/runStateChanged@v1",
           "name": "runStateChanged",
           "payloadSchema": {
@@ -14432,6 +15816,136 @@
             "type": "object"
           },
           "version": 3
+        },
+        {
+          "id": "runs/runStateChanged@v4",
+          "name": "runStateChanged",
+          "payloadSchema": {
+            "properties": {
+              "agentProfileDigests": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "auditSequence": {
+                "type": "integer"
+              },
+              "currentAttemptId": {
+                "type": "string"
+              },
+              "currentCorrelationToken": {
+                "type": "string"
+              },
+              "currentEffectKey": {
+                "type": "string"
+              },
+              "currentGateId": {
+                "type": "string"
+              },
+              "currentGateStatus": {
+                "enum": [
+                  "pending",
+                  "approved",
+                  "rejected"
+                ]
+              },
+              "currentStepId": {
+                "type": "string"
+              },
+              "definitionDigest": {
+                "type": "string"
+              },
+              "factoryEventId": {
+                "type": "string"
+              },
+              "finishedAt": {
+                "type": "string"
+              },
+              "flowDigest": {
+                "type": "string"
+              },
+              "flowId": {
+                "type": "string"
+              },
+              "moduleManifestDigest": {
+                "type": "string"
+              },
+              "outcome": {
+                "enum": [
+                  "not_actionable",
+                  "needs_reproduction",
+                  "skipped",
+                  "unable_to_reproduce",
+                  "intended_behavior",
+                  "unable_to_fix",
+                  "fix_pending",
+                  "fix_rejected",
+                  "fix_verified",
+                  "failed",
+                  "waiting",
+                  "completed",
+                  "cancelled"
+                ]
+              },
+              "runId": {
+                "type": "string"
+              },
+              "skillDigests": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "startedAt": {
+                "type": "string"
+              },
+              "stateId": {
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "queued",
+                  "running",
+                  "retrying",
+                  "waiting",
+                  "paused",
+                  "succeeded",
+                  "failed",
+                  "cancelled"
+                ]
+              },
+              "workflowId": {
+                "type": "string"
+              },
+              "workflowVersion": {
+                "type": "integer"
+              },
+              "workflowVersionDigest": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "agentProfileDigests",
+              "auditSequence",
+              "definitionDigest",
+              "factoryEventId",
+              "flowDigest",
+              "flowId",
+              "moduleManifestDigest",
+              "outcome",
+              "runId",
+              "skillDigests",
+              "startedAt",
+              "stateId",
+              "status",
+              "workflowId",
+              "workflowVersion",
+              "workflowVersionDigest"
+            ],
+            "type": "object"
+          },
+          "version": 4
         },
         {
           "id": "runs/stepRequested@v1",
@@ -17700,6 +19214,536 @@
                     },
                     "on": {
                       "type": "string"
+                    },
+                    "to": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "from",
+                    "mode",
+                    "on",
+                    "to"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "triggers": {
+                "items": {
+                  "properties": {
+                    "predicates": {
+                      "items": {
+                        "properties": {
+                          "field": {
+                            "type": "string"
+                          },
+                          "operator": {
+                            "enum": [
+                              "equals",
+                              "not_equals",
+                              "in",
+                              "not_in",
+                              "exists"
+                            ]
+                          },
+                          "value": {
+                            "type": "string"
+                          },
+                          "values": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          }
+                        },
+                        "required": [
+                          "field",
+                          "operator"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "source": {
+                      "type": "string"
+                    },
+                    "sourceId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "predicates",
+                    "source",
+                    "sourceId"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "agentProfileDigests",
+              "agentProfiles",
+              "artifactHandoffs",
+              "calls",
+              "concurrency",
+              "definitionDigest",
+              "effectPermissions",
+              "events",
+              "flowDigest",
+              "flowId",
+              "gates",
+              "initialState",
+              "normalizedJson",
+              "skillRevisions",
+              "states",
+              "steps",
+              "transitions",
+              "triggers"
+            ],
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "provider": "definitions"
+    },
+    {
+      "inputSchema": {
+        "properties": {
+          "definitionDigest": {
+            "type": "string"
+          },
+          "flowId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "definitionDigest",
+          "flowId"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "definitions/getExecutionPlanV3@v1",
+      "outputSchema": {
+        "anyOf": [
+          {
+            "properties": {
+              "agentProfileDigests": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "agentProfiles": {
+                "additionalProperties": {
+                  "properties": {
+                    "capabilities": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "command": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "digest": {
+                      "type": "string"
+                    },
+                    "instructions": {
+                      "type": "string"
+                    },
+                    "limits": {
+                      "properties": {
+                        "maxOutputBytes": {
+                          "type": "integer"
+                        },
+                        "timeoutMs": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "maxOutputBytes",
+                        "timeoutMs"
+                      ],
+                      "type": "object"
+                    },
+                    "model": {
+                      "type": "string"
+                    },
+                    "skills": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "capabilities",
+                    "command",
+                    "digest",
+                    "instructions",
+                    "limits",
+                    "model",
+                    "skills"
+                  ],
+                  "type": "object"
+                },
+                "type": "object"
+              },
+              "artifactHandoffs": {
+                "items": {
+                  "properties": {
+                    "fromStep": {
+                      "type": "string"
+                    },
+                    "toStep": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "fromStep",
+                    "toStep"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "calls": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "concurrency": {
+                "properties": {
+                  "key": {
+                    "type": "string"
+                  },
+                  "limit": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "key",
+                  "limit"
+                ],
+                "type": "object"
+              },
+              "definitionDigest": {
+                "type": "string"
+              },
+              "effectPermissions": {
+                "items": {
+                  "properties": {
+                    "capability": {
+                      "type": "string"
+                    },
+                    "targets": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "capability",
+                    "targets"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "events": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "flowDigest": {
+                "type": "string"
+              },
+              "flowId": {
+                "type": "string"
+              },
+              "gates": {
+                "items": {
+                  "properties": {
+                    "accepted": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "enum": [
+                        "approval",
+                        "event",
+                        "signal"
+                      ]
+                    },
+                    "requiredArtifactCount": {
+                      "type": "integer"
+                    },
+                    "requiredArtifactSteps": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "requiredOutcome": {
+                      "type": "string"
+                    },
+                    "timeoutMs": {
+                      "type": "integer"
+                    },
+                    "timeoutOutcome": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "accepted",
+                    "id",
+                    "kind",
+                    "requiredArtifactCount",
+                    "requiredArtifactSteps"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "initialState": {
+                "type": "string"
+              },
+              "normalizedJson": {
+                "type": "string"
+              },
+              "retriage": {
+                "properties": {
+                  "exhaustedState": {
+                    "type": "string"
+                  },
+                  "maxAttempts": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "exhaustedState",
+                  "maxAttempts"
+                ],
+                "type": "object"
+              },
+              "skillRevisions": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "states": {
+                "items": {
+                  "properties": {
+                    "gate": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "step": {
+                      "type": "string"
+                    },
+                    "terminal": {
+                      "enum": [
+                        "success",
+                        "failure"
+                      ]
+                    },
+                    "terminalOutcome": {
+                      "enum": [
+                        "not_actionable",
+                        "needs_reproduction",
+                        "skipped",
+                        "unable_to_reproduce",
+                        "intended_behavior",
+                        "unable_to_fix",
+                        "fix_pending",
+                        "fix_rejected",
+                        "fix_verified",
+                        "failed",
+                        "waiting",
+                        "completed",
+                        "cancelled"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "steps": {
+                "items": {
+                  "properties": {
+                    "agentProfile": {
+                      "type": "string"
+                    },
+                    "capabilities": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "deterministicOutcome": {
+                      "type": "string"
+                    },
+                    "effectBase": {
+                      "type": "string"
+                    },
+                    "effectCapability": {
+                      "type": "string"
+                    },
+                    "effectKind": {
+                      "enum": [
+                        "add-label",
+                        "remove-label",
+                        "create-comment",
+                        "update-comment",
+                        "create-branch",
+                        "delete-branch",
+                        "push-verified-commit",
+                        "create-pull-request",
+                        "update-pull-request"
+                      ]
+                    },
+                    "effectLabel": {
+                      "type": "string"
+                    },
+                    "effectPayloadDigest": {
+                      "type": "string"
+                    },
+                    "effectRevisionStep": {
+                      "type": "string"
+                    },
+                    "effectTarget": {
+                      "type": "string"
+                    },
+                    "effectTitle": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "enum": [
+                        "agent",
+                        "deterministic",
+                        "effect"
+                      ]
+                    },
+                    "resultContracts": {
+                      "items": {
+                        "properties": {
+                          "behavioralTest": {
+                            "enum": [
+                              "failing-then-passing",
+                              "reproduction-exception"
+                            ]
+                          },
+                          "dataTypes": {
+                            "additionalProperties": {
+                              "enum": [
+                                "boolean",
+                                "number",
+                                "string",
+                                "unknown"
+                              ]
+                            },
+                            "type": "object"
+                          },
+                          "legacyOnly": {
+                            "type": "boolean"
+                          },
+                          "outcome": {
+                            "type": "string"
+                          },
+                          "requiredArtifactCount": {
+                            "type": "integer"
+                          },
+                          "requiredData": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          }
+                        },
+                        "required": [
+                          "dataTypes",
+                          "outcome",
+                          "requiredArtifactCount",
+                          "requiredData"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "retry": {
+                      "properties": {
+                        "backoffMs": {
+                          "type": "integer"
+                        },
+                        "maxAttempts": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "backoffMs",
+                        "maxAttempts"
+                      ],
+                      "type": "object"
+                    },
+                    "skill": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "capabilities",
+                    "id",
+                    "kind",
+                    "resultContracts",
+                    "retry"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "transitions": {
+                "items": {
+                  "properties": {
+                    "from": {
+                      "type": "string"
+                    },
+                    "mode": {
+                      "enum": [
+                        "immediate",
+                        "signal"
+                      ]
+                    },
+                    "on": {
+                      "type": "string"
+                    },
+                    "retriage": {
+                      "type": "boolean"
                     },
                     "to": {
                       "type": "string"
@@ -25919,6 +27963,172 @@
     {
       "inputSchema": {
         "properties": {
+          "commandId": {
+            "type": "string"
+          },
+          "correlationToken": {
+            "type": "string"
+          },
+          "gateId": {
+            "type": "string"
+          },
+          "issuedAt": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "approve",
+              "reject",
+              "cancel",
+              "retry",
+              "pause",
+              "resume"
+            ]
+          },
+          "runId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "commandId",
+          "issuedAt",
+          "kind",
+          "runId"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "runs/applyOperatorCommandV3@v1",
+      "outputSchema": {
+        "properties": {
+          "agentProfileDigests": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "auditSequence": {
+            "type": "integer"
+          },
+          "currentAttemptId": {
+            "type": "string"
+          },
+          "currentCorrelationToken": {
+            "type": "string"
+          },
+          "currentEffectKey": {
+            "type": "string"
+          },
+          "currentGateId": {
+            "type": "string"
+          },
+          "currentGateStatus": {
+            "enum": [
+              "pending",
+              "approved",
+              "rejected"
+            ]
+          },
+          "currentStepId": {
+            "type": "string"
+          },
+          "definitionDigest": {
+            "type": "string"
+          },
+          "factoryEventId": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": "string"
+          },
+          "flowDigest": {
+            "type": "string"
+          },
+          "flowId": {
+            "type": "string"
+          },
+          "moduleManifestDigest": {
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "not_actionable",
+              "needs_reproduction",
+              "skipped",
+              "unable_to_reproduce",
+              "intended_behavior",
+              "unable_to_fix",
+              "fix_pending",
+              "fix_rejected",
+              "fix_verified",
+              "failed",
+              "waiting",
+              "completed",
+              "cancelled"
+            ]
+          },
+          "runId": {
+            "type": "string"
+          },
+          "skillDigests": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "stateId": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "queued",
+              "running",
+              "retrying",
+              "waiting",
+              "paused",
+              "succeeded",
+              "failed",
+              "cancelled"
+            ]
+          },
+          "workflowId": {
+            "type": "string"
+          },
+          "workflowVersion": {
+            "type": "integer"
+          },
+          "workflowVersionDigest": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "agentProfileDigests",
+          "auditSequence",
+          "definitionDigest",
+          "factoryEventId",
+          "flowDigest",
+          "flowId",
+          "moduleManifestDigest",
+          "outcome",
+          "runId",
+          "skillDigests",
+          "startedAt",
+          "stateId",
+          "status",
+          "workflowId",
+          "workflowVersion",
+          "workflowVersionDigest"
+        ],
+        "type": "object"
+      },
+      "provider": "runs"
+    },
+    {
+      "inputSchema": {
+        "properties": {
           "now": {
             "type": "string"
           },
@@ -25937,6 +28147,53 @@
       },
       "kind": "action",
       "name": "runs/driveRun@v1",
+      "outputSchema": {
+        "properties": {
+          "delayMs": {
+            "type": "integer"
+          },
+          "kind": {
+            "enum": [
+              "complete",
+              "sleep",
+              "wait"
+            ]
+          },
+          "signal": {
+            "type": "string"
+          },
+          "timeoutMs": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "type": "object"
+      },
+      "provider": "runs"
+    },
+    {
+      "inputSchema": {
+        "properties": {
+          "now": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "wakeKind": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "now",
+          "runId"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "runs/driveRunV2@v1",
       "outputSchema": {
         "properties": {
           "delayMs": {
@@ -26372,6 +28629,154 @@
     {
       "inputSchema": {
         "properties": {
+          "runId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "runId"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "runs/getRunV4@v1",
+      "outputSchema": {
+        "anyOf": [
+          {
+            "properties": {
+              "agentProfileDigests": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "auditSequence": {
+                "type": "integer"
+              },
+              "currentAttemptId": {
+                "type": "string"
+              },
+              "currentCorrelationToken": {
+                "type": "string"
+              },
+              "currentEffectKey": {
+                "type": "string"
+              },
+              "currentGateId": {
+                "type": "string"
+              },
+              "currentGateStatus": {
+                "enum": [
+                  "pending",
+                  "approved",
+                  "rejected"
+                ]
+              },
+              "currentStepId": {
+                "type": "string"
+              },
+              "definitionDigest": {
+                "type": "string"
+              },
+              "factoryEventId": {
+                "type": "string"
+              },
+              "finishedAt": {
+                "type": "string"
+              },
+              "flowDigest": {
+                "type": "string"
+              },
+              "flowId": {
+                "type": "string"
+              },
+              "moduleManifestDigest": {
+                "type": "string"
+              },
+              "outcome": {
+                "enum": [
+                  "not_actionable",
+                  "needs_reproduction",
+                  "skipped",
+                  "unable_to_reproduce",
+                  "intended_behavior",
+                  "unable_to_fix",
+                  "fix_pending",
+                  "fix_rejected",
+                  "fix_verified",
+                  "failed",
+                  "waiting",
+                  "completed",
+                  "cancelled"
+                ]
+              },
+              "runId": {
+                "type": "string"
+              },
+              "skillDigests": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "startedAt": {
+                "type": "string"
+              },
+              "stateId": {
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "queued",
+                  "running",
+                  "retrying",
+                  "waiting",
+                  "paused",
+                  "succeeded",
+                  "failed",
+                  "cancelled"
+                ]
+              },
+              "workflowId": {
+                "type": "string"
+              },
+              "workflowVersion": {
+                "type": "integer"
+              },
+              "workflowVersionDigest": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "agentProfileDigests",
+              "auditSequence",
+              "definitionDigest",
+              "factoryEventId",
+              "flowDigest",
+              "flowId",
+              "moduleManifestDigest",
+              "outcome",
+              "runId",
+              "skillDigests",
+              "startedAt",
+              "stateId",
+              "status",
+              "workflowId",
+              "workflowVersion",
+              "workflowVersionDigest"
+            ],
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "provider": "runs"
+    },
+    {
+      "inputSchema": {
+        "properties": {
           "correlationToken": {
             "type": "string"
           },
@@ -26460,6 +28865,167 @@
               "needs_reproduction",
               "unable_to_reproduce",
               "unable_to_fix",
+              "failed",
+              "waiting",
+              "completed",
+              "cancelled"
+            ]
+          },
+          "runId": {
+            "type": "string"
+          },
+          "skillDigests": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "stateId": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "queued",
+              "running",
+              "retrying",
+              "waiting",
+              "paused",
+              "succeeded",
+              "failed",
+              "cancelled"
+            ]
+          },
+          "workflowId": {
+            "type": "string"
+          },
+          "workflowVersion": {
+            "type": "integer"
+          },
+          "workflowVersionDigest": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "agentProfileDigests",
+          "auditSequence",
+          "definitionDigest",
+          "factoryEventId",
+          "flowDigest",
+          "flowId",
+          "moduleManifestDigest",
+          "outcome",
+          "runId",
+          "skillDigests",
+          "startedAt",
+          "stateId",
+          "status",
+          "workflowId",
+          "workflowVersion",
+          "workflowVersionDigest"
+        ],
+        "type": "object"
+      },
+      "provider": "runs"
+    },
+    {
+      "inputSchema": {
+        "properties": {
+          "correlationToken": {
+            "type": "string"
+          },
+          "gateId": {
+            "type": "string"
+          },
+          "identity": {
+            "type": "string"
+          },
+          "occurredAt": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "signal": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "correlationToken",
+          "gateId",
+          "identity",
+          "occurredAt",
+          "runId",
+          "signal"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "runs/signalRunV2@v1",
+      "outputSchema": {
+        "properties": {
+          "agentProfileDigests": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "auditSequence": {
+            "type": "integer"
+          },
+          "currentAttemptId": {
+            "type": "string"
+          },
+          "currentCorrelationToken": {
+            "type": "string"
+          },
+          "currentEffectKey": {
+            "type": "string"
+          },
+          "currentGateId": {
+            "type": "string"
+          },
+          "currentGateStatus": {
+            "enum": [
+              "pending",
+              "approved",
+              "rejected"
+            ]
+          },
+          "currentStepId": {
+            "type": "string"
+          },
+          "definitionDigest": {
+            "type": "string"
+          },
+          "factoryEventId": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": "string"
+          },
+          "flowDigest": {
+            "type": "string"
+          },
+          "flowId": {
+            "type": "string"
+          },
+          "moduleManifestDigest": {
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "not_actionable",
+              "needs_reproduction",
+              "skipped",
+              "unable_to_reproduce",
+              "intended_behavior",
+              "unable_to_fix",
+              "fix_pending",
+              "fix_rejected",
+              "fix_verified",
               "failed",
               "waiting",
               "completed",
@@ -26958,6 +29524,187 @@
               "needs_reproduction",
               "unable_to_reproduce",
               "unable_to_fix",
+              "failed",
+              "waiting",
+              "completed",
+              "cancelled"
+            ]
+          },
+          "runId": {
+            "type": "string"
+          },
+          "skillDigests": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "stateId": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "queued",
+              "running",
+              "retrying",
+              "waiting",
+              "paused",
+              "succeeded",
+              "failed",
+              "cancelled"
+            ]
+          },
+          "workflowId": {
+            "type": "string"
+          },
+          "workflowVersion": {
+            "type": "integer"
+          },
+          "workflowVersionDigest": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "agentProfileDigests",
+          "auditSequence",
+          "definitionDigest",
+          "factoryEventId",
+          "flowDigest",
+          "flowId",
+          "moduleManifestDigest",
+          "outcome",
+          "runId",
+          "skillDigests",
+          "startedAt",
+          "stateId",
+          "status",
+          "workflowId",
+          "workflowVersion",
+          "workflowVersionDigest"
+        ],
+        "type": "object"
+      },
+      "provider": "runs"
+    },
+    {
+      "inputSchema": {
+        "properties": {
+          "definitionDigest": {
+            "type": "string"
+          },
+          "factoryEventId": {
+            "type": "string"
+          },
+          "flowId": {
+            "type": "string"
+          },
+          "moduleManifestDigest": {
+            "type": "string"
+          },
+          "repository": {
+            "type": "string"
+          },
+          "repositorySha": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "taskPayload": {},
+          "workflowId": {
+            "type": "string"
+          },
+          "workflowVersionDigest": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "definitionDigest",
+          "factoryEventId",
+          "flowId",
+          "moduleManifestDigest",
+          "repository",
+          "runId",
+          "startedAt",
+          "subject",
+          "workflowId",
+          "workflowVersionDigest"
+        ],
+        "type": "object"
+      },
+      "kind": "action",
+      "name": "runs/startRunV4@v1",
+      "outputSchema": {
+        "properties": {
+          "agentProfileDigests": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "auditSequence": {
+            "type": "integer"
+          },
+          "currentAttemptId": {
+            "type": "string"
+          },
+          "currentCorrelationToken": {
+            "type": "string"
+          },
+          "currentEffectKey": {
+            "type": "string"
+          },
+          "currentGateId": {
+            "type": "string"
+          },
+          "currentGateStatus": {
+            "enum": [
+              "pending",
+              "approved",
+              "rejected"
+            ]
+          },
+          "currentStepId": {
+            "type": "string"
+          },
+          "definitionDigest": {
+            "type": "string"
+          },
+          "factoryEventId": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": "string"
+          },
+          "flowDigest": {
+            "type": "string"
+          },
+          "flowId": {
+            "type": "string"
+          },
+          "moduleManifestDigest": {
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "not_actionable",
+              "needs_reproduction",
+              "skipped",
+              "unable_to_reproduce",
+              "intended_behavior",
+              "unable_to_fix",
+              "fix_pending",
+              "fix_rejected",
+              "fix_verified",
               "failed",
               "waiting",
               "completed",
@@ -27795,6 +30542,111 @@
     },
     {
       "kind": "event",
+      "name": "runFinished",
+      "payloadSchema": {
+        "properties": {
+          "agentProfileDigests": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "auditSequence": {
+            "type": "integer"
+          },
+          "definitionDigest": {
+            "type": "string"
+          },
+          "factoryEventId": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": "string"
+          },
+          "flowDigest": {
+            "type": "string"
+          },
+          "flowId": {
+            "type": "string"
+          },
+          "moduleManifestDigest": {
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "not_actionable",
+              "needs_reproduction",
+              "skipped",
+              "unable_to_reproduce",
+              "intended_behavior",
+              "unable_to_fix",
+              "fix_pending",
+              "fix_rejected",
+              "fix_verified",
+              "failed",
+              "waiting",
+              "completed",
+              "cancelled"
+            ]
+          },
+          "runId": {
+            "type": "string"
+          },
+          "skillDigests": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "stateId": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "succeeded",
+              "failed",
+              "cancelled"
+            ]
+          },
+          "workflowId": {
+            "type": "string"
+          },
+          "workflowVersion": {
+            "type": "integer"
+          },
+          "workflowVersionDigest": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "agentProfileDigests",
+          "auditSequence",
+          "definitionDigest",
+          "factoryEventId",
+          "finishedAt",
+          "flowDigest",
+          "flowId",
+          "moduleManifestDigest",
+          "outcome",
+          "runId",
+          "skillDigests",
+          "startedAt",
+          "stateId",
+          "status",
+          "workflowId",
+          "workflowVersion",
+          "workflowVersionDigest"
+        ],
+        "type": "object"
+      },
+      "provider": "runs",
+      "version": 4
+    },
+    {
+      "kind": "event",
       "name": "runStateChanged",
       "payloadSchema": {
         "properties": {
@@ -28105,6 +30957,137 @@
       },
       "provider": "runs",
       "version": 3
+    },
+    {
+      "kind": "event",
+      "name": "runStateChanged",
+      "payloadSchema": {
+        "properties": {
+          "agentProfileDigests": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "auditSequence": {
+            "type": "integer"
+          },
+          "currentAttemptId": {
+            "type": "string"
+          },
+          "currentCorrelationToken": {
+            "type": "string"
+          },
+          "currentEffectKey": {
+            "type": "string"
+          },
+          "currentGateId": {
+            "type": "string"
+          },
+          "currentGateStatus": {
+            "enum": [
+              "pending",
+              "approved",
+              "rejected"
+            ]
+          },
+          "currentStepId": {
+            "type": "string"
+          },
+          "definitionDigest": {
+            "type": "string"
+          },
+          "factoryEventId": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": "string"
+          },
+          "flowDigest": {
+            "type": "string"
+          },
+          "flowId": {
+            "type": "string"
+          },
+          "moduleManifestDigest": {
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "not_actionable",
+              "needs_reproduction",
+              "skipped",
+              "unable_to_reproduce",
+              "intended_behavior",
+              "unable_to_fix",
+              "fix_pending",
+              "fix_rejected",
+              "fix_verified",
+              "failed",
+              "waiting",
+              "completed",
+              "cancelled"
+            ]
+          },
+          "runId": {
+            "type": "string"
+          },
+          "skillDigests": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "stateId": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "queued",
+              "running",
+              "retrying",
+              "waiting",
+              "paused",
+              "succeeded",
+              "failed",
+              "cancelled"
+            ]
+          },
+          "workflowId": {
+            "type": "string"
+          },
+          "workflowVersion": {
+            "type": "integer"
+          },
+          "workflowVersionDigest": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "agentProfileDigests",
+          "auditSequence",
+          "definitionDigest",
+          "factoryEventId",
+          "flowDigest",
+          "flowId",
+          "moduleManifestDigest",
+          "outcome",
+          "runId",
+          "skillDigests",
+          "startedAt",
+          "stateId",
+          "status",
+          "workflowId",
+          "workflowVersion",
+          "workflowVersionDigest"
+        ],
+        "type": "object"
+      },
+      "provider": "runs",
+      "version": 4
     },
     {
       "kind": "event",

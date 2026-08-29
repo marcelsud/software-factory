@@ -8,6 +8,7 @@ import {
   type DefinitionRevision,
   type ExecutionPlan,
   type ExecutionPlanV2,
+  type ExecutionPlanV3,
   isDataRecord,
   type PinnedAgentProfile,
 } from "./contracts/index.ts";
@@ -68,6 +69,8 @@ export interface AgentProfileDefinition {
 }
 
 export interface ResultContractDefinition {
+  readonly behavioralTest?: "failing-then-passing" | "reproduction-exception";
+  readonly legacyOnly: boolean;
   readonly dataTypes: Readonly<Record<string, "boolean" | "number" | "string" | "unknown">>;
   readonly outcome: string;
   readonly requiredArtifactCount: number;
@@ -78,9 +81,23 @@ export interface StepDefinition {
   readonly agentProfile?: string;
   readonly capabilities: readonly string[];
   readonly deterministicOutcome?: string;
+  readonly effectBase?: string;
   readonly effectCapability?: string;
+  readonly effectKind?:
+    | "add-label"
+    | "remove-label"
+    | "create-comment"
+    | "update-comment"
+    | "create-branch"
+    | "delete-branch"
+    | "push-verified-commit"
+    | "create-pull-request"
+    | "update-pull-request";
+  readonly effectLabel?: string;
   readonly effectPayloadDigest?: string;
+  readonly effectRevisionStep?: string;
   readonly effectTarget?: string;
+  readonly effectTitle?: string;
   readonly id: string;
   readonly kind: "agent" | "deterministic" | "effect";
   readonly resultContracts: readonly ResultContractDefinition[];
@@ -107,8 +124,13 @@ export interface StateDefinition {
   readonly terminalOutcome?:
     | "not_actionable"
     | "needs_reproduction"
+    | "skipped"
     | "unable_to_reproduce"
+    | "intended_behavior"
     | "unable_to_fix"
+    | "fix_pending"
+    | "fix_rejected"
+    | "fix_verified"
     | "failed"
     | "waiting"
     | "completed"
@@ -119,6 +141,7 @@ export interface TransitionDefinition {
   readonly from: string;
   readonly mode: "immediate" | "signal";
   readonly on: string;
+  readonly retriage: boolean;
   readonly to: string;
 }
 
@@ -135,6 +158,7 @@ export interface FlowDefinition {
   readonly gates: readonly GateDefinition[];
   readonly id: string;
   readonly initialState: string;
+  readonly retriage?: { readonly exhaustedState: string; readonly maxAttempts: number };
   readonly states: readonly StateDefinition[];
   readonly steps: readonly StepDefinition[];
   readonly transitions: readonly TransitionDefinition[];
@@ -168,6 +192,7 @@ export interface CompiledDefinition {
   readonly definition: FactoryDefinition;
   readonly plans: Readonly<Record<string, ExecutionPlan>>;
   readonly plansV2: Readonly<Record<string, ExecutionPlanV2>>;
+  readonly plansV3: Readonly<Record<string, ExecutionPlanV3>>;
   readonly revision: DefinitionRevision;
 }
 
@@ -294,12 +319,12 @@ export function compileFactoryDefinition(
           retry: { ...step.retry },
           ...(step.skill === undefined ? {} : { skill: step.skill }),
         })),
-        transitions: flow.transitions.map((transition) => ({ ...transition })),
+        transitions: flow.transitions.map(({ from, mode, on, to }) => ({ from, mode, on, to })),
       });
       return [flow.id, plan];
     }),
   );
-  const plansV2 = Object.fromEntries(
+  const plansV3 = Object.fromEntries(
     definition.flows.map((flow) => {
       const legacy = plans[flow.id];
       if (legacy === undefined) throw new Error(`compiled plan missing for ${flow.id}`);
@@ -307,8 +332,8 @@ export function compileFactoryDefinition(
         flow.id,
         deepFreeze({
           ...legacy,
-          calls: moduleCallsForV2(flow),
-          events: moduleEventsForV2(flow),
+          calls: moduleCallsForV3(flow),
+          events: moduleEventsForV3(flow),
           artifactHandoffs: flow.artifactHandoffs.map((edge) => ({ ...edge })),
           gates: flow.gates.map((gate) => ({
             accepted: [...gate.accepted],
@@ -322,6 +347,7 @@ export function compileFactoryDefinition(
             ...(gate.timeoutMs === undefined ? {} : { timeoutMs: gate.timeoutMs }),
             ...(gate.timeoutOutcome === undefined ? {} : { timeoutOutcome: gate.timeoutOutcome }),
           })),
+          ...(flow.retriage === undefined ? {} : { retriage: { ...flow.retriage } }),
           states: flow.states.map((state) => ({
             ...(state.gate === undefined ? {} : { gate: state.gate }),
             id: state.id,
@@ -332,6 +358,85 @@ export function compileFactoryDefinition(
               : { terminalOutcome: state.terminalOutcome }),
           })),
           steps: flow.steps.map((step) => ({
+            ...(step.agentProfile === undefined ? {} : { agentProfile: step.agentProfile }),
+            capabilities: [...step.capabilities],
+            ...(step.deterministicOutcome === undefined
+              ? {}
+              : { deterministicOutcome: step.deterministicOutcome }),
+            ...(step.effectBase === undefined ? {} : { effectBase: step.effectBase }),
+            ...(step.effectCapability === undefined
+              ? {}
+              : { effectCapability: step.effectCapability }),
+            ...(step.effectKind === undefined ? {} : { effectKind: step.effectKind }),
+            ...(step.effectLabel === undefined ? {} : { effectLabel: step.effectLabel }),
+            ...(step.effectPayloadDigest === undefined
+              ? {}
+              : { effectPayloadDigest: step.effectPayloadDigest }),
+            ...(step.effectRevisionStep === undefined
+              ? {}
+              : { effectRevisionStep: step.effectRevisionStep }),
+            ...(step.effectTarget === undefined ? {} : { effectTarget: step.effectTarget }),
+            ...(step.effectTitle === undefined ? {} : { effectTitle: step.effectTitle }),
+            id: step.id,
+            kind: step.kind,
+            resultContracts: step.resultContracts.map((contract) => ({
+              ...(contract.behavioralTest === undefined
+                ? {}
+                : { behavioralTest: contract.behavioralTest }),
+              legacyOnly: contract.legacyOnly,
+              dataTypes: { ...contract.dataTypes },
+              outcome: contract.outcome,
+              requiredArtifactCount: contract.requiredArtifactCount,
+              requiredData: [...contract.requiredData],
+            })),
+            retry: { ...step.retry },
+            ...(step.skill === undefined ? {} : { skill: step.skill }),
+          })),
+          transitions: flow.transitions.map((transition) => ({ ...transition })),
+          triggers: flow.triggers.map((trigger) => {
+            const source = definition.sources.find((candidate) => candidate.id === trigger.source);
+            if (source === undefined)
+              throw new Error(`compiled source missing for ${trigger.source}`);
+            return {
+              predicates: trigger.predicates.map((predicate) => ({
+                field: predicate.field,
+                operator: predicate.operator,
+                ...(predicate.value === undefined ? {} : { value: predicate.value }),
+                ...(predicate.values === undefined ? {} : { values: [...predicate.values] }),
+              })),
+              source: trigger.source,
+              sourceId:
+                source.type === "github" && source.repository !== undefined
+                  ? `github:${source.repository}`
+                  : source.id,
+            };
+          }),
+        }),
+      ];
+    }),
+  );
+  const plansV2 = Object.fromEntries(
+    definition.flows.map((flow) => {
+      const current = plansV3[flow.id] as ExecutionPlanV3 | undefined;
+      if (current === undefined) throw new Error(`compiled V3 plan missing for ${flow.id}`);
+      const compatible = { ...current };
+      delete compatible.retriage;
+      return [
+        flow.id,
+        deepFreeze({
+          ...compatible,
+          calls: moduleCallsForV2(flow),
+          events: moduleEventsForV2(flow),
+          states: current.states.map((state) => ({
+            ...(state.gate === undefined ? {} : { gate: state.gate }),
+            id: state.id,
+            ...(state.step === undefined ? {} : { step: state.step }),
+            ...(state.terminal === undefined ? {} : { terminal: state.terminal }),
+            ...(state.terminalOutcome === undefined
+              ? {}
+              : { terminalOutcome: legacyTriageOutcome(state.terminalOutcome) }),
+          })),
+          steps: current.steps.map((step) => ({
             ...(step.agentProfile === undefined ? {} : { agentProfile: step.agentProfile }),
             capabilities: [...step.capabilities],
             ...(step.deterministicOutcome === undefined
@@ -355,24 +460,12 @@ export function compileFactoryDefinition(
             retry: { ...step.retry },
             ...(step.skill === undefined ? {} : { skill: step.skill }),
           })),
-          triggers: flow.triggers.map((trigger) => {
-            const source = definition.sources.find((candidate) => candidate.id === trigger.source);
-            if (source === undefined)
-              throw new Error(`compiled source missing for ${trigger.source}`);
-            return {
-              predicates: trigger.predicates.map((predicate) => ({
-                field: predicate.field,
-                operator: predicate.operator,
-                ...(predicate.value === undefined ? {} : { value: predicate.value }),
-                ...(predicate.values === undefined ? {} : { values: [...predicate.values] }),
-              })),
-              source: trigger.source,
-              sourceId:
-                source.type === "github" && source.repository !== undefined
-                  ? `github:${source.repository}`
-                  : source.id,
-            };
-          }),
+          transitions: current.transitions.map(({ from, mode, on, to }) => ({
+            from,
+            mode,
+            on,
+            to,
+          })),
         }),
       ];
     }),
@@ -387,6 +480,7 @@ export function compileFactoryDefinition(
     definition,
     plans: deepFreeze(plans),
     plansV2: deepFreeze(plansV2),
+    plansV3: deepFreeze(plansV3),
     revision,
   });
 }
@@ -661,6 +755,7 @@ function parseFlow(value: unknown, index: number): FlowDefinition {
     "states",
     "transitions",
     "artifactHandoffs",
+    "retriage",
   ]);
   const concurrencyRecord = objectAt(record.concurrency, `${path}.concurrency`, ["key", "limit"]);
   const limit = integerAt(concurrencyRecord.limit, `${path}.concurrency.limit`);
@@ -671,6 +766,22 @@ function parseFlow(value: unknown, index: number): FlowDefinition {
       "set limit to at least 1",
       "invalid_value",
     );
+  const retriageRecord =
+    record.retriage === undefined
+      ? undefined
+      : objectAt(record.retriage, `${path}.retriage`, ["maxAttempts", "exhaustedState"]);
+  const retriageMaxAttempts =
+    retriageRecord === undefined
+      ? undefined
+      : integerAt(retriageRecord.maxAttempts, `${path}.retriage.maxAttempts`);
+  if (retriageMaxAttempts !== undefined && retriageMaxAttempts < 1) {
+    fail(
+      `${path}.retriage.maxAttempts`,
+      "retriage attempts must be positive",
+      "set maxAttempts to at least 1",
+      "invalid_retriage",
+    );
+  }
   return Object.freeze({
     artifactHandoffs: (record.artifactHandoffs === undefined
       ? []
@@ -691,6 +802,14 @@ function parseFlow(value: unknown, index: number): FlowDefinition {
     ),
     id: idAt(record.id, `${path}.id`),
     initialState: idAt(record.initialState, `${path}.initialState`),
+    ...(retriageRecord === undefined || retriageMaxAttempts === undefined
+      ? {}
+      : {
+          retriage: Object.freeze({
+            exhaustedState: idAt(retriageRecord.exhaustedState, `${path}.retriage.exhaustedState`),
+            maxAttempts: retriageMaxAttempts,
+          }),
+        }),
     states: listAt(record.states, `${path}.states`).map((entry, child) =>
       parseState(entry, index, child),
     ),
@@ -782,6 +901,11 @@ function parseStep(value: unknown, flowIndex: number, index: number): StepDefini
     "effectCapability",
     "effectTarget",
     "effectPayloadDigest",
+    "effectKind",
+    "effectLabel",
+    "effectBase",
+    "effectTitle",
+    "effectRevisionStep",
   ]);
   const kind = enumAt(record.kind, `${path}.kind`, ["agent", "deterministic", "effect"] as const);
   const retryRecord = objectAt(record.retry, `${path}.retry`, ["maxAttempts", "backoffMs"]);
@@ -805,6 +929,27 @@ function parseStep(value: unknown, flowIndex: number, index: number): StepDefini
   const skill = optionalString(record.skill, `${path}.skill`);
   const deterministicOutcome = optionalString(record.outcome, `${path}.outcome`);
   const effectCapability = optionalString(record.effectCapability, `${path}.effectCapability`);
+  const effectKind =
+    record.effectKind === undefined
+      ? undefined
+      : enumAt(record.effectKind, `${path}.effectKind`, [
+          "add-label",
+          "remove-label",
+          "create-comment",
+          "update-comment",
+          "create-branch",
+          "delete-branch",
+          "push-verified-commit",
+          "create-pull-request",
+          "update-pull-request",
+        ] as const);
+  const effectLabel = optionalString(record.effectLabel, `${path}.effectLabel`);
+  const effectBase = optionalString(record.effectBase, `${path}.effectBase`);
+  const effectTitle = optionalString(record.effectTitle, `${path}.effectTitle`);
+  const effectRevisionStep = optionalString(
+    record.effectRevisionStep,
+    `${path}.effectRevisionStep`,
+  );
   const effectTarget = optionalString(record.effectTarget, `${path}.effectTarget`);
   const effectPayloadDigest = optionalString(
     record.effectPayloadDigest,
@@ -820,6 +965,8 @@ function parseStep(value: unknown, flowIndex: number, index: number): StepDefini
             "requiredData",
             "requiredArtifactCount",
             "dataTypes",
+            "legacyOnly",
+            "behavioralTest",
           ]);
           const requiredArtifactCount =
             optionalInteger(result.requiredArtifactCount, `${resultPath}.requiredArtifactCount`) ??
@@ -852,7 +999,20 @@ function parseStep(value: unknown, flowIndex: number, index: number): StepDefini
                     ] as const),
                   ]),
                 );
+          const behavioralTest =
+            result.behavioralTest === undefined
+              ? undefined
+              : enumAt(result.behavioralTest, `${resultPath}.behavioralTest`, [
+                  "failing-then-passing",
+                  "reproduction-exception",
+                ] as const);
+          const legacyOnly =
+            result.legacyOnly === undefined
+              ? false
+              : booleanAt(result.legacyOnly, `${resultPath}.legacyOnly`);
           return Object.freeze({
+            ...(behavioralTest === undefined ? {} : { behavioralTest }),
+            legacyOnly,
             dataTypes: Object.freeze(dataTypes),
             outcome: stringAt(result.outcome, `${resultPath}.outcome`),
             requiredArtifactCount,
@@ -906,11 +1066,16 @@ function parseStep(value: unknown, flowIndex: number, index: number): StepDefini
     ...(agentProfile === undefined ? {} : { agentProfile }),
     capabilities: Object.freeze(stringListAt(record.capabilities, `${path}.capabilities`)),
     ...(deterministicOutcome === undefined ? {} : { deterministicOutcome }),
+    ...(effectBase === undefined ? {} : { effectBase }),
     ...(effectCapability === undefined ? {} : { effectCapability }),
+    ...(effectKind === undefined ? {} : { effectKind }),
+    ...(effectLabel === undefined ? {} : { effectLabel }),
     ...(effectPayloadDigest === undefined
       ? {}
       : { effectPayloadDigest: effectPayloadDigest.replace(/^sha256:/, "") }),
+    ...(effectRevisionStep === undefined ? {} : { effectRevisionStep }),
     ...(effectTarget === undefined ? {} : { effectTarget }),
+    ...(effectTitle === undefined ? {} : { effectTitle }),
     id: idAt(record.id, `${path}.id`),
     kind,
     resultContracts: Object.freeze(resultContracts),
@@ -988,8 +1153,13 @@ function parseState(value: unknown, flowIndex: number, index: number): StateDefi
   const terminalOutcome = optionalEnum(record.outcome, `${path}.outcome`, [
     "not_actionable",
     "needs_reproduction",
+    "skipped",
     "unable_to_reproduce",
+    "intended_behavior",
     "unable_to_fix",
+    "fix_pending",
+    "fix_rejected",
+    "fix_verified",
     "failed",
     "waiting",
     "completed",
@@ -1019,12 +1189,14 @@ function parseState(value: unknown, flowIndex: number, index: number): StateDefi
 
 function parseTransition(value: unknown, flowIndex: number, index: number): TransitionDefinition {
   const path = `$.flows[${flowIndex}].transitions[${index}]`;
-  const record = objectAt(value, path, ["from", "to", "on", "mode"]);
+  const record = objectAt(value, path, ["from", "to", "on", "mode", "retriage"]);
   return Object.freeze({
     from: idAt(record.from, `${path}.from`),
     mode:
       optionalEnum(record.mode, `${path}.mode`, ["immediate", "signal"] as const) ?? "immediate",
     on: stringAt(record.on, `${path}.on`),
+    retriage:
+      record.retriage === undefined ? false : booleanAt(record.retriage, `${path}.retriage`),
     to: idAt(record.to, `${path}.to`),
   });
 }
@@ -1158,6 +1330,9 @@ function validateDefinition(definition: FactoryDefinition): void {
     }
     if (!states.has(flow.initialState))
       missingRef(`${path}.initialState`, "state", flow.initialState);
+    if (flow.retriage !== undefined && !states.has(flow.retriage.exhaustedState)) {
+      missingRef(`${path}.retriage.exhaustedState`, "state", flow.retriage.exhaustedState);
+    }
     flow.triggers.forEach((trigger, index) => {
       if (!sources.has(trigger.source))
         missingRef(`${path}.triggers[${index}].source`, "source", trigger.source);
@@ -1238,6 +1413,26 @@ function validateDefinition(definition: FactoryDefinition): void {
             "undeclared_permission",
           );
         }
+      }
+      if (
+        step.kind === "effect" &&
+        step.effectKind !== undefined &&
+        step.effectCapability !== undefined
+      ) {
+        const permission = definition.effectPermissions.find(
+          (entry) => entry.capability === step.effectCapability,
+        );
+        if (permission?.effects !== undefined && !permission.effects.includes(step.effectKind)) {
+          fail(
+            `${path}.steps[${index}].effectKind`,
+            `effect kind ${JSON.stringify(step.effectKind)} is outside the permission`,
+            "use an effect kind listed by the matching permission",
+            "undeclared_permission",
+          );
+        }
+      }
+      if (step.effectRevisionStep !== undefined && !steps.has(step.effectRevisionStep)) {
+        missingRef(`${path}.steps[${index}].effectRevisionStep`, "step", step.effectRevisionStep);
       }
       if (
         step.skill !== undefined &&
@@ -1333,6 +1528,14 @@ function validateDefinition(definition: FactoryDefinition): void {
         missingRef(`${path}.transitions[${index}].from`, "state", transition.from);
       if (!states.has(transition.to))
         missingRef(`${path}.transitions[${index}].to`, "state", transition.to);
+      if (transition.retriage && flow.retriage === undefined) {
+        fail(
+          `${path}.transitions[${index}].retriage`,
+          "retriage transition has no configured bound",
+          "declare flow.retriage.maxAttempts and exhaustedState",
+          "unbounded_retriage",
+        );
+      }
       const fromState = flow.states.find((state) => state.id === transition.from);
       if (transition.mode === "signal" && fromState?.gate === undefined) {
         fail(
@@ -1443,8 +1646,106 @@ function validateDefinition(definition: FactoryDefinition): void {
         );
       }
     });
+    validateTriageFlow(flow, flowIndex);
     validateReachability(flow, flowIndex);
     validateSynchronousCycles(flow, flowIndex);
+  });
+}
+function validateTriageFlow(flow: FlowDefinition, flowIndex: number): void {
+  const path = `$.flows[${flowIndex}]`;
+  const stateById = new Map(flow.states.map((state) => [state.id, state]));
+  const stepById = new Map(flow.steps.map((step) => [step.id, step]));
+  const canReach = (start: string, predicate: (step: StepDefinition) => boolean): boolean => {
+    const seen = new Set<string>();
+    const queue = [start];
+    while (queue.length > 0) {
+      const stateId = queue.shift();
+      if (stateId === undefined || seen.has(stateId)) continue;
+      seen.add(stateId);
+      const stepId = stateById.get(stateId)?.step;
+      const step = stepId === undefined ? undefined : stepById.get(stepId);
+      if (step !== undefined && predicate(step)) return true;
+      for (const transition of flow.transitions) {
+        if (transition.from === stateId) queue.push(transition.to);
+      }
+    }
+    return false;
+  };
+
+  flow.transitions.forEach((transition, index) => {
+    const sourceStepId = stateById.get(transition.from)?.step;
+    const sourceStep = sourceStepId === undefined ? undefined : stepById.get(sourceStepId);
+    if (
+      sourceStep?.skill === "verify" &&
+      transition.on === "intended_behavior" &&
+      canReach(transition.to, (step) => step.skill === "fix")
+    ) {
+      fail(
+        `${path}.transitions[${index}].to`,
+        "intended behavior verification can reach a fix step",
+        "route intended_behavior directly to its terminal outcome",
+        "unsafe_triage_transition",
+      );
+    }
+  });
+
+  flow.steps.forEach((step, stepIndex) => {
+    if (step.skill !== "fix") return;
+    const sourceStates = flow.states.filter((state) => state.step === step.id);
+    for (const contract of step.resultContracts) {
+      if (["fix_rejected", "unable_to_fix", "failed"].includes(contract.outcome)) continue;
+      const publishes = sourceStates.some((state) =>
+        flow.transitions.some(
+          (transition) =>
+            transition.from === state.id &&
+            transition.on === contract.outcome &&
+            canReach(transition.to, (candidate) => candidate.kind === "effect"),
+        ),
+      );
+      if (!publishes) continue;
+      if (contract.behavioralTest === undefined) {
+        fail(
+          `${path}.steps[${stepIndex}].results`,
+          `fix outcome ${JSON.stringify(contract.outcome)} can publish without a behavioral-test requirement`,
+          "require failing-then-passing evidence or an explicit reproduction-exception record",
+          "missing_behavioral_test_gate",
+        );
+      }
+      const fields =
+        contract.behavioralTest === "failing-then-passing"
+          ? ([
+              ["failingTestObserved", "boolean"],
+              ["passingTestObserved", "boolean"],
+            ] as const)
+          : ([["reproductionException", "string"]] as const);
+      for (const [field, type] of fields) {
+        if (!contract.requiredData.includes(field) || contract.dataTypes[field] !== type) {
+          fail(
+            `${path}.steps[${stepIndex}].results`,
+            `behavioral-test requirement is missing typed field ${JSON.stringify(field)}`,
+            `add ${field} to requiredData with dataTypes.${field}: ${type}`,
+            "invalid_behavioral_test_gate",
+          );
+        }
+      }
+    }
+  });
+
+  flow.artifactHandoffs.forEach((handoff, index) => {
+    const producer = stepById.get(handoff.fromStep);
+    const verifier = stepById.get(handoff.toStep);
+    if (
+      verifier?.skill === "verify" &&
+      (producer?.skill === "diagnose" || producer?.skill === "fix") &&
+      producer.agentProfile === verifier.agentProfile
+    ) {
+      fail(
+        `${path}.artifactHandoffs[${index}]`,
+        "one agent profile cannot produce and approve a diagnosis or patch",
+        "use an independent verification agent profile",
+        "non_independent_verification",
+      );
+    }
   });
 }
 
@@ -1567,6 +1868,64 @@ function moduleEventsForV2(flow: FlowDefinition): string[] {
   }
   if (flow.steps.some((step) => step.skill !== undefined)) events.add("SkillRevisionPinned.v2");
   return [...events].sort();
+}
+
+function moduleCallsForV3(flow: FlowDefinition): string[] {
+  return moduleCallsForV2(flow).map((name) =>
+    name === "definitions.getExecutionPlanV2"
+      ? "definitions.getExecutionPlanV3"
+      : name === "runs.applyOperatorCommandV2"
+        ? "runs.applyOperatorCommandV3"
+        : name === "runs.driveRun"
+          ? "runs.driveRunV2"
+          : name === "runs.signalRun"
+            ? "runs.signalRunV2"
+            : name === "runs.startRunV3"
+              ? "runs.startRunV4"
+              : name,
+  );
+}
+
+function moduleEventsForV3(flow: FlowDefinition): string[] {
+  return [...new Set([...moduleEventsForV2(flow), "RunFinished.v4", "RunStateChanged.v4"])].sort();
+}
+
+function legacyTriageOutcome(
+  outcome: string,
+):
+  | "not_actionable"
+  | "needs_reproduction"
+  | "unable_to_reproduce"
+  | "unable_to_fix"
+  | "failed"
+  | "waiting"
+  | "completed"
+  | "cancelled" {
+  switch (outcome) {
+    case "skipped":
+    case "intended_behavior":
+    case "not_actionable":
+      return "not_actionable";
+    case "fix_pending":
+    case "waiting":
+      return "waiting";
+    case "fix_rejected":
+    case "unable_to_fix":
+      return "unable_to_fix";
+    case "fix_verified":
+    case "completed":
+      return "completed";
+    case "needs_reproduction":
+      return "needs_reproduction";
+    case "unable_to_reproduce":
+      return "unable_to_reproduce";
+    case "failed":
+      return "failed";
+    case "cancelled":
+      return "cancelled";
+    default:
+      throw new Error(`invalid_definition: unknown triage outcome ${JSON.stringify(outcome)}`);
+  }
 }
 
 function uniqueIds(entries: readonly { readonly id: string }[], path: string): Set<string> {

@@ -30,6 +30,7 @@ definitions v1
   call: definitions/getActiveDefinition@v1
   call: definitions/getExecutionPlan@v1
   call: definitions/getExecutionPlanV2@v1
+  call: definitions/getExecutionPlanV3@v1
   call: definitions/resolveRevision@v1
   event: definitions/definitionPublished@v1
 effects v1
@@ -98,8 +99,8 @@ operations v1
   consumes: definitions/definitionPublished@v1 as project-definition-v1
   consumes: effects/effectFinished@v3 as project-effect-finished-v3
   consumes: runs/effectRequested@v3 as project-effect-request-v3
-  consumes: runs/runFinished@v3 as project-run-finished-v3
-  consumes: runs/runStateChanged@v3 as project-run-state-v3
+  consumes: runs/runFinished@v4 as project-run-finished-v4
+  consumes: runs/runStateChanged@v4 as project-run-state-v4
   consumes: assets/skillRevisionPinned@v2 as project-skill-v2
   consumes: intake/factoryEventAccepted@v2 as project-source-event-v2
   consumes: runs/stepRequested@v2 as project-step-v2
@@ -107,24 +108,31 @@ runs v1
   depends: assets, definitions, effects, execution, intake
   call: runs/applyOperatorCommand@v1
   call: runs/applyOperatorCommandV2@v1
+  call: runs/applyOperatorCommandV3@v1
   call: runs/driveRun@v1
+  call: runs/driveRunV2@v1
   call: runs/getRun@v1
   call: runs/getRunAudit@v1
   call: runs/getRunV2@v1
   call: runs/getRunV3@v1
+  call: runs/getRunV4@v1
   call: runs/signalRun@v1
+  call: runs/signalRunV2@v1
   call: runs/startRun@v1
   call: runs/startRunV2@v1
   call: runs/startRunV3@v1
+  call: runs/startRunV4@v1
   event: runs/effectRequested@v1
   event: runs/effectRequested@v2
   event: runs/effectRequested@v3
   event: runs/runFinished@v1
   event: runs/runFinished@v2
   event: runs/runFinished@v3
+  event: runs/runFinished@v4
   event: runs/runStateChanged@v1
   event: runs/runStateChanged@v2
   event: runs/runStateChanged@v3
+  event: runs/runStateChanged@v4
   event: runs/stepRequested@v1
   event: runs/stepRequested@v2
   consumes: execution/attemptFinished@v1 as record-attempt-outcome-v1
