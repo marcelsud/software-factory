@@ -17,6 +17,7 @@ import {
   MemoryArtifactByteDriver,
 } from "./adapters/artifact-byte-driver.ts";
 import { GitHubEventNormalizer } from "./adapters/github-event-normalizer.ts";
+import { GitHubInvocationEventSource } from "./adapters/github-invocation-event-source.ts";
 import {
   FetchGitHubReadTransport,
   GitHubAppInstallationTokenProvider,
@@ -31,6 +32,7 @@ import {
   SkillResolver,
 } from "./assets/skill-resolver.ts";
 import {
+  type CompiledDefinition,
   canonicalJson,
   compileFactoryDefinition,
   DefinitionCompileError,
@@ -42,7 +44,9 @@ import {
   type FactoryEvent,
   factoryEvent,
   type OperationsHealth,
+  parseRunOnceInvocationEnvelope,
   type ReplayEvent,
+  type RunOnceResult,
   replayEvent,
 } from "./contracts/index.ts";
 import {
@@ -53,6 +57,7 @@ import {
   verifyReplayBundle,
   verifyReplayObservation,
 } from "./replay.ts";
+import { executeRunOnce, type RunOnceHost, runOnceFailureResult } from "./run-once.ts";
 import {
   FakeAgentRuntime,
   FakeGitHubReadTransport,
@@ -66,9 +71,27 @@ export interface CliIo {
 }
 
 interface CliHost {
+  drain?(options: {
+    readonly maxDurationMs: number;
+    readonly maxRuns: number;
+  }): Promise<{ readonly idle: boolean; readonly stopReason: string }>;
   close(): Promise<void>;
   executeAction(name: string, args?: unknown): Promise<{ readonly result: unknown }>;
   startWorker?(): Promise<() => Promise<void>>;
+}
+
+export interface RunOnceHostConfiguration {
+  readonly agentExecutable: string;
+  readonly artifactRoot: string;
+  readonly credentialMode: "environment" | "none";
+  readonly localRepositories: Readonly<Record<string, string>>;
+  readonly repositories: Readonly<Record<string, string>>;
+  readonly repositoryEvents: Readonly<Record<string, readonly string[]>>;
+  readonly sourceRepositories: Readonly<Record<string, string>>;
+  readonly storage:
+    | { readonly engine: "postgres"; readonly url: string }
+    | { readonly engine: "sqlite"; readonly path: string };
+  readonly workspaceRoot: string;
 }
 
 export interface CliDependencies {
@@ -82,6 +105,10 @@ export interface CliDependencies {
     repositoryEvents?: Readonly<Record<string, readonly string[]>>,
     localRepositories?: Readonly<Record<string, string>>,
   ) => Promise<CliHost>;
+  readonly openRunOnceHost?: (
+    configuration: RunOnceHostConfiguration,
+    signal: AbortSignal,
+  ) => Promise<RunOnceHost>;
   readonly readStdin?: () => Promise<string>;
   readonly readText: (path: string) => Promise<string>;
   readonly sleep?: (delayMs: number, signal: AbortSignal) => Promise<void>;
@@ -152,95 +179,23 @@ const defaultDependencies: Required<CliDependencies> = {
     repositoryEvents = {},
     localRepositories = {},
   ) {
-    const clock = () => new Date();
-    const tokenProvider = tokenProviderFromEnvironment();
-    const readTransport = new FetchGitHubReadTransport({ clock, repositories, tokenProvider });
-    const path = process.env.FACTORY_DB_PATH ?? ".factory/factory.sqlite";
-    await mkdir(dirname(resolve(path)), { recursive: true });
-    const runtime =
-      "Bun" in globalThis
-        ? await import("chimpbase/runtime/bun")
-        : await import("chimpbase/runtime/node");
-    const manifest = await readFile(new URL("../module-contracts/manifest.json", import.meta.url));
-    const agentExecutable = await realpath(process.env.FACTORY_AGENT_BIN ?? process.execPath);
-    const workspaceRoot = resolve(process.env.FACTORY_WORKSPACE_ROOT ?? ".factory/workspaces");
-    const runtimes = new Map<string, LocalProcessAgentRuntime>();
-    const repositoryPins: Record<string, string> = {};
-    for (const [fullName, configuredPath] of Object.entries(localRepositories)) {
-      const repositoryRoot = await realpath(configuredPath);
-      repositoryPins[fullName] = (
-        await promisify(execFile)("git", ["-C", repositoryRoot, "rev-parse", "HEAD"])
-      ).stdout.trim();
-      runtimes.set(
-        fullName,
-        new LocalProcessAgentRuntime({
-          repositoryRoot,
-          trustedRuntimePaths: ["/usr", "/bin", "/lib", "/lib64", dirname(agentExecutable)],
-          workspaceRoot: resolve(
-            workspaceRoot,
-            createHash("sha256").update(fullName).digest("hex"),
-          ),
-        }),
-      );
-    }
-    const attemptOwners = new Map<string, LocalProcessAgentRuntime>();
-    const agentRuntime: AgentRuntime = {
-      async run(request, attemptSignal) {
-        const selected = runtimes.get(request.repository.id);
-        if (selected === undefined)
-          throw new Error(
-            `agent_runtime_unavailable: no configured local runtime for ${request.repository.id}`,
-          );
-        attemptOwners.set(request.attemptId, selected);
-        return await selected.run(request, attemptSignal);
+    const path = resolve(process.env.FACTORY_DB_PATH ?? ".factory/factory.sqlite");
+    return await openConfiguredFactoryHost(
+      {
+        agentExecutable: process.env.FACTORY_AGENT_BIN ?? process.execPath,
+        artifactRoot: resolve(process.env.FACTORY_ARTIFACT_ROOT ?? ".factory/artifacts"),
+        credentialMode: "environment",
+        localRepositories,
+        repositories,
+        repositoryEvents,
+        sourceRepositories,
+        storage: { engine: "sqlite", path },
+        workspaceRoot: resolve(process.env.FACTORY_WORKSPACE_ROOT ?? ".factory/workspaces"),
       },
-      async cancel(attemptId) {
-        await attemptOwners.get(attemptId)?.cancel(attemptId);
-      },
-    };
-    let workflowRegistered = false;
-    const workflowVersionDigest = FACTORY_RUNS_V2_WORKFLOW_DIGEST;
-    const factoryApp = createSoftwareFactoryApp({
-      artifactByteDriver: new LocalArtifactByteDriver(
-        resolve(process.env.FACTORY_ARTIFACT_ROOT ?? ".factory/artifacts"),
-      ),
-      agentRuntime,
-      clock,
-      credentialsPresent: environmentCredentialsPresent,
-      moduleManifestDigest: createHash("sha256").update(manifest).digest("hex"),
-      readTransport,
-      repositoryEvents,
-      repositoryPins,
-      repositoryReachability: () => defaultDependencies.repositoryReachability(repositories),
       signal,
-      sourceRepositories,
-      staleLocks: async () => ((await defaultInspectDaemonLock()) === "stale" ? 1 : 0),
-      workflowReady: () => workflowRegistered,
-      workflowVersionDigest,
-    });
-    workflowRegistered = factoryApp.modules
-      .flatMap((module) => module.registrations)
-      .some(
-        (registration) =>
-          registration.kind === "workflow" &&
-          registration.definition.name === "factory-runs-v2" &&
-          registration.definition.version === 2,
-      );
-    const host = await runtime.createChimpbase({
-      app: factoryApp,
-      projectDir: process.cwd(),
-      storage: { engine: "sqlite", path },
-      subscriptions: { dispatch: "async" },
-    });
-    return {
-      close: () => host.close(),
-      executeAction: (name: string, args?: unknown) => host.executeAction(name, args),
-      async startWorker() {
-        const started = await host.start({ runWorker: true, serve: false });
-        return () => started.stop();
-      },
-    };
+    );
   },
+  openRunOnceHost: openConfiguredFactoryHost,
   async readStdin() {
     let source = "";
     for await (const chunk of process.stdin) source += chunk;
@@ -249,6 +204,127 @@ const defaultDependencies: Required<CliDependencies> = {
   readText: (path) => readFile(path, "utf8"),
   sleep: abortableSleep,
 };
+
+async function openConfiguredFactoryHost(
+  configuration: RunOnceHostConfiguration,
+  signal: AbortSignal,
+): Promise<RunOnceHost & CliHost> {
+  if (configuration.storage.engine === "sqlite")
+    await mkdir(dirname(resolve(configuration.storage.path)), { recursive: true });
+  const clock = () => new Date();
+  const tokenProvider =
+    configuration.credentialMode === "environment"
+      ? tokenProviderFromEnvironment()
+      : {
+          async getToken(): Promise<never> {
+            throw new Error("GitHub credentials are disabled by run-once configuration");
+          },
+        };
+  const readTransport = new FetchGitHubReadTransport({
+    clock,
+    repositories: configuration.repositories,
+    tokenProvider,
+  });
+  const runtime =
+    "Bun" in globalThis
+      ? await import("chimpbase/runtime/bun")
+      : await import("chimpbase/runtime/node");
+  const manifest = await readFile(new URL("../module-contracts/manifest.json", import.meta.url));
+  const agentExecutable = await realpath(configuration.agentExecutable);
+  const runtimes = new Map<string, LocalProcessAgentRuntime>();
+  const repositoryPins: Record<string, string> = {};
+  for (const [fullName, configuredPath] of Object.entries(configuration.localRepositories)) {
+    const repositoryRoot = await realpath(configuredPath);
+    repositoryPins[fullName] = (
+      await promisify(execFile)("git", ["-C", repositoryRoot, "rev-parse", "HEAD"])
+    ).stdout.trim();
+    runtimes.set(
+      fullName,
+      new LocalProcessAgentRuntime({
+        repositoryRoot,
+        trustedRuntimePaths: ["/usr", "/bin", "/lib", "/lib64", dirname(agentExecutable)],
+        workspaceRoot: resolve(
+          configuration.workspaceRoot,
+          createHash("sha256").update(fullName).digest("hex"),
+        ),
+      }),
+    );
+  }
+  const attemptOwners = new Map<string, LocalProcessAgentRuntime>();
+  const agentRuntime: AgentRuntime = {
+    async run(request, attemptSignal) {
+      const selected = runtimes.get(request.repository.id);
+      if (selected === undefined)
+        throw new Error(
+          `agent_runtime_unavailable: no configured local runtime for ${request.repository.id}`,
+        );
+      attemptOwners.set(request.attemptId, selected);
+      return await selected.run(request, attemptSignal);
+    },
+    async cancel(attemptId) {
+      await attemptOwners.get(attemptId)?.cancel(attemptId);
+    },
+  };
+  let workflowRegistered = false;
+  const credentialsPresent =
+    configuration.credentialMode === "environment" ? environmentCredentialsPresent : () => false;
+  const factoryApp = createSoftwareFactoryApp({
+    artifactByteDriver: new LocalArtifactByteDriver(resolve(configuration.artifactRoot)),
+    agentRuntime,
+    clock,
+    credentialsPresent,
+    moduleManifestDigest: createHash("sha256").update(manifest).digest("hex"),
+    readTransport,
+    repositoryEvents: configuration.repositoryEvents,
+    repositoryPins,
+    async repositoryReachability() {
+      const entries = await Promise.all(
+        Object.keys(configuration.repositories)
+          .sort()
+          .map(async (repositoryId) => {
+            try {
+              const diagnostic = await readTransport.diagnoseReadPermission({ repositoryId });
+              return [
+                repositoryId,
+                diagnostic.canReadIssues ? "reachable" : "unreachable",
+              ] as const;
+            } catch {
+              return [repositoryId, "unreachable"] as const;
+            }
+          }),
+      );
+      return Object.fromEntries(entries);
+    },
+    signal,
+    sourceRepositories: configuration.sourceRepositories,
+    staleLocks: async () => ((await defaultInspectDaemonLock()) === "stale" ? 1 : 0),
+    workflowReady: () => workflowRegistered,
+    workflowVersionDigest: FACTORY_RUNS_V2_WORKFLOW_DIGEST,
+  });
+  workflowRegistered = factoryApp.modules
+    .flatMap((module) => module.registrations)
+    .some(
+      (registration) =>
+        registration.kind === "workflow" &&
+        registration.definition.name === "factory-runs-v2" &&
+        registration.definition.version === 2,
+    );
+  const host = await runtime.createChimpbase({
+    app: factoryApp,
+    projectDir: process.cwd(),
+    storage: configuration.storage,
+    subscriptions: { dispatch: "async" },
+  });
+  return {
+    close: () => host.close(),
+    drain: (options) => host.drain(options),
+    executeAction: (name: string, args?: unknown) => host.executeAction(name, args),
+    async startWorker() {
+      const started = await host.start({ runWorker: true, serve: false });
+      return () => started.stop();
+    },
+  };
+}
 
 export async function runCli(
   argv: readonly string[],
@@ -263,6 +339,7 @@ export async function runCli(
     if (command === "daemon") return await daemonCommand(rest, io, dependencies);
     if (command === "trigger") return await triggerCommand(rest, io, dependencies);
     if (command === "skills") return await skillsCommand(rest, io, dependencies);
+    if (command === "run-once") return await runOnceCommand(rest, io, dependencies);
     if (command === "replay") return await replayCommand(rest, io, dependencies);
     if (
       command === "status" ||
@@ -288,7 +365,7 @@ export async function runCli(
       return 0;
     }
     io.stderr(
-      "Usage: factory validate|plan|skills|poll|daemon|trigger|status|runs|show|events|effects|pause|resume|retry|cancel|approve|reject|doctor|replay|modules check\n",
+      "Usage: factory validate|plan|skills|poll|daemon|run-once|trigger|status|runs|show|events|effects|pause|resume|retry|cancel|approve|reject|doctor|replay|modules check\n",
     );
     return 2;
   } catch (error) {
@@ -303,6 +380,123 @@ export async function runCli(
     io.stderr(`${error instanceof Error ? error.message : String(error)}\n`);
     return 1;
   }
+}
+
+async function runOnceCommand(
+  argv: readonly string[],
+  io: CliIo,
+  dependencies: CliDependencies,
+): Promise<number> {
+  const { values } = parseArgs({
+    allowPositionals: false,
+    args: [...argv],
+    options: {
+      "agent-bin": { type: "string" },
+      "agent-runtime": { type: "string" },
+      "artifact-export": { type: "string" },
+      "artifact-root": { type: "string" },
+      config: { type: "string", default: process.env.FACTORY_CONFIG ?? "factory.yaml" },
+      credentials: { type: "string" },
+      event: { type: "string" },
+      json: { type: "boolean", default: false },
+      "max-duration-ms": { type: "string", default: "30000" },
+      "max-work": { type: "string", default: "100" },
+      "storage-engine": { type: "string" },
+      "storage-path": { type: "string" },
+      "storage-url": { type: "string" },
+      "workspace-root": { type: "string" },
+    },
+    strict: true,
+  });
+  const eventPath = requiredOption(values.event, "--event");
+  const agentExecutable = requiredOption(values["agent-bin"], "--agent-bin");
+  if (requiredOption(values["agent-runtime"], "--agent-runtime") !== "local-process")
+    throw new Error("run-once --agent-runtime must be local-process");
+  const artifactExport = resolve(requiredOption(values["artifact-export"], "--artifact-export"));
+  const artifactRoot = resolve(requiredOption(values["artifact-root"], "--artifact-root"));
+  const workspaceRoot = resolve(requiredOption(values["workspace-root"], "--workspace-root"));
+  const credentialValue = requiredOption(values.credentials, "--credentials");
+  if (credentialValue !== "environment" && credentialValue !== "none")
+    throw new Error("run-once --credentials must be environment or none");
+  const storageEngine = requiredOption(values["storage-engine"], "--storage-engine");
+  const storage =
+    storageEngine === "sqlite"
+      ? {
+          engine: "sqlite" as const,
+          path: resolve(requiredOption(values["storage-path"], "--storage-path")),
+        }
+      : storageEngine === "postgres"
+        ? {
+            engine: "postgres" as const,
+            url: requiredOption(values["storage-url"], "--storage-url"),
+          }
+        : (() => {
+            throw new Error("run-once --storage-engine must be sqlite or postgres");
+          })();
+  if (storage.engine === "sqlite" && values["storage-url"] !== undefined)
+    throw new Error("run-once SQLite configuration cannot include --storage-url");
+  if (storage.engine === "postgres" && values["storage-path"] !== undefined)
+    throw new Error("run-once PostgreSQL configuration cannot include --storage-path");
+
+  const source =
+    eventPath === "stdin"
+      ? await (dependencies.readStdin ?? defaultDependencies.readStdin)()
+      : await dependencies.readText(eventPath);
+  const envelope = parseRunOnceInvocationEnvelope(JSON.parse(source));
+  let prepared: PreparedDefinition;
+  try {
+    prepared = await prepareCheckedDefinition(values.config, dependencies, agentExecutable);
+  } catch (error) {
+    const result = runOnceFailureResult(envelope, error, (message) => io.stderr(`${message}\n`));
+    writeRunOnceOutput(result, values.json, io);
+    return result.exitCode;
+  }
+  const repositories = githubRepositories(prepared.compiled.definition);
+  const composition = repositoryComposition(repositories, values.config);
+  const controller = (
+    dependencies.createAbortController ?? defaultDependencies.createAbortController
+  )();
+  const configuration: RunOnceHostConfiguration = {
+    agentExecutable,
+    artifactRoot,
+    credentialMode: credentialValue,
+    localRepositories: composition.localRepositories,
+    repositories: composition.repositories,
+    repositoryEvents: composition.repositoryEvents,
+    sourceRepositories: composition.sourceRepositories,
+    storage,
+    workspaceRoot,
+  };
+  let result: RunOnceResult;
+  try {
+    result = await executeRunOnce({
+      activate: (host) => activatePreparedDefinition(host, values.config, prepared),
+      artifactExport,
+      boot: () =>
+        (dependencies.openRunOnceHost ?? defaultDependencies.openRunOnceHost)(
+          configuration,
+          controller.signal,
+        ),
+      envelope,
+      eventSource: new GitHubInvocationEventSource(),
+      expectedDefinitionRevision: prepared.compiled.revision.definitionDigest,
+      maxDurationMs: positiveInteger(values["max-duration-ms"], "--max-duration-ms"),
+      maxWork: positiveInteger(values["max-work"], "--max-work"),
+      reportDiagnostic: (message) => io.stderr(`${message}\n`),
+    });
+  } finally {
+    controller.abort();
+  }
+  writeRunOnceOutput(result, values.json, io);
+  return result.exitCode;
+}
+
+function writeRunOnceOutput(result: RunOnceResult, json: boolean, io: CliIo): void {
+  io.stdout(
+    json
+      ? `${canonicalJson(result)}\n`
+      : `run-once ${result.resultClass}\nruns: ${result.runIds.join(", ") || "none"}\noutcome: ${result.outcome ?? "none"}\npending: ${result.pending.gates.length} gate, ${result.pending.retries.length} retry, ${result.pending.effects.length} effect\n`,
+  );
 }
 
 async function replayCommand(
@@ -710,6 +904,11 @@ async function daemonCommand(
       );
       await host.executeAction("operations/refreshWorkerHeartbeat@v1", {});
       io.stdout(`polled ${repositories.length} repositories; accepted ${accepted}\n`);
+      if (values.once) {
+        await stopWorker?.();
+        stopWorker = undefined;
+        await host.drain?.({ maxDurationMs: 30_000, maxRuns: 100 });
+      }
       if (values.once || controller.signal.aborted) break;
       await (dependencies.sleep ?? defaultDependencies.sleep)(intervalMs, controller.signal);
     } while (!controller.signal.aborted);
@@ -1154,15 +1353,21 @@ async function loadDefinition(
   }).definition;
 }
 
-async function activateCheckedDefinition(
-  host: Pick<CliHost, "executeAction">,
+interface PreparedDefinition {
+  readonly compiled: CompiledDefinition;
+  readonly configuredSkills: readonly ConfiguredSkillResolution[];
+  readonly source: string;
+}
+
+async function prepareCheckedDefinition(
   config: string,
   dependencies: CliDependencies,
-): Promise<void> {
+  configuredAgentExecutable = process.env.FACTORY_AGENT_BIN ?? process.execPath,
+): Promise<PreparedDefinition> {
   let source = await dependencies.readText(config);
-  const agentExecutable = await realpath(process.env.FACTORY_AGENT_BIN ?? process.execPath);
+  const agentExecutable = await realpath(configuredAgentExecutable);
   source = source.replaceAll("/__factory_agent_bin__", agentExecutable);
-  const configured = await configuredSkills(config, source);
+  const resolvedSkills = await configuredSkills(config, source);
   const document = parseDocument(source, {
     customTags: [],
     merge: false,
@@ -1170,7 +1375,7 @@ async function activateCheckedDefinition(
     schema: "core",
     uniqueKeys: true,
   });
-  for (const [index, skill] of configured.entries()) {
+  for (const [index, skill] of resolvedSkills.entries()) {
     if (skill.configuredRevision === "unpinned") {
       document.setIn(["skills", index, "revision"], skill.inspection.digest);
     } else if (skill.configuredRevision !== skill.inspection.digest) {
@@ -1178,21 +1383,46 @@ async function activateCheckedDefinition(
         `skill digest mismatch: ${skill.configuredId} claims ${skill.configuredRevision}, resolved ${skill.inspection.digest}`,
       );
     }
+  }
+  source = document.toString();
+  return {
+    compiled: compileFactoryDefinition(source, { sourceName: config }),
+    configuredSkills: resolvedSkills,
+    source,
+  };
+}
+
+async function activatePreparedDefinition(
+  host: Pick<CliHost, "executeAction">,
+  config: string,
+  prepared: PreparedDefinition,
+): Promise<void> {
+  for (const skill of prepared.configuredSkills)
     await host.executeAction("assets/storeSkillBundleV2@v1", {
       bundle: skill.resolved.bundle,
       source: skill.configuredPath,
     });
-  }
-  source = document.toString();
   const revision = (
     await host.executeAction("definitions/compileDefinition@v1", {
-      source,
+      source: prepared.source,
       sourceName: config,
     })
   ).result as { readonly definitionDigest: string };
   await host.executeAction("definitions/activateDefinition@v1", {
     definitionDigest: revision.definitionDigest,
   });
+}
+
+async function activateCheckedDefinition(
+  host: Pick<CliHost, "executeAction">,
+  config: string,
+  dependencies: CliDependencies,
+): Promise<void> {
+  await activatePreparedDefinition(
+    host,
+    config,
+    await prepareCheckedDefinition(config, dependencies),
+  );
 }
 
 function githubRepositories(definition: FactoryDefinition, selected?: string) {
@@ -1402,6 +1632,12 @@ export async function acquireDaemonLock(): Promise<() => Promise<void>> {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
   };
+}
+
+function requiredOption(value: string | undefined, name: string): string {
+  if (value === undefined || value.trim() === "")
+    throw new Error(`run-once requires ${name} <value>`);
+  return value;
 }
 
 function positiveInteger(value: string, name: string): number {

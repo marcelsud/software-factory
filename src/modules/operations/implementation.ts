@@ -173,13 +173,12 @@ function safeSourceEvent(event: SafeObject) {
 }
 
 function runTime(run: SafeObject): string {
-  if (typeof run.finishedAt === "string") return run.finishedAt;
   const startedAt = String(run.startedAt);
   const sequence = typeof run.auditSequence === "number" ? run.auditSequence : 0;
-  const milliseconds = Date.parse(startedAt);
-  return Number.isFinite(milliseconds)
-    ? new Date(milliseconds + sequence).toISOString()
-    : startedAt;
+  const minimum = Date.parse(startedAt) + sequence;
+  const recorded = typeof run.finishedAt === "string" ? Date.parse(run.finishedAt) : Number.NaN;
+  const milliseconds = Number.isFinite(recorded) ? Math.max(recorded, minimum) : minimum;
+  return Number.isFinite(milliseconds) ? new Date(milliseconds).toISOString() : startedAt;
 }
 
 function factOrder(left: OperationEventProjectionRow, right: OperationEventProjectionRow): number {
